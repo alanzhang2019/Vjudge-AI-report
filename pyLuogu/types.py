@@ -1,4 +1,6 @@
-from typing import List, Tuple, Literal, Dict, TypeVar, Generic
+from __future__ import annotations
+
+from typing import Any, List, Tuple, Literal, Dict, TypeVar, Generic, Mapping, TypeAlias, TypedDict, Union
 
 from .bits.ultility import JsonSerializable, Printable
 
@@ -10,6 +12,8 @@ __all__ = [
     "ListRequestParams",
     "ProblemListRequestParams", 
     "ProblemSetListRequestParams",
+    "ContestListRequestParams",
+    "TeamProblemListRequestParams",
     "UserListRequestParams",
     "RecordListRequestParams", 
     "ThemeListRequestParams",
@@ -84,20 +88,223 @@ __all__ = [
     "RecordRequestResponse",
     "TagRequestResponse",
     "SubmitCodeResponse",
+    "RawDataResponse",
+    "EmptyResponse",
+    "ArticleListRequestResponse",
+    "ArticleReplyListResponse",
+    "Blog",
+    "BlogListRequestResponse",
+    "BlogDataRequestResponse",
+    "BlogReplyListResponse",
+    "ChatMessage",
+    "ChatRecordRequestResponse",
+    "ImageListRequestResponse",
+    "UploadLink",
+    "GenerateUploadLinkResponse",
+    "RankingUser",
+    "RankingListRequestResponse",
+    "Notification",
+    "NotificationListRequestResponse",
+    "AdvertisementResponse",
+    "PaintboardTokenResponse",
+    "PasteListRequestResponse",
+    "RecordListRequestResponse",
+    "DownloadableTestcaseResponse",
+    "TeamListRequestResponse",
+    "Theme",
+    "ThemeListRequestResponse",
+    "UserPracticeResponse",
+    "UserSettingResponse",
+    "AuthResponse",
     "LuoguCookies",
     "ProblemType",
     "ProblemSetType",
-    "TransferProblemType"
+    "TransferProblemType",
+    "JsonValue",
+    "JsonObject",
+    "JsonMapping",
+    "EditArticleRequest",
+    "BatchEditArticleRequest",
+    "RegisterRequest",
+    "OpenIdAuthRequest",
+    "AuthUnlockRequest",
+    "EditBlogRequest",
+    "BlogAdminForm",
+    "ContestJoinRequest",
+    "EditContestRequest",
+    "EditContestProblemRequest",
+    "CreatePostRequest",
+    "GenerateUploadLinkRequest",
+    "EditPasteRequest",
+    "EditTrainingRequest",
+    "EditTrainingProblemsRequest",
+    "TranslateProblemRequest",
+    "TeamJoinRequest",
+    "EditTeamRequest",
+    "TeamMemberUpdateRequest",
+    "EditThemeRequest",
+    "UserPreferenceUpdateRequest",
+    "BindRemoteJudgeAccountRequest",
 ]
 
 ProblemType = Literal["P", "U", "T", "B", "CF", "AT", "UVA", "SP"]
 ProblemSetType = Literal["official", "select"]
 TransferProblemType = Literal["P", "U", "B"] | int
+JsonPrimitive: TypeAlias = str | int | float | bool | None
+JsonValue: TypeAlias = Union[JsonPrimitive, List["JsonValue"], Dict[str, "JsonValue"]]
+JsonObject: TypeAlias = Dict[str, JsonValue]
+JsonMapping: TypeAlias = Mapping[str, object]
+
+
+class EditArticleRequest(TypedDict, total=False):
+    title: str
+    category: int
+    content: str
+    solutionFor: str | None
+    status: int
+    top: int
+
+
+class BatchEditArticleRequest(TypedDict, total=False):
+    status: int
+    category: int
+    lids: List[str]
+
+
+class RegisterRequest(TypedDict, total=False):
+    username: str
+    password: str
+    endpoint: str
+    endpointType: int
+    verificationCode: str
+
+
+class OpenIdAuthRequest(TypedDict, total=False):
+    code: str
+    state: str
+    redirectURI: str
+
+
+class AuthUnlockRequest(TypedDict, total=False):
+    password: str
+    captcha: str
+    code: str
+
+
+class EditBlogRequest(TypedDict, total=False):
+    title: str
+    content: str
+    identifier: str
+    type: str
+    top: int
+    status: int
+    csrf_token: str
+
+
+class BlogAdminForm(TypedDict, total=False):
+    method: str
+    ids: List[int]
+    status: int
+    type: str
+
+
+class ContestJoinRequest(TypedDict, total=False):
+    code: str
+    invitationCode: str
+    password: str
+
+
+class EditContestRequest(TypedDict, total=False):
+    settings: JsonObject
+    hostID: int | None
+
+
+class EditContestProblemRequest(TypedDict, total=False):
+    problems: List[str]
+    pids: List[str]
+
+
+class CreatePostRequest(TypedDict, total=False):
+    captcha: str
+    content: str
+    title: str
+    forum: str
+
+
+class GenerateUploadLinkRequest(TypedDict, total=False):
+    filename: str
+    fileName: str
+    size: int
+    type: str
+    mimeType: str
+
+
+class EditPasteRequest(TypedDict, total=False):
+    data: str
+    public: bool
+
+
+class EditTrainingRequest(TypedDict, total=False):
+    title: str
+    name: str
+    description: str
+    type: int
+    providerID: int | None
+
+
+class EditTrainingProblemsRequest(TypedDict, total=False):
+    problems: List[str]
+    pids: List[str]
+
+
+class TranslateProblemRequest(TypedDict, total=False):
+    locale: str
+    content: JsonObject
+
+
+class TeamJoinRequest(TypedDict, total=False):
+    reason: str
+    message: str
+
+
+class EditTeamRequest(TypedDict, total=False):
+    name: str
+    description: str
+    notice: str
+    contact: JsonObject
+    joinPermission: int
+
+
+class TeamMemberUpdateRequest(TypedDict, total=False):
+    realName: str
+    group: str
+    permission: int
+
+
+class EditThemeRequest(TypedDict, total=False):
+    name: str
+    header: JsonObject
+    sideNav: JsonObject
+    footer: JsonObject
+
+
+class UserPreferenceUpdateRequest(TypedDict, total=False):
+    background: str
+    color: str
+    theme: int
+    language: str
+
+
+class BindRemoteJudgeAccountRequest(TypedDict, total=False):
+    oj: str
+    username: str
+    password: str
+    captcha: str
 
 class LuoguType(JsonSerializable, Printable):
     __type_dict__ = {}
 
-    def __init__(self,json=None):
+    def __init__(self, json: dict[str, Any] | None = None):
         super().__init__(json)
 
 class RequestParams(LuoguType):
@@ -127,7 +334,8 @@ class ListRequestParams(RequestParams):
 class ProblemListRequestParams(ListRequestParams):
     __type_dict__ = {
         "page": int,
-        "orderBy": int,
+        "orderBy": str,
+        "order": str,
         "keyword": str,
         "content": bool,
         "type": str,
@@ -141,6 +349,22 @@ class ProblemListRequestParams(ListRequestParams):
     type: ProblemType
     difficulty: int
     tag: str
+
+class ContestListRequestParams(ListRequestParams):
+    __type_dict__ = {
+        "page": int,
+        "name": str,
+        "method": int,
+        "public": int
+    }
+
+class TeamProblemListRequestParams(ListRequestParams):
+    __type_dict__ = {
+        "page": int,
+        "keyword": str,
+        "orderBy": str,
+        "order": str
+    }
 
 class ProblemSetListRequestParams(ListRequestParams):
     __type_dict__ = {
@@ -201,7 +425,7 @@ class RankingListRequestParams(ListRequestParams):
 
 class ProblemRequestParams(RequestParams):
     __type_dict__ = {
-        "contest_id": int
+        "contestId": int
     }
 
 class UserSearchRequestParams(RequestParams):
@@ -279,6 +503,7 @@ class UserSummary(LuoguType):
         "isRoot": bool, 
         "color": str, 
         "ccfLevel": int, 
+        "xcpcLevel": int,
         "background": str, 
     }
     uid: int
@@ -290,6 +515,7 @@ class UserSummary(LuoguType):
     isBanned: bool
     color: str
     ccfLevel: int
+    xcpcLevel: int
     background: str
     isRoot: bool
 
@@ -364,10 +590,12 @@ class Provider(LuoguType):
     user: UserSummary | None
     team: TeamSummary | None
 
-    def __init__(self, json=None):
+    def __init__(self, json: dict[str, Any] | None = None):
         super().__init__(json=None)
         self.user = None
         self.team = None
+        if json is None:
+            return
         if json.get("uid") is not None:
             self.user = UserSummary(json)
         else:
@@ -382,13 +610,22 @@ class Attachment(LuoguType):
         "uploadTime": int,  # 上传时间（时间戳）
         "downloadLink": str,  # 下载链接
         "id": str,  # 附件 ID
-        "fileName": str  # 文件名
+        "filename": str,  # 文件名
+        "fileName": str  # legacy alias
     }
     size: int
     uploadTime: int
     downloadLink: str
     id: str
-    fileName: str
+    filename: str | None
+    fileName: str | None
+
+    def __init__(self, json: dict[str, Any] | None = None):
+        super().__init__(json)
+        if self.filename is None and self.fileName is not None:
+            self.filename = self.fileName
+        if self.fileName is None and self.filename is not None:
+            self.fileName = self.filename
 
 class ProblemSetSummary(LuoguType):
     __type_dict__ = {
@@ -398,6 +635,7 @@ class ProblemSetSummary(LuoguType):
         "marked": bool,
         "markCount": int,
         "id": int,
+        "name": str,
         "title": str,
         "type": int,
         "provider": Provider
@@ -408,9 +646,17 @@ class ProblemSetSummary(LuoguType):
     marked: bool
     markCount: int
     id: int
-    title: str
+    name: str | None
+    title: str | None
     type: int
     provider: Provider
+
+    def __init__(self, json: dict[str, Any] | None = None):
+        super().__init__(json)
+        if self.name is None and self.title is not None:
+            self.name = self.title
+        if self.title is None and self.name is not None:
+            self.title = self.name
 
 class ContestSketch(LuoguType):
     __type_dict__ = {
@@ -470,7 +716,6 @@ class PostSummary(PostSketch):
         "valid": bool,
         "locked": bool,
         "replyCount": int,
-        "recentReply": Reply,
     }
     content: str
     createTime: int
@@ -480,7 +725,6 @@ class PostSummary(PostSketch):
     valid: bool
     locked: bool
     replyCount: int
-    recentReply: Reply
 
 class Prize(LuoguType):
     __type_dict__ = {
@@ -555,6 +799,8 @@ class ScoringStrategy(LuoguType):
         "type": int,    # 评分策略类型
         "script": str   # 评分脚本内容
     }
+    type: int
+    script: str | None
 
 class ProblemSettings(LuoguType):
     __type_dict__ = {
@@ -697,19 +943,36 @@ class ProblemSetDetails(ProblemSetSummary):
 class ContestSummary(ContestSketch):
     __type_dict__ = {
         **ContestSketch.__type_dict__,
+        "method": int,
+        "visibility": int,
         "ruleType": int,
         "visibilityType": int,
         "invitationCodeType": int,
-        "rated": bool,
+        "rated": int,
         "problemCount": int,
         "host": Provider,
+        "squad": bool,
     }
-    ruleType: int
-    visibilityType: int
-    invitationCodeType: int
-    rated: bool
-    problemCount: int
-    host: Provider
+    method: int | None
+    visibility: int | None
+    ruleType: int | None
+    visibilityType: int | None
+    invitationCodeType: int | None
+    rated: bool | int | None
+    problemCount: int | None
+    host: Provider | None
+    squad: bool | None
+
+    def __init__(self, json: dict[str, Any] | None = None):
+        super().__init__(json)
+        if self.method is None and self.ruleType is not None:
+            self.method = self.ruleType
+        if self.ruleType is None and self.method is not None:
+            self.ruleType = self.method
+        if self.visibility is None and self.visibilityType is not None:
+            self.visibility = self.visibilityType
+        if self.visibilityType is None and self.visibility is not None:
+            self.visibilityType = self.visibility
 
 class ContestDetails(ContestSummary):
     __type_dict__ = {
@@ -918,7 +1181,7 @@ class Post(PostSummary):
         "pinnedReply": Reply,
         "content": str
     }
-    pinnedReply: None
+    pinnedReply: Reply | None
     content: str
 
 class Paste(LuoguType):
@@ -1265,6 +1528,317 @@ class SubmitCodeResponse(Response):
         "rid" : int
     }
     rid: int
+
+class RawDataResponse(Response):
+    __type_dict__ = {
+        "data": Any
+    }
+    data: Any
+
+class EmptyResponse(Response):
+    __type_dict__ = {
+        "ok": bool,
+        "_empty": bool,
+    }
+    ok: bool
+    _empty: bool
+
+class ArticleListRequestResponse(Response):
+    __type_dict__ = {
+        "articles": [Article],
+        "count": int,
+        "perPage": int,
+    }
+    articles: List[Article]
+    count: int
+    perPage: int
+
+class ArticleReplyListResponse(Response):
+    __type_dict__ = {
+        "replies": [Reply],
+        "count": int,
+        "perPage": int,
+    }
+    replies: List[Reply]
+    count: int
+    perPage: int
+
+class Blog(LuoguType):
+    __type_dict__ = {
+        "id": int,
+        "title": str,
+        "content": str,
+        "identifier": str,
+        "type": str,
+        "status": int,
+        "top": int,
+        "time": int,
+        "author": UserSummary,
+        "replyCount": int,
+        "upvote": int,
+    }
+    id: int
+    title: str
+    content: str | None
+    identifier: str | None
+    type: str | None
+    status: int | None
+    top: int | None
+    time: int | None
+    author: UserSummary | None
+    replyCount: int | None
+    upvote: int | None
+
+class BlogListRequestResponse(Response):
+    __type_dict__ = {
+        "blogs": [Blog],
+        "count": int,
+        "perPage": int,
+    }
+    blogs: List[Blog]
+    count: int
+    perPage: int
+
+class BlogDataRequestResponse(Response):
+    __type_dict__ = {
+        "blog": Blog,
+        "canEdit": bool,
+        "canReply": bool,
+        "voted": int,
+    }
+    blog: Blog
+    canEdit: bool | None
+    canReply: bool | None
+    voted: int | None
+
+class BlogReplyListResponse(Response):
+    __type_dict__ = {
+        "replies": [Reply],
+        "count": int,
+        "perPage": int,
+    }
+    replies: List[Reply]
+    count: int
+    perPage: int
+
+class ChatMessage(LuoguType):
+    __type_dict__ = {
+        "id": int,
+        "sender": UserSummary,
+        "receiver": UserSummary,
+        "content": str,
+        "time": int,
+        "read": bool,
+    }
+    id: int
+    sender: UserSummary | None
+    receiver: UserSummary | None
+    content: str
+    time: int
+    read: bool | None
+
+class ChatRecordRequestResponse(Response):
+    __type_dict__ = {
+        "records": [ChatMessage],
+        "count": int,
+        "perPage": int,
+    }
+    records: List[ChatMessage]
+    count: int
+    perPage: int
+
+class ImageListRequestResponse(Response):
+    __type_dict__ = {
+        "images": [Image],
+        "count": int,
+        "perPage": int,
+    }
+    images: List[Image]
+    count: int
+    perPage: int
+
+class UploadLink(LuoguType):
+    __type_dict__ = {
+        "host": str,
+        "policy": str,
+        "accessKeyID": str,
+        "callback": str,
+        "signature": str,
+        "expiredTime": int,
+        "dir": str,
+    }
+    host: str
+    policy: str
+    accessKeyID: str
+    callback: str
+    signature: str
+    expiredTime: int
+    dir: str
+
+class GenerateUploadLinkResponse(Response):
+    __type_dict__ = {
+        "uploadLink": UploadLink
+    }
+    uploadLink: UploadLink
+
+class RankingUser(UserSummary):
+    __type_dict__ = {
+        **UserSummary.__type_dict__,
+        "ranking": int,
+        "rating": int,
+        "elo": EloRatingSummary,
+    }
+    ranking: int | None
+    rating: int | None
+    elo: EloRatingSummary | None
+
+class RankingListRequestResponse(Response):
+    __type_dict__ = {
+        "users": [RankingUser],
+        "count": int,
+        "perPage": int,
+    }
+    users: List[RankingUser]
+    count: int
+    perPage: int
+
+class Notification(LuoguType):
+    __type_dict__ = {
+        "id": int,
+        "type": int,
+        "content": str,
+        "time": int,
+        "read": bool,
+        "sender": UserSummary,
+    }
+    id: int
+    type: int
+    content: str
+    time: int
+    read: bool | None
+    sender: UserSummary | None
+
+class NotificationListRequestResponse(Response):
+    __type_dict__ = {
+        "notifications": [Notification],
+        "count": int,
+        "perPage": int,
+    }
+    notifications: List[Notification]
+    count: int
+    perPage: int
+
+class AdvertisementResponse(Response):
+    __type_dict__ = {
+        "data": Any
+    }
+    data: Any
+
+class PaintboardTokenResponse(Response):
+    __type_dict__ = {
+        "token": str
+    }
+    token: str
+
+class PasteListRequestResponse(Response):
+    __type_dict__ = {
+        "pastes": [Paste],
+        "count": int,
+        "perPage": int,
+    }
+    pastes: List[Paste]
+    count: int
+    perPage: int
+
+class RecordListRequestResponse(Response):
+    __type_dict__ = {
+        "records": [Record],
+        "count": int,
+        "perPage": int,
+    }
+    records: List[Record]
+    count: int
+    perPage: int
+
+class DownloadableTestcaseResponse(Response):
+    __type_dict__ = {
+        "testcases": [str],
+        "data": Any
+    }
+    testcases: List[str]
+    data: Any
+
+class TeamListRequestResponse(Response):
+    __type_dict__ = {
+        "teams": [TeamSummary],
+        "count": int,
+        "perPage": int,
+    }
+    teams: List[TeamSummary]
+    count: int
+    perPage: int
+
+class Theme(LuoguType):
+    __type_dict__ = {
+        "id": int,
+        "name": str,
+        "user": UserSummary,
+        "header": {str: Any},
+        "sideNav": {str: Any},
+        "footer": {str: Any},
+        "createTime": int,
+        "updateTime": int,
+    }
+    id: int
+    name: str
+    user: UserSummary | None
+    header: Dict[str, Any] | None
+    sideNav: Dict[str, Any] | None
+    footer: Dict[str, Any] | None
+    createTime: int | None
+    updateTime: int | None
+
+class ThemeListRequestResponse(Response):
+    __type_dict__ = {
+        "themes": [Theme],
+        "count": int,
+        "perPage": int,
+    }
+    themes: List[Theme]
+    count: int
+    perPage: int
+
+class UserPracticeResponse(Response):
+    __type_dict__ = {
+        "problems": [ProblemSummary],
+        "count": int,
+        "perPage": int,
+        "data": Any,
+    }
+    problems: List[ProblemSummary]
+    count: int
+    perPage: int
+    data: Any
+
+class UserSettingResponse(Response):
+    __type_dict__ = {
+        "user": UserDetails,
+        "settings": {str: Any},
+        "data": Any,
+    }
+    user: UserDetails | None
+    settings: Dict[str, Any] | None
+    data: Any
+
+class AuthResponse(Response):
+    __type_dict__ = {
+        "user": UserDetails,
+        "locked": bool,
+        "data": Any,
+    }
+    user: UserDetails | None
+    locked: bool | None
+    data: Any
 
 class LuoguCookies(LuoguType):
     __type_dict__ = {

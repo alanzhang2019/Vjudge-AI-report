@@ -1,205 +1,46 @@
-import re
-import json
-import time
-from typing import List, Literal, Callable
+from typing import Any, List, Literal, Callable, TypeVar, cast
 
 import httpx
-import bs4
 
 from .types import *
 from .errors import *
-from . import logger
+from .api_helpers import *
+from .normalizers import *
+from .transport import SyncLuoguTransportMixin
 
-class luoguAPI:
+_TResponse = TypeVar("_TResponse", bound=Response)
+
+
+def _json_payload(payload: JsonMapping | None) -> JsonObject | None:
+    if payload is None:
+        return None
+    return cast(JsonObject, dict(payload))
+
+
+class luoguAPI(SyncLuoguTransportMixin):
     def __init__(
             self,
             base_url="https://www.luogu.com.cn",
-            cookies: LuoguCookies = None,
+            cookies: LuoguCookies | None = None,
             timeout: float | httpx.Timeout | None = 10,
             max_retries: int = 5,
     ):
-        self.base_url = base_url
-        self.cookies = None if cookies is None else cookies.to_json()
-        self.max_retries = max_retries
+        self._init_transport(base_url, cookies, max_retries)
         self.client = httpx.Client(
             timeout=timeout,
             cookies=self.cookies,
             follow_redirects=True,
         )
-        self.x_csrf_token = None
 
-    def _send_request(
-            self,
-            endpoint: str,
-            method: str = "GET",
-            params: RequestParams | None = None,
-            data: dict | None = None,
-    ):
-        url = f"{self.base_url}/{endpoint}"
-        headers = self._get_headers(method)
-        param_final = None if params is None else params.to_json()
+    def close(self) -> None:
+        self.client.close()
 
-        request = self.client.build_request(
-            method, url,
-            headers=headers,
-            params=param_final,
-            json=data,
-        )
+    def __enter__(self):
+        return self
 
-        if method == "GET":
-            logger.info(f"GET from {url} with params: {param_final}")
-        else:
-            data_str = json.dumps(data)
-            payload_str = data_str if data and len(data_str) < 50 else data_str[:50] + "..."
-            logger.info(f"POST to {url} with payload: {payload_str}")
-
-        for attempt in range(self.max_retries):
-            try:
-                response = self.client.send(request)
-            except httpx.TimeoutException as e:
-                logger.warning(f"Attempt {attempt + 1}: Timeout error - {e}")
-                time.sleep(1)
-                continue
-            except httpx.HTTPError as e:
-                logger.error(f"Request error: {e}")
-                raise RequestError("Request error") from e
-
-            try:
-                response.raise_for_status()
-                try:
-                    res_json = response.json()
-                except json.JSONDecodeError:
-                    logger.error(f"Failed to decode JSON response: {response.text}")
-                    raise RequestError("Failed to decode JSON response") from None
-                logger.debug(f"{json.dumps(res_json)}")
-
-                if res_json.get("currentTemplate") == "AuthLogin":
-                    raise AuthenticationError("Need Login")
-                if res_json.get("code") == 403:
-                    if res_json.get("errorMessage") == "user.not_self":
-                        raise AuthenticationError("not yourself")
-                    error_message = res_json.get("currentData").get("errorMessage")
-                    raise ForbiddenError( error_message or "Forbidden" )
-                
-                if res_json.get("code") in [404, 418]:
-                    raise NotFoundError(f"Resource not found {endpoint}")
-
-                if res_json.get("currentData") is not None:
-                    res_json = res_json.get("currentData")
-                if res_json.get("data") is not None:
-                    res_json = res_json.get("data")
-                return res_json
-            except httpx.HTTPStatusError as e:
-                if response.status_code == 401:
-                    raise AuthenticationError("Authentication failed") from e
-                elif response.status_code == 403:
-                    res_json = response.json()
-                    message = res_json.get("errorMessage")
-                    logger.warning(f"HTTP 403: {message}")
-                    if message is None:
-                        raise ForbiddenError(f"Forbidden: {e}") from e
-                    if message == "请求频繁，请稍候再试":
-                        time.sleep(5)
-                        continue
-                    if message == "验证码错误":
-                        raise NeedCaptcha("Need captcha") from e
-                        continue
-                    if message == "user.not_self":
-                        raise AuthenticationError("not yourself")
-                    logger.warning("CSRF token expired, refreshing token...")
-                    self._get_csrf()
-                    continue  # Retry the request
-                elif response.status_code == 404:
-                    raise NotFoundError("Resource not found") from e
-                elif response.status_code == 429:
-                    raise RateLimitError("Rate limit exceeded") from e
-                elif 500 <= response.status_code < 600:
-                    raise ServerError("Server error") from e
-                else:
-                    raise RequestError(f"HTTP error: {e}", status_code=response.status_code) from e
-        else:
-            logger.error("Failed to send request after 5 attempts")
-            raise RequestError("Failed to send request after 5 attempts")
-
-    def _get_headers(self, method: str) -> dict:
-        headers = {
-            "User-Agent": "luogu_bot",
-            "x-luogu-type": "content-only",
-            "x-lentille-request": "content-only",
-        }
-        if method != "GET":
-            if not self.x_csrf_token:
-                self._get_csrf()
-            headers.update({
-                "Content-Type": "application/json",
-                "referer": "https://www.luogu.com.cn/",
-                "x-csrf-token": self.x_csrf_token
-            })
-        return headers
-
-    def _get_csrf(self, endpoint="") -> str:
-        headers = {
-            "User-Agent": "luogu_bot",
-        }
-
-        for attempt in range(self.max_retries):
-            try:
-                response = self.client.get(
-                    self.base_url + endpoint, 
-                    headers=headers, 
-                    cookies=self.cookies
-                )
-                
-                response.raise_for_status()
-
-                result = re.search(r"C3VK=(.*);", response.text)
-                if result:
-                    self.cookies["C3VK"] = result.group(1)
-                    logger.debug("C3VK token fetched successfully")
-                    continue
-
-                soup = bs4.BeautifulSoup(response.text, "html.parser")
-                csrf_meta = soup.select_one("meta[name='csrf-token']")
-
-                if csrf_meta and "content" in csrf_meta.attrs:
-                    self.x_csrf_token = csrf_meta["content"]
-                    logger.info("CSRF token fetched successfully")
-                    return self.x_csrf_token
-                else:
-                    logger.warning("CSRF token not found, retrying...")
-                    time.sleep(1)
-            except httpx.TimeoutException as e:
-                logger.warning(f"Attempt {attempt + 1}: Timeout error - {e}")
-                time.sleep(1)
-            except httpx.HTTPError as e:
-                logger.error(f"HTTP error: {e}")
-                raise RequestError("HTTP error") from e
-
-        logger.error("Failed to fetch CSRF token after 5 attempts")
-        raise RequestError("Failed to fetch CSRF token after 5 attempts")
-
-    def _get_captcha(self):
-        headers = {
-            "User-Agent": "luogu_bot",
-            "x-csrf-token": self.x_csrf_token
-        }
-        for attempt in range(self.max_retries):
-            try:
-                response = self.client.get(
-                    self.base_url + "/api/verify/captcha", 
-                    headers=headers, 
-                    cookies=self.cookies
-                )
-
-                response.raise_for_status()
-
-                return response.content
-            except httpx.TimeoutException as e:
-                logger.warning(f"Attempt {attempt + 1}: Timeout error - {e}")
-                time.sleep(1)
-            except httpx.HTTPError as e:
-                logger.error(f"HTTP error: {e}")
-                raise RequestError("HTTP error") from e
+    def __exit__(self, exc_type, exc, traceback):
+        self.close()
+        return False
 
     def _post_captcha(self, captcha: str):
         raise NotImplementedError
@@ -212,12 +53,15 @@ class luoguAPI:
         raise NotImplementedError
 
     def logout(self):
-        raise NotImplementedError
+        res = self._send_request(endpoint=api_route("auth_logout"), method="POST")
+        self.x_csrf_token = None
+        return EmptyResponse(empty_response(res))
 
     def get_problem_list(
             self,
             page: int | None = None,
-            orderBy: int | None = None,
+            orderBy: str | None = None,
+            order: Literal["asc", "desc"] | None = None,
             keyword: str | None = None,
             content: bool | None = None,
             _type: ProblemType | None = None,
@@ -226,71 +70,40 @@ class luoguAPI:
             params: ProblemListRequestParams | None = None
     ) -> ProblemListRequestResponse:
         if params is None:
-            params = ProblemListRequestParams(json={
-                "page": page,
-                "orderBy": orderBy,
-                "keyword": keyword,
-                "content": content,
-                "type": _type,
-                "difficulty": difficulty,
-                "tag": tag
-            })
-        res = self._send_request(endpoint="problem/list", params=params)
+            params = problem_list_params(page, orderBy, order, keyword, content, _type, difficulty, tag)
+        res = self._send_request(endpoint=PROBLEM_LIST_ENDPOINT, params=params)
 
-        res["count"] = res["problems"]["count"]
-        res["perPage"] = res["problems"]["perPage"]
-        res["problems"] = res["problems"]["result"]
-
-        return ProblemListRequestResponse(res)
+        return ProblemListRequestResponse(normalize_problem_list(res))
 
     def get_problem(
             self, pid: str,
             contest_id: int | None = None
     ) -> ProblemDataRequestResponse:
-        params = ProblemRequestParams(json={"contest_id": contest_id})
-        res = self._send_request(endpoint=f"problem/{pid}", params=params)
+        params = problem_request_params(contest_id)
+        res = self._send_request(endpoint=problem_endpoint(pid), params=params)
 
-        res["problem"]["limits"] = list(zip(
-            res["problem"]["limits"]["time"], res["problem"]["limits"]["memory"]
-        ) )
-
-        return ProblemDataRequestResponse(res)
+        return ProblemDataRequestResponse(normalize_problem_data(res))
 
     def get_problem_settings_legacy(
             self, pid: str,
     ) -> ProblemSettingsRequestResponse:
-        res = self._send_request(endpoint=f"problem/edit/{pid}")
+        res = self._send_request(endpoint=problem_settings_legacy_endpoint(pid))
         
-        res["problemDetails"] = res["problem"]
-        res["problemSettings"] = res["setting"]
-        res["problemSettings"]["comment"] = res["problem"]["comment"]
-        res["problemSettings"]["providerID"] = res["problem"]["provider"]["uid"] or res["problem"]["provider"]["id"]
-        res["testCaseSettings"] = dict()
-        res["testCaseSettings"]["cases"] = res["testCases"]
-        res["testCaseSettings"]["scoringStrategy"] = res["scoringStrategy"]
-        res["testCaseSettings"]["subtaskScoringStrategies"] = res["subtaskScoringStrategies"]
-        res["testCaseSettings"]["showSubtask"] = res["showSubtask"]
+        return ProblemSettingsRequestResponse(normalize_problem_settings_legacy(res))
 
-        return ProblemSettingsRequestResponse(res)
-
-    def get_problem_settings(self, pid: str):
-        res = self._send_request(endpoint=f"problem/{pid}/edit")
+    def get_problem_settings(self, pid: str) -> ProblemSettingsRequestResponse:
+        res = self._send_request(endpoint=problem_settings_endpoint(pid))
         
-        return res
+        return ProblemSettingsRequestResponse(normalize_problem_settings(res))
 
     def update_problem_settings(
             self, pid: str,
             new_settings: ProblemSettings,
     ) -> ProblemModifiedResponse:
         res = self._send_request(
-            endpoint=f"fe/api/problem/edit/{pid}",
+            endpoint=problem_edit_endpoint(pid),
             method="POST",
-            data={
-                "settings": new_settings.to_json(),
-                "type": None,
-                "providerID": new_settings.providerID,
-                "comment": new_settings.comment
-            }
+            data=update_problem_payload(new_settings)
         )
 
         return ProblemModifiedResponse(res)
@@ -300,7 +113,7 @@ class luoguAPI:
             new_settings: TestCaseSettings
     ) -> UpdateTestCasesSettingsResponse:
         res = self._send_request(
-            endpoint=f"/fe/api/problem/editTestCase/{pid}",
+            endpoint=problem_edit_testcase_endpoint(pid),
             method="POST",
             data=new_settings.to_json()
         )
@@ -314,14 +127,9 @@ class luoguAPI:
     ) -> ProblemModifiedResponse:
         _type = "U" if tid is None else "T"
         res = self._send_request(
-            endpoint=f"fe/api/problem/new",
+            endpoint=PROBLEM_NEW_ENDPOINT,
             method="POST",
-            data={
-                "settings": settings.to_json(),
-                "type": _type,
-                "providerID": tid,
-                "comment": settings.comment
-            }
+            data=create_problem_payload(settings, _type, tid)
         )
 
         return ProblemModifiedResponse(res)
@@ -330,7 +138,7 @@ class luoguAPI:
             self, pid: str,
     ) -> bool:
         res = self._send_request(
-            endpoint=f"fe/api/problem/delete/{pid}",
+            endpoint=problem_delete_endpoint(pid),
             method="POST",
             data={}
         )
@@ -342,23 +150,10 @@ class luoguAPI:
             target: TransferProblemType = "U",
             is_clone: bool = False
     ) -> ProblemModifiedResponse:
-        if isinstance(target, int):
-            data = {
-                "type": "T",
-                "teamID": target
-            }
-        else:
-            data = {
-                "type": target
-            }
-        
-        if is_clone:
-            data["operation"] = "clone"
-            
         res = self._send_request(
-            endpoint=f"fe/api/problem/transfer/{pid}",
+            endpoint=problem_transfer_endpoint(pid),
             method="POST",
-            data=data
+            data=transfer_problem_payload(target, is_clone)
         )
 
         return ProblemModifiedResponse(res)
@@ -375,57 +170,50 @@ class luoguAPI:
         raise NotImplementedError
 
     def get_problem_solutions(self, pid: str, page: int | None = None) -> ProblemSolutionRequestResponse:
-        params = ListRequestParams(json={"page": page})
-        res = self._send_request(endpoint=f"problem/solution/{pid}", params=params)
+        params = list_params(page)
+        res = self._send_request(endpoint=problem_solution_endpoint(pid), params=params)
 
-        res["count"] = res["solutions"]["count"]
-        res["perPage"] = res["solutions"]["perPage"]
-        res["solutions"] = res["solutions"]["result"]
-
-        return ProblemSolutionRequestResponse(res)
+        return ProblemSolutionRequestResponse(normalize_problem_solutions(res))
 
     def get_user(self, uid: int) -> UserDataRequestResponse:
-        res = self._send_request(endpoint=f"user/{uid}")
+        res = self._send_request(endpoint=user_endpoint(uid))
         
-        if res.get("teams") is not None:
-            res["teams"] = [x.get("team") for x in res["teams"]]
-        res["user"]["eloMax"] = res["eloMax"]
-
-        return UserDataRequestResponse(res)
+        return UserDataRequestResponse(normalize_user_data(res))
 
     def get_user_info(self, uid: int) -> UserDetails:
-        res = self._send_request(endpoint=f"api/user/info/{uid}")
+        res = self._send_request(endpoint=user_info_endpoint(uid))
 
         return UserDetails(res["user"])
     
     def get_user_following_list(self, uid: int, page: int | None = None) -> List[UserDetails]:
-        params = UserListRequestParams(json={"user": uid, "page": page})
-        res = self._send_request(endpoint=f"api/user/followings", params=params)
+        params = user_list_params(uid, page)
+        res = self._send_request(endpoint=user_followings_endpoint(), params=params)
         return [UserDetails(user) for user in res["users"]["result"]]
 
     def get_user_follower_list(self, uid: int, page: int | None = None) -> List[UserDetails]:
-        params = UserListRequestParams(json={"user": uid, "page": page})
-        res = self._send_request(endpoint=f"api/user/followers", params=params)
+        params = user_list_params(uid, page)
+        res = self._send_request(endpoint=user_followers_endpoint(), params=params)
         return [UserDetails(user) for user in res["users"]["result"]]
 
     def get_user_blacklist(self, uid: int, page: int | None = None) -> List[UserDetails]:
-        params = UserListRequestParams(json={"user": uid, "page": page})
-        res = self._send_request(endpoint=f"api/user/blacklist", params=params)
+        params = user_list_params(uid, page)
+        res = self._send_request(endpoint=user_blacklist_endpoint(), params=params)
         return [UserDetails(user) for user in res["users"]["result"]]
     
     def search_user(self, keyword: str) -> List[UserSummary]:
         params = UserSearchRequestParams({"keyword" : keyword})
         
-        res = self._send_request(endpoint="api/user/search", params=params)
+        res = self._send_request(endpoint=USER_SEARCH_ENDPOINT, params=params)
         return [UserSummary(user) for user in res["users"]]
 
     def me(self) -> UserDetails:
-        return self.get_user(self.cookies["_uid"].split("_")[0]).user
+        if self.cookies is None or "_uid" not in self.cookies:
+            raise AuthenticationError("Need Login")
+        return self.get_user(int(self.cookies["_uid"].split("_")[0])).user
 
     def get_problem_set(self, id: int) -> ProblemSetDataRequestResponse:
-        res = self._send_request(endpoint=f"/training/{id}")
-        res["training"]["problems"] = [x.get("problem") for x in res["training"]["problems"]]
-        return ProblemSetDataRequestResponse(res)
+        res = self._send_request(endpoint=problem_set_endpoint(id))
+        return ProblemSetDataRequestResponse(normalize_problem_set(res))
     
     def get_problem_set_list(
             self,
@@ -435,137 +223,162 @@ class luoguAPI:
             params: ProblemSetListRequestParams | None = None
     ):
         if params is None:
-            params = ProblemSetListRequestParams(json={
-                "page": page,
-                "keyword": keyword,
-                "type": type
-            })
-        res = self._send_request(endpoint="training/list", params=params)
-        res["trainings"]["trainings"] = res["trainings"]["result"]
-        return ProblemSetListRequestResponse(res["trainings"])
+            params = problem_set_list_params(page, keyword, type)
+        res = self._send_request(endpoint=PROBLEM_SET_LIST_ENDPOINT, params=params)
+        return ProblemSetListRequestResponse(normalize_problem_set_list(res))
     
     def get_contest(self, id: int) -> ContestDataRequestResponse:
-        res = self._send_request(endpoint=f"contest/{id}")
+        res = self._send_request(endpoint=contest_endpoint(id))
 
-        res["contest"]["problems"] = [x.get("problem") for x in res["contestProblems"]]
-        res["contest"]["isScoreboardFrozen"] = res["isScoreboardFrozen"]
-        return ContestDataRequestResponse(res)
+        return ContestDataRequestResponse(normalize_contest(res))
     
-    def get_contest_list(self, page: int | None = None):
-        params = ListRequestParams(json={"page": page})
-        res = self._send_request(endpoint="contest/list", params=params)
-        res["contests"]["contests"] = res["contests"]["result"]
-        return ContestListRequestResponse(res["contests"])
+    def get_contest_list(
+            self,
+            page: int | None = None,
+            name: str | None = None,
+            method: int | None = None,
+            public: int | None = None,
+    ) -> ContestListRequestResponse:
+        params = contest_list_params(page, name, method, public)
+        res = self._send_request(endpoint=CONTEST_LIST_ENDPOINT, params=params)
+        return ContestListRequestResponse(normalize_contest_list(res))
             
     def get_disscussion(self,
             id: int,
             page: int | None = None,
             orderBy: int | None = None,
     ) -> DiscussionRequestResponse:
-        params = DiscussionRequestParams(json={"page": page, "orderBy": orderBy})
-        res = self._send_request(endpoint=f"discuss/{id}", params=params)
+        params = discussion_params(page, orderBy)
+        res = self._send_request(endpoint=discussion_endpoint(id), params=params)
 
-        res["perPage"] = res["replies"]["perPage"]
-        res["count"] = res["replies"]["count"]
-        res["replies"] = res["replies"]["result"]
-        return DiscussionRequestResponse(res)     
+        return DiscussionRequestResponse(normalize_discussion(res))     
     
     def get_activity(self, 
             uid: int, 
             page: int | None = None
     ) -> ActivityRequestResponse:
-        params = ActivityReuqestParams(json={"user": uid, "page": page})
-        res = self._send_request(endpoint=f"/api/feed/list", params=params)
+        params = activity_params(uid, page)
+        res = self._send_request(endpoint=ACTIVITY_ENDPOINT, params=params)
 
-        res["activities"] = res["feeds"]["result"]
-        res["perPage"] = res["feeds"]["perPage"]
-        res["count"] = res["feeds"]["count"]
-        return ActivityRequestResponse(res)
+        return ActivityRequestResponse(normalize_activity(res))
 
     def get_team(self, tid: int) -> TeamDataRequestResponse:
-        res = self._send_request(endpoint=f"team/{tid}")
+        res = self._send_request(endpoint=team_endpoint(tid))
         return TeamDataRequestResponse(res)
 
-    def get_team_member_list(self, tid: int) -> List[TeamMember]:
-        res = self._send_request(endpoint=f"api/team/members/{tid}")
-        res["perPage"] = res["members"]["perPage"]
-        res["count"] = res["members"]["count"]
-        res["members"] = res["members"]["result"]
-
-        return TeamMemberRequestResponse(res)
+    def get_team_member_list(self, tid: int) -> TeamMemberRequestResponse:
+        res = self._send_request(endpoint=team_members_endpoint(tid))
+        return TeamMemberRequestResponse(normalize_team_members(res))
 
     def get_team_problem_list(
             self, tid: int,
-            page: int | None = None
+            page: int | None = None,
+            keyword: str | None = None,
+            orderBy: Literal["pid", "name"] | None = None,
+            order: Literal["asc", "desc"] | None = None,
     ) -> ProblemListRequestResponse:
-        params = ListRequestParams(json={"page": page})
+        params = team_problem_list_params(page, keyword, orderBy, order)
         res = self._send_request(
-            endpoint=f"api/team/problems/{tid}", 
+            endpoint=team_problems_endpoint(tid), 
             params=params
         )
 
-        res["count"] = res["problems"]["count"]
-        res["perPage"] = res["problems"]["perPage"]
-        res["problems"] = res["problems"]["result"]
-
-        return ProblemListRequestResponse(res)
+        return ProblemListRequestResponse(normalize_problem_list(res))
 
     def get_team_problem_set_list(self, tid: int, page: int | None = None) -> ProblemSetListRequestResponse:
-        params = ListRequestParams(json={"page": page})
-        res = self._send_request(endpoint=f"api/team/trainings/{tid}", params=params)
-        res["trainings"]["trainings"] = res["trainings"]["result"]
-        return ProblemSetListRequestResponse(res["trainings"])
+        params = list_params(page)
+        res = self._send_request(endpoint=team_problem_sets_endpoint(tid), params=params)
+        return ProblemSetListRequestResponse(normalize_problem_set_list(res))
     
     def get_team_contest_list(self, tid: int, page: int | None = None) -> ContestListRequestResponse:
-        params = ListRequestParams(json={"page": page})
-        res = self._send_request(endpoint=f"api/team/contests/{tid}", params=params)
-        res["contests"]["contests"] = res["contests"]["result"]
-        return ContestListRequestResponse(res["contests"])
+        params = list_params(page)
+        res = self._send_request(endpoint=team_contests_endpoint(tid), params=params)
+        return ContestListRequestResponse(normalize_contest_list(res))
+
+    def get_created_contest(self, id: int) -> RawDataResponse:
+        return self._request_route("contest_created", path_params={"id": id})
+
+    def get_team_member_page(self, tid: int, page: int | None = None) -> TeamMemberRequestResponse:
+        return self._typed_route(
+            "team_member_page",
+            TeamMemberRequestResponse,
+            path_params={"id": tid},
+            params=raw_params(page=page),
+            normalizer=normalize_team_members,
+        )
+
+    def get_team_problem_page(
+            self,
+            tid: int,
+            page: int | None = None,
+            keyword: str | None = None,
+            orderBy: Literal["pid", "name"] | None = None,
+            order: Literal["asc", "desc"] | None = None,
+    ) -> ProblemListRequestResponse:
+        return self._typed_route(
+            "team_problem_page",
+            ProblemListRequestResponse,
+            path_params={"id": tid},
+            params=team_problem_list_params(page, keyword, orderBy, order),
+            normalizer=normalize_problem_list,
+        )
+
+    def get_team_training_page(self, tid: int, page: int | None = None) -> ProblemSetListRequestResponse:
+        return self._typed_route(
+            "team_training_page",
+            ProblemSetListRequestResponse,
+            path_params={"id": tid},
+            params=list_params(page),
+            normalizer=normalize_problem_set_list,
+        )
+
+    def get_team_contest_page(self, tid: int, page: int | None = None) -> ContestListRequestResponse:
+        return self._typed_route(
+            "team_contest_page",
+            ContestListRequestResponse,
+            path_params={"id": tid},
+            params=list_params(page),
+            normalizer=normalize_contest_list,
+        )
 
     def get_paste(self, id: str) -> PasteRequestResponse:
-        res = self._send_request(endpoint=f"paste/{id}")
+        res = self._send_request(endpoint=paste_endpoint(id))
         return PasteRequestResponse(res)
 
     def get_record(self, rid: str) -> RecordRequestResponse:
-        res = self._send_request(endpoint=f"record/{rid}")
+        res = self._send_request(endpoint=record_endpoint(rid))
         return RecordRequestResponse(res)
     
     def get_article(self, lid: str) -> ArticleDataRequestResponse:
-        res = self._send_request(endpoint=f"article/{lid}")
+        res = self._send_request(endpoint=article_endpoint(lid))
         return ArticleDataRequestResponse(res)
     
     def get_created_problem_list(
             self, page: int | None = None
     ) -> ProblemListRequestResponse:
-        params = ListRequestParams(json={"page": page})
-        res = self._send_request(endpoint="api/user/createdProblems", params=params)
+        params = list_params(page)
+        res = self._send_request(endpoint=CREATED_PROBLEMS_ENDPOINT, params=params)
 
-        res["count"] = res["problems"]["count"]
-        res["perPage"] = res["problems"]["perPage"]
-        res["problems"] = res["problems"]["result"]
+        return ProblemListRequestResponse(normalize_problem_list(res))
 
-        return ProblemListRequestResponse(res)
+    def get_created_problem_set_list(self, page: int | None = None) -> ProblemSetListRequestResponse:
+        params = list_params(page)
+        res = self._send_request(endpoint=CREATED_PROBLEM_SETS_ENDPOINT, params=params)
 
-    def get_created_problem_set_list(self, page: int | None = None):
-        params = ListRequestParams(json={"page": page})
-        res = self._send_request(endpoint="api/user/createdTrainings", params=params)
-
-        res["trainings"]["trainings"] = res["trainings"]["result"]
-        return ProblemSetListRequestResponse(res["trainings"])
+        return ProblemSetListRequestResponse(normalize_problem_set_list(res))
     
     def get_created_contest_list(self, page: int | None = None) -> ContestListRequestResponse:
-        params = ListRequestParams(json={"page": page})
-        res = self._send_request(endpoint="api/user/createdContests", params=params)
-        res["contests"]["contests"] = res["contests"]["result"]
-        return ContestListRequestResponse(res["contests"])
+        params = list_params(page)
+        res = self._send_request(endpoint=CREATED_CONTESTS_ENDPOINT, params=params)
+        return ContestListRequestResponse(normalize_contest_list(res))
 
     def submit_code(
             self,
             pid: str,
             code: str,
             contest_id: int | None = None,
-            lang: str | None = None,
-            enableO2: bool = True,
+            lang: int | None = None,
+            enableO2: bool | int = True,
             capture_handler: Callable[[bytes], str] | None = None
     ) -> SubmitCodeResponse:
         captcha_text = ""
@@ -573,15 +386,10 @@ class luoguAPI:
             try:
                 self._get_csrf(f"/problem/{pid}")
                 res = self._send_request(
-                    endpoint=f"/fe/api/problem/submit/{pid}",
-                    params=ProblemRequestParams(json={"contest_id": contest_id}),
+                    endpoint=problem_submit_endpoint(pid),
+                    params=problem_request_params(contest_id),
                     method="POST",
-                    data={
-                        "code": code,
-                        "lang": lang,
-                        "enableO2": enableO2,
-                        "captcha": captcha_text
-                    }
+                    data=submit_code_payload(code, lang, enableO2, captcha_text)
                 )
                 return SubmitCodeResponse(res)
             except NeedCaptcha:
@@ -589,14 +397,448 @@ class luoguAPI:
                     raise NeedCaptcha("Need captcha")
                 captcha = self._get_captcha()
                 captcha_text = capture_handler(captcha)
-            
-    def submit_code_via_openluogu():
+        
+        raise RequestError("Failed to submit code after multiple attempts")
+
+    def submit_code_via_openluogu(self):
         raise NotImplementedError
     
     def get_tags(self) -> TagRequestResponse:
-        res = self._send_request(endpoint="/_lfe/tags")
+        res = self._send_request(endpoint=TAGS_ENDPOINT)
         return TagRequestResponse(res)
 
     def get_image(self, id: int) -> Image:
-        res = self._send_request(endpoint=f"/api/image/detail/{id}")
+        res = self._send_request(endpoint=image_endpoint(id))
         return Image(res["image"])
+
+    def _request_route(
+            self,
+            route_name: str,
+            method: str = "GET",
+            path_params: dict[str, object] | None = None,
+            params: RequestParams | None = None,
+            data: JsonMapping | None = None,
+            form: JsonMapping | None = None,
+            response_type: ResponseType = "json",
+    ) -> RawDataResponse:
+        res = self._send_request(
+            endpoint=api_route(route_name, **(path_params or {})),
+            method=method,
+            params=params,
+            data=_json_payload(data),
+            form=_json_payload(form),
+            response_type=response_type,
+        )
+        if response_type != "json":
+            return res
+        return RawDataResponse(raw_response(res))
+
+    def _typed_route(
+            self,
+            route_name: str,
+            response_cls: type[_TResponse],
+            method: str = "GET",
+            path_params: dict[str, object] | None = None,
+            params: RequestParams | None = None,
+            data: JsonMapping | None = None,
+            form: JsonMapping | None = None,
+            normalizer: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    ) -> _TResponse:
+        res = self._send_request(
+            endpoint=api_route(route_name, **(path_params or {})),
+            method=method,
+            params=params,
+            data=_json_payload(data),
+            form=_json_payload(form),
+        )
+        if normalizer is not None:
+            res = normalizer(res)
+        return response_cls(res)
+
+    def get_watching_activities(self, page: int | None = None) -> ActivityRequestResponse:
+        return self._typed_route("feed_watching", ActivityRequestResponse, params=raw_params(page=page), normalizer=normalize_activity)
+
+    def post_activity(self, content: str) -> RawDataResponse:
+        return self._request_route("feed_post", method="POST", form={"content": content})
+
+    def delete_activity(self, id: int | str) -> RawDataResponse:
+        return self._request_route("feed_delete", method="POST", path_params={"id": id})
+
+    def report_activity(self, id: int | str, reason: str | None = None) -> RawDataResponse:
+        return self._request_route("feed_report", method="POST", data={"id": id, "reason": reason})
+
+    def get_article_list(self, page: int | None = None, keyword: str | None = None) -> ArticleListRequestResponse:
+        return self._typed_route("article_list", ArticleListRequestResponse, params=raw_params(page=page, keyword=keyword), normalizer=normalize_articles)
+
+    def find_article(self, keyword: str, page: int | None = None) -> ArticleListRequestResponse:
+        return self._typed_route("article_find", ArticleListRequestResponse, params=raw_params(keyword=keyword, page=page), normalizer=normalize_articles)
+
+    def get_my_articles(self, page: int | None = None) -> ArticleListRequestResponse:
+        return self._typed_route("article_mine", ArticleListRequestResponse, params=raw_params(page=page), normalizer=normalize_articles)
+
+    def get_favored_articles(self, page: int | None = None) -> ArticleListRequestResponse:
+        return self._typed_route("article_favored", ArticleListRequestResponse, params=raw_params(page=page), normalizer=normalize_articles)
+
+    def get_article_collection(self, id: int | str, page: int | None = None) -> ArticleListRequestResponse:
+        return self._typed_route("article_collection", ArticleListRequestResponse, path_params={"id": id}, params=raw_params(page=page), normalizer=normalize_articles)
+
+    def get_article_available_collections(self, lid: int | str) -> RawDataResponse:
+        return self._request_route("article_available_collection", path_params={"lid": lid})
+
+    def create_article(self, request: EditArticleRequest) -> RawDataResponse:
+        return self._request_route("article_new", method="POST", data=request)
+
+    def update_article(self, lid: int | str, request: EditArticleRequest) -> RawDataResponse:
+        return self._request_route("article_edit", method="POST", path_params={"lid": lid}, data=request)
+
+    def delete_article(self, lid: int | str) -> RawDataResponse:
+        return self._request_route("article_delete", method="POST", path_params={"lid": lid})
+
+    def batch_update_articles(self, request: BatchEditArticleRequest) -> RawDataResponse:
+        return self._request_route("article_batch_edit", method="POST", data=request)
+
+    def favor_article(self, lid: int | str, undo: bool | None = None) -> RawDataResponse:
+        return self._request_route("article_favor", method="POST", path_params={"lid": lid}, data={"undo": undo})
+
+    def vote_article(self, lid: int | str, vote: int) -> RawDataResponse:
+        return self._request_route("article_vote", method="POST", path_params={"lid": lid}, params=raw_params(vote=vote))
+
+    def request_article_promotion(self, lid: int | str) -> RawDataResponse:
+        return self._request_route("article_request_promotion", method="POST", path_params={"lid": lid})
+
+    def withdraw_article_promotion(self, lid: int | str) -> RawDataResponse:
+        return self._request_route("article_withdraw_promotion", method="POST", path_params={"lid": lid})
+
+    def get_article_replies(self, lid: int | str, page: int | None = None) -> ArticleReplyListResponse:
+        return self._typed_route("article_replies", ArticleReplyListResponse, path_params={"lid": lid}, params=raw_params(page=page), normalizer=normalize_article_replies)
+
+    def reply_article(self, lid: int | str, content: str) -> RawDataResponse:
+        return self._request_route("article_reply", method="POST", path_params={"lid": lid}, data={"content": content})
+
+    def delete_article_reply(self, lid: int | str, id: int | str) -> RawDataResponse:
+        return self._request_route("article_delete_reply", method="POST", path_params={"lid": lid, "id": id})
+
+    def get_lg4_captcha(self) -> bytes:
+        return self._send_request(endpoint=api_route("captcha_lg4"), response_type="bytes")
+
+    def get_motp_target(self) -> RawDataResponse:
+        return self._request_route("auth_motp_to")
+
+    def finish_signup(self, request: RegisterRequest) -> RawDataResponse:
+        return self._request_route("auth_finish_signup", method="POST", data=request)
+
+    def auth_with_password(self, username: str, password: str) -> RawDataResponse:
+        return self._request_route("auth_password", method="POST", data={"username": username, "password": password})
+
+    def connect_openid(self, id: int | str, request: OpenIdAuthRequest | None = None) -> RawDataResponse:
+        return self._request_route("openid_connect", method="POST", path_params={"id": id}, data=request)
+
+    def lock_auth(self) -> RawDataResponse:
+        return self._request_route("auth_lock", method="POST")
+
+    def auth_with_totp(self, code: str) -> RawDataResponse:
+        return self._request_route("auth_totp", method="POST", data={"code": code})
+
+    def request_motp(self) -> RawDataResponse:
+        return self._request_route("auth_motp_request", method="POST")
+
+    def auth_with_motp(self, code: str) -> RawDataResponse:
+        return self._request_route("auth_motp", method="POST", data={"code": code})
+
+    def unlock_auth(self, request: AuthUnlockRequest | None = None) -> RawDataResponse:
+        return self._request_route("auth_unlock", method="POST", data=request)
+
+    def get_user_blogs(self, uid: int, page: int | None = None) -> BlogListRequestResponse:
+        return self._typed_route("blog_user_blogs", BlogListRequestResponse, params=raw_params(uid=uid, page=page), normalizer=normalize_blogs)
+
+    def get_blog_list(self, page: int | None = None, keyword: str | None = None) -> BlogListRequestResponse:
+        return self._typed_route("blog_lists", BlogListRequestResponse, params=raw_params(page=page, keyword=keyword), normalizer=normalize_blogs)
+
+    def get_blog(self, id: int | str) -> BlogDataRequestResponse:
+        return self._typed_route("blog_detail", BlogDataRequestResponse, path_params={"id": id}, normalizer=normalize_blog)
+
+    def create_blog(self, request: EditBlogRequest) -> RawDataResponse:
+        return self._request_route("blog_new", method="POST", data=request)
+
+    def update_blog(self, id: int | str, request: EditBlogRequest) -> RawDataResponse:
+        return self._request_route("blog_edit", method="POST", path_params={"id": id}, data=request)
+
+    def delete_blog(self, id: int | str) -> RawDataResponse:
+        return self._request_route("blog_delete", method="POST", path_params={"id": id})
+
+    def get_blog_admin_list(self, page_type: str | None = None, page: int | None = None) -> BlogListRequestResponse:
+        return self._typed_route("blog_admin_list", BlogListRequestResponse, params=raw_params(pageType=page_type, page=page), normalizer=normalize_blogs)
+
+    def update_blog_admin_list(self, form: BlogAdminForm, page_type: str | None = None) -> str:
+        return self._send_request(
+            endpoint=api_route("blog_admin_list"),
+            method="POST",
+            params=raw_params(pageType=page_type),
+            form=_json_payload(form),
+            response_type="text",
+        )
+
+    def get_blog_replies(self, id: int | str, page: int | None = None) -> BlogReplyListResponse:
+        return self._typed_route("blog_replies", BlogReplyListResponse, path_params={"id": id}, params=raw_params(page=page), normalizer=normalize_blog_replies)
+
+    def reply_blog(self, id: int | str, content: str) -> RawDataResponse:
+        return self._request_route("blog_reply", method="POST", path_params={"id": id}, data={"content": content})
+
+    def vote_blog(self, id: int | str, vote: int) -> RawDataResponse:
+        return self._request_route("blog_vote", method="POST", path_params={"id": id}, params=raw_params(vote=vote))
+
+    def delete_blog_comment(self, id: int | str) -> RawDataResponse:
+        return self._request_route("blog_delete_comment", method="POST", path_params={"id": id})
+
+    def get_chat_page(self) -> str:
+        return self._send_request(endpoint=api_route("chat"), response_type="text")
+
+    def get_chat_records(self, user: int | None = None, page: int | None = None) -> ChatRecordRequestResponse:
+        return self._typed_route("chat_record", ChatRecordRequestResponse, params=raw_params(user=user, page=page), normalizer=normalize_chat_records)
+
+    def create_chat(self, uid: int, content: str) -> RawDataResponse:
+        return self._request_route("chat_new", method="POST", data={"uid": uid, "content": content})
+
+    def delete_chat(self, id: int | str) -> RawDataResponse:
+        return self._request_route("chat_delete", method="POST", data={"id": id})
+
+    def clear_chat_unread(self, uid: int | None = None) -> RawDataResponse:
+        return self._request_route("chat_clear_unread", method="POST", data={"uid": uid})
+
+    def get_joined_contest_list(self, page: int | None = None) -> ContestListRequestResponse:
+        return self._typed_route("joined_contests", ContestListRequestResponse, params=raw_params(page=page), normalizer=normalize_contest_list)
+
+    def get_contest_scoreboard(self, id: int | str, page: int | None = None) -> RawDataResponse:
+        return self._request_route("contest_scoreboard", path_params={"id": id}, params=raw_params(page=page))
+
+    def join_contest(self, id: int | str, request: ContestJoinRequest | None = None) -> RawDataResponse:
+        return self._request_route("contest_join", method="POST", path_params={"id": id}, data=request)
+
+    def get_contest_squad(self, id: int | str) -> RawDataResponse:
+        return self._request_route("contest_squad", path_params={"id": id})
+
+    def quit_contest_squad_member(self, id: int | str, uid: int | None = None) -> RawDataResponse:
+        return self._request_route("contest_squad_member_quit", method="POST", path_params={"id": id}, data={"uid": uid})
+
+    def create_contest(self, request: EditContestRequest) -> RawDataResponse:
+        return self._request_route("contest_new", method="POST", data=request)
+
+    def update_contest(self, id: int | str, request: EditContestRequest) -> RawDataResponse:
+        return self._request_route("contest_edit", method="POST", path_params={"id": id}, data=request)
+
+    def update_contest_problem(self, id: int | str, request: EditContestProblemRequest) -> RawDataResponse:
+        return self._request_route("contest_edit_problem", method="POST", path_params={"id": id}, data=request)
+
+    def delete_contest(self, id: int | str) -> RawDataResponse:
+        return self._request_route("contest_delete", method="POST", path_params={"id": id})
+
+    def get_discussion_list(self, page: int | None = None, keyword: str | None = None) -> RawDataResponse:
+        return self._request_route("discuss_list", params=raw_params(page=page, keyword=keyword))
+
+    def get_created_post_list(self, page: int | None = None) -> RawDataResponse:
+        return self._request_route("created_posts", params=raw_params(page=page))
+
+    def create_discussion(self, request: CreatePostRequest) -> RawDataResponse:
+        return self._request_route("discuss_post", method="POST", data=request)
+
+    def reply_discussion(self, id: int | str, content: str) -> RawDataResponse:
+        return self._request_route("discuss_reply", method="POST", path_params={"id": id}, data={"content": content})
+
+    def delete_discussion(self, id: int | str) -> RawDataResponse:
+        return self._request_route("discuss_delete", method="POST", path_params={"id": id})
+
+    def delete_discussion_reply(self, id: int | str) -> RawDataResponse:
+        return self._request_route("discuss_delete_reply", method="POST", path_params={"id": id})
+
+    def report_post(self, id: int | str, reason: str | None = None) -> RawDataResponse:
+        return self._request_route("post_report", method="POST", data={"id": id, "reason": reason})
+
+    def report_post_reply(self, id: int | str, reason: str | None = None) -> RawDataResponse:
+        return self._request_route("post_reply_report", method="POST", data={"id": id, "reason": reason})
+
+    def submit_ide_code(self, code: str, language: int, input_data: str | None = None) -> RawDataResponse:
+        return self._request_route("ide_submit", method="POST", data={"code": code, "lang": language, "input": input_data})
+
+    def get_image_list(self, page: int | None = None) -> ImageListRequestResponse:
+        return self._typed_route("image_list", ImageListRequestResponse, params=raw_params(page=page), normalizer=normalize_images)
+
+    def generate_image_upload_link(self, request: GenerateUploadLinkRequest | None = None) -> GenerateUploadLinkResponse:
+        return self._typed_route("image_generate_upload_link", GenerateUploadLinkResponse, method="POST", data=request)
+
+    def delete_image(self, id: int | str) -> RawDataResponse:
+        return self._request_route("image_delete", method="POST", data={"id": id})
+
+    def get_config(self) -> RawDataResponse:
+        return self._request_route("config")
+
+    def get_ranking(self, page: int | None = None) -> RankingListRequestResponse:
+        return self._typed_route("ranking", RankingListRequestResponse, params=raw_params(page=page), normalizer=normalize_rankings)
+
+    def get_elo_ranking(self, page: int | None = None) -> RankingListRequestResponse:
+        return self._typed_route("ranking_elo", RankingListRequestResponse, params=raw_params(page=page), normalizer=normalize_rankings)
+
+    def get_notifications(self, page: int | None = None) -> NotificationListRequestResponse:
+        return self._typed_route("notification", NotificationListRequestResponse, params=raw_params(page=page), normalizer=normalize_notifications)
+
+    def get_advertisement(self, id: int | str) -> RawDataResponse:
+        return self._request_route("advertisement", path_params={"id": id})
+
+    def get_paintboard(self) -> RawDataResponse:
+        return self._request_route("paintboard_board")
+
+    def reset_paintboard_token(self) -> RawDataResponse:
+        return self._request_route("paintboard_reset_token", method="POST")
+
+    def paint(self, x: int, y: int, color: int) -> RawDataResponse:
+        return self._request_route("paintboard_paint", method="POST", data={"x": x, "y": y, "color": color})
+
+    def get_paste_list(self, page: int | None = None) -> PasteListRequestResponse:
+        return self._typed_route("paste_list", PasteListRequestResponse, params=raw_params(page=page), normalizer=normalize_pastes)
+
+    def create_paste(self, request: EditPasteRequest) -> RawDataResponse:
+        return self._request_route("paste_new", method="POST", data=request)
+
+    def update_paste(self, id: int | str, request: EditPasteRequest) -> RawDataResponse:
+        return self._request_route("paste_edit", method="POST", path_params={"id": id}, data=request)
+
+    def delete_paste(self, id: int | str) -> RawDataResponse:
+        return self._request_route("paste_delete", method="POST", path_params={"id": id})
+
+    def get_marked_training_list(self, page: int | None = None) -> ProblemSetListRequestResponse:
+        return self._typed_route("marked_trainings", ProblemSetListRequestResponse, params=raw_params(page=page), normalizer=normalize_problem_set_list)
+
+    def mark_training(self, id: int | str) -> RawDataResponse:
+        return self._request_route("training_mark", method="POST", path_params={"id": id})
+
+    def unmark_training(self, id: int | str) -> RawDataResponse:
+        return self._request_route("training_unmark", method="POST", path_params={"id": id})
+
+    def create_training(self, request: EditTrainingRequest) -> RawDataResponse:
+        return self._request_route("training_new", method="POST", data=request)
+
+    def update_training(self, id: int | str, request: EditTrainingRequest) -> RawDataResponse:
+        return self._request_route("training_edit", method="POST", path_params={"id": id}, data=request)
+
+    def add_training_problem(self, id: int | str, pid: str) -> RawDataResponse:
+        return self._request_route("training_add_problem", method="POST", path_params={"id": id}, data={"pid": pid})
+
+    def update_training_problems(self, id: int | str, request: EditTrainingProblemsRequest) -> RawDataResponse:
+        return self._request_route("training_edit_problems", method="POST", path_params={"id": id}, data=request)
+
+    def clone_training(self, id: int | str) -> RawDataResponse:
+        return self._request_route("training_clone", method="POST", path_params={"id": id})
+
+    def delete_training(self, id: int | str) -> RawDataResponse:
+        return self._request_route("training_delete", method="POST", path_params={"id": id})
+
+    def add_problem_to_tasklist(self, pid: str) -> RawDataResponse:
+        return self._request_route("problem_tasklist_add", method="POST", data={"pid": pid})
+
+    def remove_problem_from_tasklist(self, pid: str) -> RawDataResponse:
+        return self._request_route("problem_tasklist_remove", method="POST", data={"pid": pid})
+
+    def translate_problem(self, pid: str, request: TranslateProblemRequest | None = None) -> RawDataResponse:
+        return self._request_route("problem_translate", method="POST", path_params={"pid": pid}, data=request)
+
+    def get_record_list(self, page: int | None = None, uid: int | None = None) -> RecordListRequestResponse:
+        return self._typed_route("record_list", RecordListRequestResponse, params=raw_params(page=page, uid=uid), normalizer=normalize_records)
+
+    def query_downloadable_testcase(self, id: int | str) -> DownloadableTestcaseResponse:
+        return self._typed_route("record_downloadable_testcase", DownloadableTestcaseResponse, path_params={"id": id}, normalizer=normalize_downloadable_testcases)
+
+    def download_record_testcase(self, id: int | str, testcase: int | str | None = None) -> bytes:
+        return self._send_request(
+            endpoint=api_route("record_download_testcase", id=id),
+            params=raw_params(testcase=testcase),
+            response_type="bytes",
+        )
+
+    def get_my_teams(self) -> TeamListRequestResponse:
+        return self._typed_route("mine_team", TeamListRequestResponse, normalizer=normalize_teams)
+
+    def join_team(self, id: int | str, request: TeamJoinRequest | None = None) -> RawDataResponse:
+        return self._request_route("team_join", method="POST", path_params={"id": id}, data=request)
+
+    def exit_team(self, id: int | str) -> RawDataResponse:
+        return self._request_route("team_exit", method="POST", path_params={"id": id})
+
+    def create_team(self, request: EditTeamRequest) -> RawDataResponse:
+        return self._request_route("team_create", method="POST", data=request)
+
+    def update_team(self, id: int | str, request: EditTeamRequest) -> RawDataResponse:
+        return self._request_route("team_edit", method="POST", path_params={"id": id}, data=request)
+
+    def set_team_master(self, id: int | str, uid: int) -> RawDataResponse:
+        return self._request_route("team_set_master", method="POST", path_params={"id": id}, data={"uid": uid})
+
+    def update_team_notice(self, id: int | str, content: str) -> RawDataResponse:
+        return self._request_route("team_edit_notice", method="POST", path_params={"id": id}, data={"content": content})
+
+    def update_team_member(self, id: int | str, uid: int, request: TeamMemberUpdateRequest) -> RawDataResponse:
+        return self._request_route("team_edit_member", method="POST", path_params={"id": id}, data={"uid": uid, **request})
+
+    def review_team_join_request(self, id: int | str, uid: int, accepted: bool) -> RawDataResponse:
+        return self._request_route("team_review", method="POST", path_params={"id": id}, data={"uid": uid, "accepted": accepted})
+
+    def kick_team_member(self, id: int | str, uid: int) -> RawDataResponse:
+        return self._request_route("team_kick", method="POST", path_params={"id": id}, data={"uid": uid})
+
+    def get_theme_list(self, page: int | None = None) -> ThemeListRequestResponse:
+        return self._typed_route("theme_list", ThemeListRequestResponse, params=raw_params(page=page), normalizer=normalize_themes)
+
+    def get_theme_design(self, id: int | str) -> RawDataResponse:
+        return self._request_route("theme_design", path_params={"id": id})
+
+    def set_theme(self, id: int | str) -> RawDataResponse:
+        return self._request_route("theme_set", method="POST", path_params={"id": id})
+
+    def create_theme(self, request: EditThemeRequest) -> RawDataResponse:
+        return self._request_route("theme_new", method="POST", data=request)
+
+    def update_theme(self, id: int | str, request: EditThemeRequest) -> RawDataResponse:
+        return self._request_route("theme_edit", method="POST", path_params={"id": id}, data=request)
+
+    def delete_theme(self, id: int | str) -> RawDataResponse:
+        return self._request_route("theme_delete", method="POST", path_params={"id": id})
+
+    def get_user_practice(self, uid: int) -> UserPracticeResponse:
+        return self._typed_route("user_practice", UserPracticeResponse, path_params={"uid": uid}, normalizer=normalize_user_practice)
+
+    def get_rating_elo(self, uid: int | None = None) -> RawDataResponse:
+        return self._request_route("rating_elo", params=raw_params(uid=uid))
+
+    def get_user_setting(self) -> UserSettingResponse:
+        return self._typed_route("user_setting", UserSettingResponse, normalizer=raw_response)
+
+    def get_user_preference(self) -> UserSettingResponse:
+        return self._typed_route("user_preference", UserSettingResponse, normalizer=raw_response)
+
+    def update_user_preference(self, request: UserPreferenceUpdateRequest) -> RawDataResponse:
+        return self._request_route("user_preference_update", method="POST", data=request)
+
+    def get_user_prize_setting(self) -> UserSettingResponse:
+        return self._typed_route("user_prize_setting", UserSettingResponse, normalizer=raw_response)
+
+    def get_user_security_setting(self) -> UserSettingResponse:
+        return self._typed_route("user_security_setting", UserSettingResponse, normalizer=raw_response)
+
+    def update_user_slogan(self, slogan: str) -> RawDataResponse:
+        return self._request_route("user_update_slogan", method="POST", data={"slogan": slogan})
+
+    def update_user_introduction(self, introduction: str) -> RawDataResponse:
+        return self._request_route("user_update_introduction", method="POST", data={"introduction": introduction})
+
+    def update_user_header_image(self, image: str) -> RawDataResponse:
+        return self._request_route("user_update_header_image", method="POST", data={"image": image})
+
+    def bind_vjudge_account(self, request: BindRemoteJudgeAccountRequest) -> RawDataResponse:
+        return self._request_route("user_bind_vjudge", method="POST", data=request)
+
+    def unbind_vjudge_account(self) -> RawDataResponse:
+        return self._request_route("user_unbind_vjudge", method="POST")
+
+    def bind_openid(self, id: int | str, request: OpenIdAuthRequest | None = None) -> RawDataResponse:
+        return self._request_route("openid_bind", method="POST", path_params={"id": id}, data=request)
+
+    def unbind_openid(self, id: int | str) -> RawDataResponse:
+        return self._request_route("user_unbind_openid", method="POST", path_params={"id": id})

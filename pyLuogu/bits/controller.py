@@ -6,7 +6,7 @@ import time
 
 
 class event:
-    def __init__(self, owner, name: str = None):
+    def __init__(self, owner, name: str | None = None):
         if name is None:
             self._name = hex(id(self))
         else:
@@ -35,7 +35,7 @@ class event:
 class timer:
     __id = 0
 
-    def __init__(self, name: str = None, interval: float = 0):
+    def __init__(self, name: str | None = None, interval: float = 0):
         timer.__id += 1
         self._id = timer.__id
 

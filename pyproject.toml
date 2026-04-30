@@ -16,7 +16,7 @@ dependencies = [
     "httpx",
     "beautifulsoup4"
 ]
-requires-python = ">=3.7"
+requires-python = ">=3.10"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Operating System :: OS Independent",
@@ -27,8 +27,8 @@ classifiers = [
 [project.urls]
 Homepage = "https://github.com/NekoOS-Group/luogu-api-python" 
 
-[tool.setuptools]
-packages = ["pyLuogu"]
+[tool.setuptools.packages.find]
+include = ["pyLuogu*"]
 
 [project.optional-dependencies]
 dev = [

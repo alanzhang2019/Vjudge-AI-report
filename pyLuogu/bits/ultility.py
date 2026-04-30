@@ -6,7 +6,8 @@ __all__ = [
     "CachePool",
 ]
 
-from typing import Generic, TypeVar, Dict, Any, Awaitable, Callable, Union
+from types import UnionType
+from typing import Generic, TypeVar, Dict, Any, Callable, Literal, Union, get_args, get_origin
 
 import json
 import time
@@ -14,11 +15,109 @@ import time
 from .strings import str_type_of, str_val, decorating, str_type
 
 
+_NONE_TYPE = type(None)
+
+
 def make_list(val) -> list:
     if isinstance(val, list):
         return list(val)
     else:
         return [val]
+
+
+def _is_union_type(expected_type: Any) -> bool:
+    return get_origin(expected_type) in (Union, UnionType)
+
+
+def _is_literal_type(expected_type: Any) -> bool:
+    return get_origin(expected_type) is Literal
+
+
+def _conversion_error(key: str | None, expected_type: Any, value: Any) -> TypeError:
+    return TypeError(f"{key} Expected {expected_type}, got {type(value)} with value {value}")
+
+
+def _parse_union_type(key: str | None, value: Any, expected_type: Any) -> Any:
+    errors = []
+    for candidate in get_args(expected_type):
+        if candidate is _NONE_TYPE:
+            if value is None:
+                return None
+            continue
+        try:
+            return _parse_typed_value(key, value, candidate)
+        except (TypeError, ValueError) as e:
+            errors.append(e)
+    raise _conversion_error(key, expected_type, value) from (errors[-1] if errors else None)
+
+
+def _parse_literal_type(key: str | None, value: Any, expected_type: Any) -> Any:
+    choices = get_args(expected_type)
+    if value not in choices:
+        raise _conversion_error(key, expected_type, value)
+    return value
+
+
+def _parse_list_type(key: str | None, value: Any, expected_type: Any) -> list[Any]:
+    origin = get_origin(expected_type)
+    item_types = list(get_args(expected_type)) if origin is list else expected_type
+    if len(item_types) != 1:
+        raise TypeError(f"List type must have exactly one element type: {expected_type}")
+    item_type = item_types[0]
+    if not isinstance(value, list):
+        raise TypeError(f"{key} Expected a list of {item_type}, got {type(value)}")
+    return [_parse_typed_value(None, item, item_type) for item in value]
+
+
+def _parse_tuple_type(key: str | None, value: Any, expected_type: Any) -> tuple[Any, ...]:
+    origin = get_origin(expected_type)
+    item_types = get_args(expected_type) if origin is tuple else expected_type
+    if not isinstance(value, (list, tuple)) or len(value) != len(item_types):
+        raise TypeError(f"{key} Expected a tuple of {item_types}, got {type(value)} with value {value}")
+    return tuple(_parse_typed_value(None, item, item_type) for item, item_type in zip(value, item_types))
+
+
+def _parse_dict_type(key: str | None, value: Any, expected_type: Any) -> dict[Any, Any]:
+    origin = get_origin(expected_type)
+    if origin is dict:
+        key_type, value_type = get_args(expected_type)
+    else:
+        key_type, value_type = list(expected_type.items())[0]
+    if not isinstance(value, (dict, list)):
+        raise TypeError(f"{key} Expected a dict of {expected_type}, got {type(value)}")
+    if isinstance(value, list):
+        return {
+            _parse_typed_value(None, key_type(index), key_type): _parse_typed_value(None, item, value_type)
+            for index, item in enumerate(value)
+        }
+    return {
+        _parse_typed_value(None, item_key, key_type): _parse_typed_value(None, item_value, value_type)
+        for item_key, item_value in value.items()
+    }
+
+
+def _parse_typed_value(key: str | None, value: Any, expected_type: Any) -> Any:
+    if expected_type is Any:
+        return value
+    if value is None:
+        return None
+
+    origin = get_origin(expected_type)
+    if _is_union_type(expected_type):
+        return _parse_union_type(key, value, expected_type)
+    if _is_literal_type(expected_type):
+        return _parse_literal_type(key, value, expected_type)
+    if isinstance(expected_type, list) or origin is list:
+        return _parse_list_type(key, value, expected_type)
+    if isinstance(expected_type, tuple) or origin is tuple:
+        return _parse_tuple_type(key, value, expected_type)
+    if isinstance(expected_type, dict) or origin is dict:
+        return _parse_dict_type(key, value, expected_type)
+    if isinstance(expected_type, type) and issubclass(expected_type, JsonSerializable):
+        return expected_type(json=value)
+    if isinstance(expected_type, type) and not isinstance(value, expected_type):
+        raise TypeError(f"{key} Expected {expected_type}, got {type(value)}")
+    return value
 
 
 class JsonSerializable:
@@ -33,43 +132,6 @@ class JsonSerializable:
         """
         初始化对象，将 JSON 数据映射到对象属性
         """
-
-        def handle_nested_type(_key, _value, _expected_type):
-            """
-            处理嵌套类型的转换
-            """
-            if _value is None:
-                return None
-
-            if isinstance(_expected_type, list):
-                if len(_expected_type) != 1:
-                    raise TypeError(f"List type must have exactly one element type: {_expected_type}")
-                inner_type = _expected_type[0]
-                if not isinstance(_value, list):
-                    raise TypeError(f"{_key} Expected a list of {inner_type}, got {type(_value)}")
-                return [handle_nested_type(None, v, inner_type) for v in _value]
-
-            elif isinstance(_expected_type, tuple):
-                if not isinstance(_value, (list, tuple)) or len(_value) != len(_expected_type):
-                    raise TypeError(f"{_key} Expected a tuple of {_expected_type}, got {type(_value)} with value {_value}")
-                return tuple(handle_nested_type(None, v, t) for v, t in zip(_value, _expected_type))
-
-            elif isinstance(_expected_type, dict):
-                if not isinstance(_value, dict) and not isinstance(_value, list):
-                    raise TypeError(f"{_key} Expected a dict of {_expected_type}, got {type(_value)}")
-                key_type, val_type = list(_expected_type.items())[0]
-                if isinstance(_value, list):
-                    return {handle_nested_type(None, key_type(k), key_type): handle_nested_type(None, v, val_type) for k, v in enumerate(_value)}
-                return {handle_nested_type(None, k, key_type): handle_nested_type(None, v, val_type) for k, v in _value.items()}
-
-            elif issubclass(_expected_type, JsonSerializable):
-                return _expected_type(json=_value)
-
-            elif not isinstance(_value, _expected_type):
-                raise TypeError(f"{_key} Expected {_expected_type}, got {type(_value)}")
-
-            return _value
-
         if not isinstance(json, dict):
             raise TypeError(f"Expected a dictionary, got {type(json)}")
 
@@ -80,7 +142,7 @@ class JsonSerializable:
                 continue
 
             if value is not None:
-                value = handle_nested_type(key, value, expected_type)
+                value = _parse_typed_value(key, value, expected_type)
 
             setattr(self, key, value)
 
@@ -166,8 +228,8 @@ class Printable:
     def __str__(self):
         return decorating(str_type_of(self) + "\n" + self.__tree__(), 37, 0)
 
-_T = TypeVar("T")
-LoadFunctionType = Union[Callable[[str], _T], Callable[[str], Awaitable[_T]]]
+_T = TypeVar("_T")
+LoadFunctionType = Callable[[str], _T]
 
 class CacheItem(Generic[_T]):
     def __init__(self, 
@@ -186,14 +248,16 @@ class CacheItem(Generic[_T]):
     def refresh( self,
             new_value: _T | None = None,
             new_cache_duration: float | None = None,
-            new_load_function: LoadFunctionType = None
+            new_load_function: LoadFunctionType[_T] | None = None
     ):
         self.value = new_value or self.value
         self.load_function = new_load_function or self.load_function
-        if new_value is None and self.load_function is None:
+        load_function = self.load_function
+        if new_value is None and load_function is None:
             raise ValueError("No new value load function provided")
         if new_value is None:
-            self.value = self.load_function(self.id)
+            assert load_function is not None
+            self.value = load_function(self.id)
         self.cache_duration = new_cache_duration or self.cache_duration
         self.last_loaded_time = time.time()
     
@@ -264,6 +328,7 @@ class CachePool(Generic[_T]):
         if value is None and load_function is None:
             raise ValueError("No new value load function provided")
         if value is None:
+            assert load_function is not None
             value = load_function(resource_id)
         self._cache[resource_id] = CacheItem(resource_id, value, cache_duration, load_function)
         return self._cache[resource_id]
@@ -272,15 +337,22 @@ class CachePool(Generic[_T]):
         self._cache.clear()
 
 class LazyType:
-    def __init__(self, load_function: LoadFunctionType, cache_duration=60):
+    def __init__(self, load_function: Callable[[], Any], cache_duration=60):
         self._load_function = load_function
         self._loaded = False
         self._data = None
         self._cache_duration = cache_duration
-        self._last_loaded_time = None
+        self._last_loaded_time: float | None = None
 
     def _load(self):
-        if not self._loaded or (self._cache_duration and (time.time() - self._last_loaded_time) > self._cache_duration):
+        if (
+                not self._loaded
+                or self._last_loaded_time is None
+                or (
+                    self._cache_duration
+                    and (time.time() - self._last_loaded_time) > self._cache_duration
+                )
+        ):
             self._data = self._load_function()
             self._loaded = True
             self._last_loaded_time = time.time()
@@ -301,7 +373,7 @@ class LazyType:
         return repr(self._data)
 
 class LazyProxy:
-    def __init__(self, load_function: LoadFunctionType, cache_duration=60):
+    def __init__(self, load_function: Callable[[], Any], cache_duration=60):
         self._lazy = LazyType(load_function, cache_duration)
 
     def __getattr__(self, name):

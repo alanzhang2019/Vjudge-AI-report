@@ -1,31 +1,30 @@
 import unittest
-from pyLuogu.errors import LuoguAPIError, RequestError, AuthenticationError, NotFoundError, RateLimitError, ServerError
+
+from pyLuogu.errors import (
+    AuthenticationError,
+    LuoguAPIError,
+    NeedCaptcha,
+    NotFoundError,
+    RateLimitError,
+    RequestError,
+    ServerError,
+)
+
 
 class TestLuoguAPIErrors(unittest.TestCase):
+    def test_error_hierarchy(self):
+        self.assertIsInstance(AuthenticationError("auth"), LuoguAPIError)
+        self.assertIsInstance(NotFoundError("missing"), LuoguAPIError)
+        self.assertIsInstance(RateLimitError("slow down"), LuoguAPIError)
+        self.assertIsInstance(ServerError("server"), LuoguAPIError)
+        self.assertIsInstance(NeedCaptcha("captcha"), LuoguAPIError)
 
-    def test_luogu_api_error(self):
-        # Add test for LuoguAPIError
-        pass
+    def test_request_error_stores_status_code(self):
+        error = RequestError("boom", status_code=429)
 
-    def test_request_error(self):
-        # Add test for RequestError
-        pass
+        self.assertEqual(str(error), "boom")
+        self.assertEqual(error.status_code, 429)
 
-    def test_authentication_error(self):
-        # Add test for AuthenticationError
-        pass
 
-    def test_not_found_error(self):
-        # Add test for NotFoundError
-        pass
-
-    def test_rate_limit_error(self):
-        # Add test for RateLimitError
-        pass
-
-    def test_server_error(self):
-        # Add test for ServerError
-        pass
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

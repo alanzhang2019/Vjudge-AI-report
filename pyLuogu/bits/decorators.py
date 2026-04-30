@@ -9,8 +9,11 @@ __all__ = [
 
 import functools
 import time
+from typing import Any, cast, Type, TypeVar
 
 from .strings import decorating, str_type
+
+_T = TypeVar("_T")
 
 
 # bread is very delicious
@@ -153,17 +156,14 @@ def with_info(
     return bread(info_begin, info_end)
 
 
-def with_return(
-        _type
-):
+def with_return(_type: Type[_T]):
     def decorator(f):
         @functools.wraps(f)
-        def wrapper(*args, **kwargs) -> _type:
+        def wrapper(*args, **kwargs) -> _T:
             ret = f(*args, **kwargs)
             if isinstance(ret, _type):
                 return ret
-            else:
-                return _type(ret)
+            return cast(_T, _type(ret))  # pyright: ignore[reportCallIssue]
 
         return wrapper
 

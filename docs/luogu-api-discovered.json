@@ -1,0 +1,1774 @@
+{
+  "generated_at": "2026-04-30T10:16:42.981206+00:00",
+  "sources": {
+    "third_party_docs": "https://github.com/0f-0b/luogu-api-docs",
+    "official_site": "https://www.luogu.com.cn"
+  },
+  "documented_endpoints": [
+    {
+      "title": "获取用户动态",
+      "source": "activities.md",
+      "method": "GET",
+      "path": "/api/feed/list",
+      "params": " { user?: number; page?: number } ",
+      "request_body": null,
+      "response_body": " application/json ( { feeds: List<Activity> } )",
+      "notes": []
+    },
+    {
+      "title": "获取关注的用户的动态",
+      "source": "activities.md",
+      "method": "GET",
+      "path": "/api/feed/watching",
+      "params": " { page?: number } ",
+      "request_body": null,
+      "response_body": " application/json ( { status: number; data: ActivityData[] } )",
+      "notes": []
+    },
+    {
+      "title": "发布动态",
+      "source": "activities.md",
+      "method": "POST",
+      "path": "/api/feed/postBenben",
+      "params": null,
+      "request_body": " application/x-www-form-urlencoded ( { content: string } )",
+      "response_body": " application/json ( { status: number; data: ActivityData } )",
+      "notes": []
+    },
+    {
+      "title": "删除动态",
+      "source": "activities.md",
+      "method": "POST",
+      "path": "/api/feed/delete/:id",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( { status: number; data: [] } )",
+      "notes": []
+    },
+    {
+      "title": "举报动态",
+      "source": "activities.md",
+      "method": "POST",
+      "path": "/api/report/feed",
+      "params": null,
+      "request_body": " application/x-www-form-urlencoded ( { relevantID: number; reason: string } )",
+      "response_body": " application/json ( { status: number; data: string } )",
+      "notes": []
+    },
+    {
+      "title": "列出文章",
+      "source": "articles.md",
+      "method": "GET",
+      "path": "/article",
+      "params": " { category?: number; page?: number } ",
+      "request_body": null,
+      "response_body": " application/json ( LentilleDataResponse<ArticleListData> )",
+      "notes": []
+    },
+    {
+      "title": "列出用户文章",
+      "source": "articles.md",
+      "method": "GET",
+      "path": "/api/article/find",
+      "params": " ArticleListParams ",
+      "request_body": null,
+      "response_body": " application/json ( { articles: List<Article> } )",
+      "notes": []
+    },
+    {
+      "title": "列出创建的文章",
+      "source": "articles.md",
+      "method": "GET",
+      "path": "/article/mine",
+      "params": " CreatedArticleListParams ",
+      "request_body": null,
+      "response_body": " application/json ( LentilleDataResponse<CreatedArticleListData> )",
+      "notes": []
+    },
+    {
+      "title": "列出收藏的文章",
+      "source": "articles.md",
+      "method": "GET",
+      "path": "/article/favored",
+      "params": " { page?: number } ",
+      "request_body": null,
+      "response_body": " application/json ( { favorites: List<{ time: number; article: Article }> } )",
+      "notes": []
+    },
+    {
+      "title": "获取文章",
+      "source": "articles.md",
+      "method": "GET",
+      "path": "/article/:lid",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( LentilleDataResponse<ArticleData> )",
+      "notes": [
+        "**注**: 此处的域名为 `www.luogu.com`。"
+      ]
+    },
+    {
+      "title": "列出合集文章",
+      "source": "articles.md",
+      "method": "GET",
+      "path": "/article/collection/:id",
+      "params": " { page?: number } ",
+      "request_body": null,
+      "response_body": " application/json ( LentilleDataResponse<ArticleCollectionData> )",
+      "notes": []
+    },
+    {
+      "title": "获取可投稿的官方合集",
+      "source": "articles.md",
+      "method": "GET",
+      "path": "/article/:lid/availableCollection",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( { collections: ArticleCollectionSummary[] } )",
+      "notes": []
+    },
+    {
+      "title": "创建文章",
+      "source": "articles.md",
+      "method": "POST",
+      "path": "/api/article/new",
+      "params": null,
+      "request_body": " application/json ( EditArticleRequest )",
+      "response_body": " application/json ( { article: ArticleDetails } )",
+      "notes": []
+    },
+    {
+      "title": "编辑文章",
+      "source": "articles.md",
+      "method": "POST",
+      "path": "/api/article/edit/:lid",
+      "params": null,
+      "request_body": " application/json ( EditArticleRequest )",
+      "response_body": " application/json ( { article: ArticleDetails } )",
+      "notes": []
+    },
+    {
+      "title": "删除文章",
+      "source": "articles.md",
+      "method": "POST",
+      "path": "/api/article/delete/:lid",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( { lid: string } )",
+      "notes": []
+    },
+    {
+      "title": "批量修改文章",
+      "source": "articles.md",
+      "method": "POST",
+      "path": "/api/article/batchEdit",
+      "params": null,
+      "request_body": " application/json ( BatchEditArticleRequest )",
+      "response_body": " application/json ( { lids: string[] } )",
+      "notes": []
+    },
+    {
+      "title": "收藏文章",
+      "source": "articles.md",
+      "method": "POST",
+      "path": "/api/article/favor/:lid",
+      "params": " { remove?: unknown } ",
+      "request_body": null,
+      "response_body": " application/json ( { lid: string } )",
+      "notes": []
+    },
+    {
+      "title": "赞/踩文章",
+      "source": "articles.md",
+      "method": "POST",
+      "path": "/api/article/vote/:lid",
+      "params": " { vote: number } ",
+      "request_body": null,
+      "response_body": " application/json ( { voted: number; upvotes: number } )",
+      "notes": [
+        "**注**：和原博客 API 不同，此处通过 URL 而非请求主体传参。"
+      ]
+    },
+    {
+      "title": "申请全站推荐",
+      "source": "articles.md",
+      "method": "POST",
+      "path": "/api/article/requestPromotion/:lid",
+      "params": null,
+      "request_body": null,
+      "response_body": " ",
+      "notes": []
+    },
+    {
+      "title": "撤回全站推荐",
+      "source": "articles.md",
+      "method": "POST",
+      "path": "/api/article/withdrawPromotion/:lid",
+      "params": null,
+      "request_body": null,
+      "response_body": " ",
+      "notes": []
+    },
+    {
+      "title": "获取评论",
+      "source": "articles.md",
+      "method": "GET",
+      "path": "/article/:lid/replies",
+      "params": " { sort?: string; after?: number } ",
+      "request_body": null,
+      "response_body": " application/json ( { replySlice: Comment[] } )",
+      "notes": []
+    },
+    {
+      "title": "发表评论",
+      "source": "articles.md",
+      "method": "POST",
+      "path": "/article/:lid/reply",
+      "params": null,
+      "request_body": " application/json ( { content: string } )",
+      "response_body": " application/json ( { reply: Comment } )",
+      "notes": []
+    },
+    {
+      "title": "删除评论",
+      "source": "articles.md",
+      "method": "POST",
+      "path": "/article/:lid/deleteReply/:id",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( { id: number } )",
+      "notes": []
+    },
+    {
+      "title": "获取图片验证码",
+      "source": "auth.md",
+      "method": "GET",
+      "path": "/lg4/captcha",
+      "params": null,
+      "request_body": null,
+      "response_body": " image/jpeg ",
+      "notes": []
+    },
+    {
+      "title": "发送注册验证码",
+      "source": "auth.md",
+      "method": "POST",
+      "path": "/auth/motp/to",
+      "params": " { endpoint: number, exist: number } ",
+      "request_body": " application/json ( { endpoint: string, captcha: string } )",
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "注册",
+      "source": "auth.md",
+      "method": "POST",
+      "path": "/auth/finish-signup",
+      "params": null,
+      "request_body": " application/json ( RegisterRequest )",
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "登录",
+      "source": "auth.md",
+      "method": "POST",
+      "path": "/do-auth/password",
+      "params": null,
+      "request_body": " application/json ( LoginRequest )",
+      "response_body": " application/json ( LoginResponse )",
+      "notes": []
+    },
+    {
+      "title": "通过 OpenID 登录",
+      "source": "auth.md",
+      "method": "GET",
+      "path": "/openid/:id/connect",
+      "params": null,
+      "request_body": null,
+      "response_body": null,
+      "notes": [
+        "**注**: 重定向到对应的认证页面。"
+      ]
+    },
+    {
+      "title": "登出",
+      "source": "auth.md",
+      "method": "POST",
+      "path": "/auth/logout",
+      "params": null,
+      "request_body": null,
+      "response_body": null,
+      "notes": []
+    },
+    {
+      "title": "锁定",
+      "source": "auth.md",
+      "method": "POST",
+      "path": "/auth/lock",
+      "params": null,
+      "request_body": null,
+      "response_body": null,
+      "notes": []
+    },
+    {
+      "title": "使用 TOTP 解锁",
+      "source": "auth.md",
+      "method": "POST",
+      "path": "/do-auth/totp",
+      "params": null,
+      "request_body": " application/json ( { code: string } )",
+      "response_body": " application/json ( LoginResponse )",
+      "notes": []
+    },
+    {
+      "title": "发送一次性验证码",
+      "source": "auth.md",
+      "method": "POST",
+      "path": "/auth/motp/request",
+      "params": " { endpoint: number } ",
+      "request_body": " application/json ( { captcha: string } )",
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "使用一次性验证码解锁",
+      "source": "auth.md",
+      "method": "POST",
+      "path": "/do-auth/motp",
+      "params": null,
+      "request_body": " application/json ( { code: string } )",
+      "response_body": " application/json ( LoginResponse )",
+      "notes": []
+    },
+    {
+      "title": "获取解锁方式",
+      "source": "auth.md",
+      "method": "GET",
+      "path": "/auth/unlock",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( DataResponse<{ mode: string }> )",
+      "notes": []
+    },
+    {
+      "title": "列出所有文章",
+      "source": "blog.md",
+      "method": "GET",
+      "path": "/api/blog/userBlogs",
+      "params": " { user?: number; page?: number } ",
+      "request_body": null,
+      "response_body": " application/json ( { blogs: List<BlogSummary> } )",
+      "notes": []
+    },
+    {
+      "title": "列出未隐藏的文章",
+      "source": "blog.md",
+      "method": "GET",
+      "path": "/api/blog/lists",
+      "params": " BlogListParams ",
+      "request_body": null,
+      "response_body": " application/json ( { status: number; data: List<Blog> } )",
+      "notes": []
+    },
+    {
+      "title": "获取文章",
+      "source": "blog.md",
+      "method": "GET",
+      "path": "/api/blog/detail/:id",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( { status: number; data: List<LegacyBlog> } )",
+      "notes": []
+    },
+    {
+      "title": "创建文章",
+      "source": "blog.md",
+      "method": "POST",
+      "path": "/blogAdmin/article/post_new",
+      "params": null,
+      "request_body": " application/x-www-form-urlencoded ( EditBlogRequest )",
+      "response_body": " application/json ( { status: number; data: number } )",
+      "notes": []
+    },
+    {
+      "title": "编辑文章",
+      "source": "blog.md",
+      "method": "POST",
+      "path": "/blogAdmin/article/post_edit/:id",
+      "params": null,
+      "request_body": " application/x-www-form-urlencoded ( EditBlogRequest )",
+      "response_body": " application/json ( { status: number; data: number } )",
+      "notes": []
+    },
+    {
+      "title": "删除文章",
+      "source": "blog.md",
+      "method": "POST",
+      "path": "/api/blog/delete/:id",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( { status: number } )",
+      "notes": []
+    },
+    {
+      "title": "批量更新文章状态",
+      "source": "blog.md",
+      "method": "POST",
+      "path": "/blogAdmin/article/list",
+      "params": " { pageType: \"list\" } ",
+      "request_body": " application/x-www-form-urlencoded ( { method: \"update\"; \"blog-id\": number[]; \"edit-status\": number; \"csrf-token\": string } )",
+      "response_body": " text/html ",
+      "notes": []
+    },
+    {
+      "title": "批量恢复/删除回收站中的文章",
+      "source": "blog.md",
+      "method": "POST",
+      "path": "/blogAdmin/article/list",
+      "params": " { pageType: \"trash\" } ",
+      "request_body": " application/x-www-form-urlencoded ( { method: \"recover\" | \"delete\"; \"blog-id\": number[]; \"csrf-token\": string } )",
+      "response_body": " text/html ",
+      "notes": []
+    },
+    {
+      "title": "获取评论",
+      "source": "blog.md",
+      "method": "GET",
+      "path": "/api/blog/replies/:id",
+      "params": " { page?: number } ",
+      "request_body": null,
+      "response_body": " application/json ( { status: number; data: List<Comment> } )",
+      "notes": []
+    },
+    {
+      "title": "发表评论",
+      "source": "blog.md",
+      "method": "POST",
+      "path": "/api/blog/reply/:id",
+      "params": null,
+      "request_body": " application/json ( { content: string } )",
+      "response_body": " application/json ( { status: number; reply: Comment } )",
+      "notes": []
+    },
+    {
+      "title": "赞/踩文章",
+      "source": "blog.md",
+      "method": "POST",
+      "path": "/api/blog/vote/:id",
+      "params": null,
+      "request_body": " application/json ( { Type: number } )",
+      "response_body": " application/json ( { status: number; data: number } )",
+      "notes": []
+    },
+    {
+      "title": "删除评论",
+      "source": "blog.md",
+      "method": "POST",
+      "path": "/blogAdmin/article/deleteComment/:id",
+      "params": null,
+      "request_body": " application/x-www-form-urlencoded ( { \"reply-id\": number; \"csrf-token\": string } )",
+      "response_body": " application/json ( { status: number; data: string } )",
+      "notes": []
+    },
+    {
+      "title": "列出最近联系",
+      "source": "chat.md",
+      "method": "GET",
+      "path": "/chat",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( DataResponse<ChatListData> )",
+      "notes": []
+    },
+    {
+      "title": "获取私信",
+      "source": "chat.md",
+      "method": "GET",
+      "path": "/api/chat/record",
+      "params": " { user: number; page?: number } ",
+      "request_body": null,
+      "response_body": " application/json ( { messages: List<Message> } )",
+      "notes": []
+    },
+    {
+      "title": "发送私信",
+      "source": "chat.md",
+      "method": "POST",
+      "path": "/api/chat/new",
+      "params": null,
+      "request_body": " application/json ( { user: number; content: string } )",
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "删除私信",
+      "source": "chat.md",
+      "method": "POST",
+      "path": "/api/chat/delete",
+      "params": null,
+      "request_body": " application/json ( { id: number } )",
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "清除未读私信通知",
+      "source": "chat.md",
+      "method": "POST",
+      "path": "/api/chat/clearUnread",
+      "params": null,
+      "request_body": " application/json ( { user: number } )",
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "列出比赛",
+      "source": "contests.md",
+      "method": "GET",
+      "path": "/contest/list",
+      "params": " ContestListParams ",
+      "request_body": null,
+      "response_body": " application/json ( LentilleDataResponse<{ contests: List<Contest> }> )",
+      "notes": []
+    },
+    {
+      "title": "列出参加的比赛",
+      "source": "contests.md",
+      "method": "GET",
+      "path": "/api/user/joinedContests",
+      "params": " { page?: number } ",
+      "request_body": null,
+      "response_body": " application/json ( { contests: List<LegacyContest> } )",
+      "notes": []
+    },
+    {
+      "title": "列出创建的比赛",
+      "source": "contests.md",
+      "method": "GET",
+      "path": "/api/user/createdContests",
+      "params": " { page?: number } ",
+      "request_body": null,
+      "response_body": " application/json ( { contests: List<LegacyContest> } )",
+      "notes": []
+    },
+    {
+      "title": "获取比赛",
+      "source": "contests.md",
+      "method": "GET",
+      "path": "/contest/:id",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( LentilleDataResponse<ContestData> )",
+      "notes": []
+    },
+    {
+      "title": "获取创建的比赛",
+      "source": "contests.md",
+      "method": "GET",
+      "path": "/contest/edit/:id",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( DataResponse<CreatedContestData> )",
+      "notes": []
+    },
+    {
+      "title": "获取排行榜",
+      "source": "contests.md",
+      "method": "GET",
+      "path": "/fe/api/contest/scoreboard/:id",
+      "params": " { page?: number } ",
+      "request_body": null,
+      "response_body": " application/json ( GetScoreboardResponse )",
+      "notes": []
+    },
+    {
+      "title": "参加比赛",
+      "source": "contests.md",
+      "method": "POST",
+      "path": "/contest/:id/join",
+      "params": null,
+      "request_body": " application/json ( { code?: string; unrated?: boolean; squadCode?: string } )",
+      "response_body": " application/json ( { id: number } )",
+      "notes": []
+    },
+    {
+      "title": "创建小队",
+      "source": "contests.md",
+      "method": "POST",
+      "path": "/contest/:id/squad",
+      "params": null,
+      "request_body": " application/json ( {} )",
+      "response_body": " application/json ( { squad: Squad } )",
+      "notes": []
+    },
+    {
+      "title": "退出小队/踢出队员/解散小队",
+      "source": "contests.md",
+      "method": "POST",
+      "path": "/contest/:id/squadMemberQuit",
+      "params": null,
+      "request_body": " application/json ( { uid: number } )",
+      "response_body": " application/json ( { squad: Squad | null } )",
+      "notes": []
+    },
+    {
+      "title": "创建比赛",
+      "source": "contests.md",
+      "method": "POST",
+      "path": "/fe/api/contest/new",
+      "params": null,
+      "request_body": " application/json ( EditContestRequest )",
+      "response_body": " application/json ( { id: number } )",
+      "notes": []
+    },
+    {
+      "title": "编辑比赛",
+      "source": "contests.md",
+      "method": "POST",
+      "path": "/fe/api/contest/edit/:id",
+      "params": null,
+      "request_body": " application/json ( EditContestRequest )",
+      "response_body": " application/json ( { id: number } )",
+      "notes": []
+    },
+    {
+      "title": "编排比赛题目",
+      "source": "contests.md",
+      "method": "POST",
+      "path": "/fe/api/contest/editProblem/:id",
+      "params": null,
+      "request_body": " application/json ( { pids: string[]; scores: { [pid: string]: number } } )",
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "删除比赛",
+      "source": "contests.md",
+      "method": "POST",
+      "path": "/fe/api/contest/delete/:id",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "列出帖子",
+      "source": "discussions.md",
+      "method": "GET",
+      "path": "/discuss",
+      "params": " { forum?: string; page?: number } ",
+      "request_body": null,
+      "response_body": " application/json ( LentilleDataResponse<PostListData> )",
+      "notes": []
+    },
+    {
+      "title": "列出发布的帖子",
+      "source": "discussions.md",
+      "method": "GET",
+      "path": "/api/user/createdPosts",
+      "params": " { page?: number; orderBy?: string } ",
+      "request_body": null,
+      "response_body": " application/json ( { posts: List<LegacyPost> } )",
+      "notes": []
+    },
+    {
+      "title": "获取帖子",
+      "source": "discussions.md",
+      "method": "GET",
+      "path": "/discuss/:id",
+      "params": " { page?: number; sort?: string } ",
+      "request_body": null,
+      "response_body": " application/json ( LentilleDataResponse<PostData> )",
+      "notes": []
+    },
+    {
+      "title": "发布帖子",
+      "source": "discussions.md",
+      "method": "POST",
+      "path": "/api/discuss/post",
+      "params": null,
+      "request_body": " application/json ( CreatePostRequest )",
+      "response_body": " application/json ( { status: number; data: number } )",
+      "notes": []
+    },
+    {
+      "title": "发表回复",
+      "source": "discussions.md",
+      "method": "POST",
+      "path": "/api/discuss/reply/:id",
+      "params": null,
+      "request_body": " application/json ( { captcha: string; content: string } )",
+      "response_body": " application/json ( { status: number; data: [] } )",
+      "notes": []
+    },
+    {
+      "title": "删除帖子",
+      "source": "discussions.md",
+      "method": "DELETE",
+      "path": "/api/discuss/delete/:id",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( { status: number; data: [] } )",
+      "notes": []
+    },
+    {
+      "title": "删除回复",
+      "source": "discussions.md",
+      "method": "DELETE",
+      "path": "/api/discuss/deleteReply/:id",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( { status: number; data: [] } )",
+      "notes": []
+    },
+    {
+      "title": "举报帖子",
+      "source": "discussions.md",
+      "method": "POST",
+      "path": "/api/report/post",
+      "params": null,
+      "request_body": " application/json ( { relevantID: number; reason: string } )",
+      "response_body": " application/json ( { status: number; data: string } )",
+      "notes": []
+    },
+    {
+      "title": "举报回复",
+      "source": "discussions.md",
+      "method": "POST",
+      "path": "/api/report/post_reply",
+      "params": null,
+      "request_body": " application/json ( { relevantID: number; reason: string } )",
+      "response_body": " application/json ( { status: number; data: string } )",
+      "notes": []
+    },
+    {
+      "title": "提交代码",
+      "source": "ide.md",
+      "method": "POST",
+      "path": "/api/ide_submit",
+      "params": null,
+      "request_body": " application/x-www-form-urlencoded ( IDESubmitRequest )",
+      "response_body": " application/json ( { status: number; data: { rid: number } } )",
+      "notes": []
+    },
+    {
+      "title": "列出图片",
+      "source": "images.md",
+      "method": "GET",
+      "path": "/image",
+      "params": " { user: number; content: string } ",
+      "request_body": null,
+      "response_body": " application/json ( DataResponse<ImageListData> )",
+      "notes": []
+    },
+    {
+      "title": "获取图片",
+      "source": "images.md",
+      "method": "GET",
+      "path": "/api/image/detail/:id",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( { image: Image } )",
+      "notes": []
+    },
+    {
+      "title": "生成上传参数",
+      "source": "images.md",
+      "method": "GET",
+      "path": "/api/image/generateUploadLink",
+      "params": " { watermarkType: number; captcha: string } ",
+      "request_body": null,
+      "response_body": " application/json ( GenerateUploadParametersResponse )",
+      "notes": []
+    },
+    {
+      "title": "删除图片",
+      "source": "images.md",
+      "method": "POST",
+      "path": "/api/image/delete",
+      "params": null,
+      "request_body": " application/json ( { images: string[] } )",
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "获取配置",
+      "source": "misc.md",
+      "method": "GET",
+      "path": "/_lfe/config",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( ConfigResponse )",
+      "notes": []
+    },
+    {
+      "title": "获取标签",
+      "source": "misc.md",
+      "method": "GET",
+      "path": "/_lfe/tags",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( TagsResponse )",
+      "notes": []
+    },
+    {
+      "title": "获取咕值排名",
+      "source": "misc.md",
+      "method": "GET",
+      "path": "/ranking",
+      "params": " RankingListParams ",
+      "request_body": null,
+      "response_body": " application/json ( LentilleDataResponse<{ ranking: List<GuRatingDetails> }> )",
+      "notes": []
+    },
+    {
+      "title": "获取等级分排名",
+      "source": "misc.md",
+      "method": "GET",
+      "path": "/ranking/elo",
+      "params": " { page?: number } ",
+      "request_body": null,
+      "response_body": " application/json ( LentilleDataResponse<{ ranking: List<EloRatingDetails & { previous: EloRatingDetails | null }> }> )",
+      "notes": []
+    },
+    {
+      "title": "获取通知",
+      "source": "misc.md",
+      "method": "GET",
+      "path": "/user/notification",
+      "params": " NotificationsParams ",
+      "request_body": null,
+      "response_body": " application/json ( DataResponse<NotificationsData> )",
+      "notes": []
+    },
+    {
+      "title": "获取广告",
+      "source": "misc.md",
+      "method": "GET",
+      "path": "/api/qiaFan/getFan/:id",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( { advertisement: Advertisement | null } )",
+      "notes": []
+    },
+    {
+      "title": "冬日绘版内容",
+      "source": "misc.md",
+      "method": "GET",
+      "path": "/paintboard/board",
+      "params": null,
+      "request_body": null,
+      "response_body": " text/plain (1000 行 * 600 列的字符矩阵，第 i 行第 j 个字符表示第 j 行第 i 个像素。)",
+      "notes": []
+    },
+    {
+      "title": "冬日绘版重置 token",
+      "source": "misc.md",
+      "method": "POST",
+      "path": "/paintboard/resetToken",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( { token: string } )",
+      "notes": []
+    },
+    {
+      "title": "冬日绘版绘制",
+      "source": "misc.md",
+      "method": "POST",
+      "path": "/paintboard/paint",
+      "params": " { token?: string } ",
+      "request_body": " application/json ( { x: number; y: number; color: number } )",
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "列出剪贴板",
+      "source": "pastes.md",
+      "method": "GET",
+      "path": "/paste",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( DataResponse<{ pastes: List<Paste> }> )",
+      "notes": []
+    },
+    {
+      "title": "获取剪贴板",
+      "source": "pastes.md",
+      "method": "GET",
+      "path": "/paste/:id",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( DataResponse<{ paste: Paste }> )",
+      "notes": []
+    },
+    {
+      "title": "创建剪贴板",
+      "source": "pastes.md",
+      "method": "POST",
+      "path": "/paste/new",
+      "params": null,
+      "request_body": " application/json ( { data?: string; public?: boolean } )",
+      "response_body": " application/json ( { id: string } )",
+      "notes": []
+    },
+    {
+      "title": "编辑剪贴板",
+      "source": "pastes.md",
+      "method": "POST",
+      "path": "/paste/edit/:id",
+      "params": null,
+      "request_body": " application/json ( { data?: string; public?: boolean } )",
+      "response_body": " application/json ( { id: string } )",
+      "notes": []
+    },
+    {
+      "title": "删除剪贴板",
+      "source": "pastes.md",
+      "method": "POST",
+      "path": "/paste/delete/:id",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( { id: string } )",
+      "notes": []
+    },
+    {
+      "title": "列出题单",
+      "source": "problem-sets.md",
+      "method": "GET",
+      "path": "/training/list",
+      "params": " ProblemSetListParams ",
+      "request_body": null,
+      "response_body": " application/json ( DataResponse<ProblemSetListData> )",
+      "notes": []
+    },
+    {
+      "title": "列出创建的题单",
+      "source": "problem-sets.md",
+      "method": "GET",
+      "path": "/api/user/createdTrainings",
+      "params": " { page?: number } ",
+      "request_body": null,
+      "response_body": " application/json ( { trainings: List<ProblemSet> } )",
+      "notes": []
+    },
+    {
+      "title": "获取题单",
+      "source": "problem-sets.md",
+      "method": "GET",
+      "path": "/training/:id",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( DataResponse<ProblemSetData> )",
+      "notes": []
+    },
+    {
+      "title": "列出收藏的题单",
+      "source": "problem-sets.md",
+      "method": "GET",
+      "path": "/api/user/markedTrainings",
+      "params": " { page?: number } ",
+      "request_body": null,
+      "response_body": " application/json ( { trainingParticipations: List<{ training: ProblemSet; user: UserSummary }> } )",
+      "notes": []
+    },
+    {
+      "title": "收藏题单",
+      "source": "problem-sets.md",
+      "method": "POST",
+      "path": "/api/training/mark/:id",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "取消收藏题单",
+      "source": "problem-sets.md",
+      "method": "POST",
+      "path": "/api/training/unmark/:id",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "创建题单",
+      "source": "problem-sets.md",
+      "method": "POST",
+      "path": "/api/training/new",
+      "params": null,
+      "request_body": " application/json ( { settings: ProblemSetSettings; providerID: number | null } )",
+      "response_body": " application/json ( { id: number } )",
+      "notes": []
+    },
+    {
+      "title": "编辑题单",
+      "source": "problem-sets.md",
+      "method": "POST",
+      "path": "/api/training/edit/:id",
+      "params": null,
+      "request_body": " application/json ( { settings: ProblemSetSettings } )",
+      "response_body": " application/json ( { id: number } )",
+      "notes": []
+    },
+    {
+      "title": "添加题单题目",
+      "source": "problem-sets.md",
+      "method": "POST",
+      "path": "/api/training/addProblem/:id",
+      "params": null,
+      "request_body": " application/json ( { pids: string[] } )",
+      "response_body": " application/json ( { addedProblems: string[] } )",
+      "notes": []
+    },
+    {
+      "title": "编排题单题目",
+      "source": "problem-sets.md",
+      "method": "POST",
+      "path": "/api/training/editProblems/:id",
+      "params": null,
+      "request_body": " application/json ( { pids: string[] } )",
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "转存题单",
+      "source": "problem-sets.md",
+      "method": "POST",
+      "path": "/api/training/clone/:id",
+      "params": null,
+      "request_body": " application/json ( { type: number; providerID: number | null } )",
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "删除题单",
+      "source": "problem-sets.md",
+      "method": "POST",
+      "path": "/api/training/delete/:id",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "列出题目",
+      "source": "problems.md",
+      "method": "GET",
+      "path": "/problem/list",
+      "params": " ProblemListParams ",
+      "request_body": null,
+      "response_body": " application/json ( DataResponse<{ problems: List<LegacyProblem & Maybe<ProblemStatus>>; page: number }> )",
+      "notes": []
+    },
+    {
+      "title": "列出创建的题目",
+      "source": "problems.md",
+      "method": "GET",
+      "path": "/api/user/createdProblems",
+      "params": " { page?: number } ",
+      "request_body": null,
+      "response_body": " application/json ( { problems: List<LegacyProblem> } )",
+      "notes": []
+    },
+    {
+      "title": "获取题目",
+      "source": "problems.md",
+      "method": "GET",
+      "path": "/problem/:pid",
+      "params": " { contestId?: number } ",
+      "request_body": null,
+      "response_body": " application/json ( LentilleDataResponse<ProblemData> )",
+      "notes": []
+    },
+    {
+      "title": "获取题解",
+      "source": "problems.md",
+      "method": "GET",
+      "path": "/problem/solution/:pid",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( LentilleDataResponse<SolutionsData> )",
+      "notes": []
+    },
+    {
+      "title": "收藏题目",
+      "source": "problems.md",
+      "method": "POST",
+      "path": "/fe/api/problem/tasklistAdd",
+      "params": null,
+      "request_body": " application/json ( { pid: string } )",
+      "response_body": " application/json ( { status: number } )",
+      "notes": []
+    },
+    {
+      "title": "取消收藏题目",
+      "source": "problems.md",
+      "method": "POST",
+      "path": "/fe/api/problem/tasklistRemove",
+      "params": null,
+      "request_body": " application/json ( { pid: string } )",
+      "response_body": " application/json ( { status: number } )",
+      "notes": []
+    },
+    {
+      "title": "提交代码",
+      "source": "problems.md",
+      "method": "POST",
+      "path": "/fe/api/problem/submit/:pid",
+      "params": " { contestId?: number } ",
+      "request_body": " application/json ( SubmitCodeRequest ) 或 multipart/form-data ( { file: Blob; captcha?: string } )",
+      "response_body": " application/json ( { rid: number } )",
+      "notes": [
+        "**注**：提交代码时，主页的 CSRF 令牌会失效，比如 `AT_abc001_a` 题目的提交需要 `https://www.luogu.com.cn/problem/AT_abc001_a` 页面返回的 CSRF 令牌，而使用主页返回的令牌则无法通过鉴权。"
+      ]
+    },
+    {
+      "title": "提交翻译",
+      "source": "problems.md",
+      "method": "POST",
+      "path": "/fe/api/problem/translate/:pid",
+      "params": null,
+      "request_body": " application/json ( { translation: string } )",
+      "response_body": " ",
+      "notes": []
+    },
+    {
+      "title": "创建题目",
+      "source": "problems.md",
+      "method": "POST",
+      "path": "/fe/api/problem/new",
+      "params": null,
+      "request_body": " application/json ( CreateProblemRequest )",
+      "response_body": " application/json ( { pid: string } )",
+      "notes": []
+    },
+    {
+      "title": "编辑题目",
+      "source": "problems.md",
+      "method": "POST",
+      "path": "/fe/api/problem/edit/:pid",
+      "params": null,
+      "request_body": " application/json ( { settings: ProblemSettings } )",
+      "response_body": " application/json ( { pid: string } )",
+      "notes": []
+    },
+    {
+      "title": "更新数据点设置",
+      "source": "problems.md",
+      "method": "POST",
+      "path": "/fe/api/problem/editTestCase/:pid",
+      "params": null,
+      "request_body": " application/json ( UpdateTestCasesSettingsRequest )",
+      "response_body": " application/json ( UpdateTestCasesSettingsResponse )",
+      "notes": []
+    },
+    {
+      "title": "迁移题目",
+      "source": "problems.md",
+      "method": "POST",
+      "path": "/fe/api/problem/transfer/:pid",
+      "params": null,
+      "request_body": " application/json ( { type: string; teamID?: number } | { operation: \"clone\"; type: \"T\"; teamID: number } )",
+      "response_body": " application/json ( { pid: string } )",
+      "notes": []
+    },
+    {
+      "title": "删除题目",
+      "source": "problems.md",
+      "method": "POST",
+      "path": "/fe/api/problem/delete/:id",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "列出记录",
+      "source": "records.md",
+      "method": "GET",
+      "path": "/record/list",
+      "params": " RecordListParams ",
+      "request_body": null,
+      "response_body": " application/json ( DataResponse<{ records: List<RecordBase> }> )",
+      "notes": []
+    },
+    {
+      "title": "获取记录",
+      "source": "records.md",
+      "method": "GET",
+      "path": "/record/:id",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( DataResponse<RecordData> )",
+      "notes": []
+    },
+    {
+      "title": "获取可下载的数据点",
+      "source": "records.md",
+      "method": "GET",
+      "path": "/fe/api/record/queryDownloadableTestcase/:id",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( { testcaseId: number | null } )",
+      "notes": []
+    },
+    {
+      "title": "获取数据点内容",
+      "source": "records.md",
+      "method": "POST",
+      "path": "/fe/api/record/downloadTestcase/:id",
+      "params": null,
+      "request_body": " application/json ( { testcaseId: number } )",
+      "response_body": " application/json ( { status: number; data: { input: string; output: string } } )",
+      "notes": []
+    },
+    {
+      "title": "获取团队",
+      "source": "teams.md",
+      "method": "GET",
+      "path": "/team/:id",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( LentilleDataResponse<TeamData> )",
+      "notes": []
+    },
+    {
+      "title": "列出加入的团队",
+      "source": "teams.md",
+      "method": "GET",
+      "path": "/user/mine/team",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( LentilleDataResponse<UserTeamsData> )",
+      "notes": []
+    },
+    {
+      "title": "列出团队成员",
+      "source": "teams.md",
+      "method": "GET",
+      "path": "/team/:id/member",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( LentilleDataResponse<TeamMembersData> )",
+      "notes": []
+    },
+    {
+      "title": "列出团队题目",
+      "source": "teams.md",
+      "method": "GET",
+      "path": "/team/:id/problem",
+      "params": " TeamProblemListParams ",
+      "request_body": null,
+      "response_body": " application/json ( LentilleDataResponse<TeamProblemsData> )",
+      "notes": []
+    },
+    {
+      "title": "列出团队题单",
+      "source": "teams.md",
+      "method": "GET",
+      "path": "/team/:id/training",
+      "params": " { page?: number } ",
+      "request_body": null,
+      "response_body": " application/json ( LentilleDataResponse<TeamProblemSetsData> )",
+      "notes": []
+    },
+    {
+      "title": "列出团队比赛",
+      "source": "teams.md",
+      "method": "GET",
+      "path": "/team/:id/contest",
+      "params": " { page?: number } ",
+      "request_body": null,
+      "response_body": " application/json ( LentilleDataResponse<TeamContestsData> )",
+      "notes": []
+    },
+    {
+      "title": "加入团队",
+      "source": "teams.md",
+      "method": "POST",
+      "path": "/api/team/join/:id",
+      "params": null,
+      "request_body": " application/json ( { applyMessage?: string } )",
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "退出团队",
+      "source": "teams.md",
+      "method": "POST",
+      "path": "/api/team/exit/:id",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "创建团队",
+      "source": "teams.md",
+      "method": "POST",
+      "path": "/api/team/create",
+      "params": null,
+      "request_body": " application/json ( { name: string } )",
+      "response_body": " application/json ( { teamId: number } )",
+      "notes": []
+    },
+    {
+      "title": "编辑团队",
+      "source": "teams.md",
+      "method": "POST",
+      "path": "/api/team/edit/:id",
+      "params": null,
+      "request_body": " application/json ( { settings: { description: string; joinPermission: number } } )",
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "转让团队",
+      "source": "teams.md",
+      "method": "POST",
+      "path": "/api/team/setMaster/:id",
+      "params": null,
+      "request_body": " application/json ( { uid: number } )",
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "更新公告",
+      "source": "teams.md",
+      "method": "POST",
+      "path": "/api/team/editNotice/:id",
+      "params": null,
+      "request_body": " application/json ( { notice: string } )",
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "管理成员",
+      "source": "teams.md",
+      "method": "POST",
+      "path": "/api/team/editMember/:id",
+      "params": null,
+      "request_body": " application/json ( ManageTeamMemberRequest )",
+      "response_body": " application/json ( TeamMember )",
+      "notes": []
+    },
+    {
+      "title": "审核成员",
+      "source": "teams.md",
+      "method": "POST",
+      "path": "/api/team/review/:id",
+      "params": null,
+      "request_body": " application/json ( { uid: number; reviewResult: \"apply\" | \"refuse\" | \"ban\" } )",
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "移除成员",
+      "source": "teams.md",
+      "method": "POST",
+      "path": "/api/team/kick/:id",
+      "params": null,
+      "request_body": " application/json ( { uid: number } )",
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "列出主题",
+      "source": "themes.md",
+      "method": "GET",
+      "path": "/theme/list",
+      "params": " ThemeListParams ",
+      "request_body": null,
+      "response_body": " application/json ( DataResponse<{ themes: List<ThemeDetails> }> )",
+      "notes": []
+    },
+    {
+      "title": "获取主题",
+      "source": "themes.md",
+      "method": "GET",
+      "path": "/theme/design/:id",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( DataResponse<{ theme: ThemeDetails }> )",
+      "notes": []
+    },
+    {
+      "title": "应用主题",
+      "source": "themes.md",
+      "method": "POST",
+      "path": "/theme/setTheme/:id",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( [] )",
+      "notes": []
+    },
+    {
+      "title": "创建主题",
+      "source": "themes.md",
+      "method": "POST",
+      "path": "/theme/edit/",
+      "params": null,
+      "request_body": " application/json ( EditThemeRequest )",
+      "response_body": " application/json ( { id: string } )",
+      "notes": []
+    },
+    {
+      "title": "编辑主题",
+      "source": "themes.md",
+      "method": "POST",
+      "path": "/theme/edit/:id",
+      "params": null,
+      "request_body": " application/json ( EditThemeRequest )",
+      "response_body": " application/json ( { id: string } )",
+      "notes": []
+    },
+    {
+      "title": "删除主题",
+      "source": "themes.md",
+      "method": "POST",
+      "path": "/theme/delete/:id",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( [] )",
+      "notes": []
+    },
+    {
+      "title": "获取用户",
+      "source": "users.md",
+      "method": "GET",
+      "path": "/user/:uid",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( LentilleDataResponse<UserData> )",
+      "notes": []
+    },
+    {
+      "title": "根据 UID 或名字搜索用户",
+      "source": "users.md",
+      "method": "GET",
+      "path": "/api/user/search",
+      "params": " { keyword: string } ",
+      "request_body": null,
+      "response_body": " application/json ( { users: [UserSummary | null] } )",
+      "notes": []
+    },
+    {
+      "title": "获取练习情况",
+      "source": "users.md",
+      "method": "GET",
+      "path": "/user/:uid/practice",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( LentilleDataResponse<UserPracticeData> )",
+      "notes": []
+    },
+    {
+      "title": "获取历史等级分",
+      "source": "users.md",
+      "method": "GET",
+      "path": "/api/rating/elo",
+      "params": " { user: number; page?: number; limit?: number } ",
+      "request_body": null,
+      "response_body": " application/json ( { records: List<EloRating> } )",
+      "notes": []
+    },
+    {
+      "title": "列出关注",
+      "source": "users.md",
+      "method": "GET",
+      "path": "/api/user/followings",
+      "params": " { user: number; page?: number } ",
+      "request_body": null,
+      "response_body": " application/json ( { users: List<User & UserStats> } )",
+      "notes": []
+    },
+    {
+      "title": "列出粉丝",
+      "source": "users.md",
+      "method": "GET",
+      "path": "/api/user/followers",
+      "params": " { user: number; page?: number } ",
+      "request_body": null,
+      "response_body": " application/json ( { users: List<User & UserStats> } )",
+      "notes": []
+    },
+    {
+      "title": "获取黑名单",
+      "source": "users.md",
+      "method": "GET",
+      "path": "/api/user/blacklist",
+      "params": " { user: number; page?: number } ",
+      "request_body": null,
+      "response_body": " application/json ( { users: List<User & UserStats> } )",
+      "notes": []
+    },
+    {
+      "title": "获取账号设置",
+      "source": "users.md",
+      "method": "GET",
+      "path": "/user/setting",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( LentilleDataResponse<UserAccountsData> )",
+      "notes": []
+    },
+    {
+      "title": "获取偏好设置",
+      "source": "users.md",
+      "method": "GET",
+      "path": "/user/setting/preference",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( LentilleDataResponse<UserPreferencesData> )",
+      "notes": []
+    },
+    {
+      "title": "更新偏好设置",
+      "source": "users.md",
+      "method": "POST",
+      "path": "/user/setting/preference/update",
+      "params": null,
+      "request_body": " application/json ( UserPreferences )",
+      "response_body": " application/json ( { setting: UserPreferences } )",
+      "notes": []
+    },
+    {
+      "title": "获取奖项认证设置",
+      "source": "users.md",
+      "method": "GET",
+      "path": "/user/setting/prize",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( LentilleDataResponse<UserPrizeSettingsData> )",
+      "notes": []
+    },
+    {
+      "title": "获取安全设置",
+      "source": "users.md",
+      "method": "GET",
+      "path": "/user/setting/security",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( LentilleDataResponse<UserSecuritySettingsData> )",
+      "notes": []
+    },
+    {
+      "title": "更新签名",
+      "source": "users.md",
+      "method": "POST",
+      "path": "/api/user/updateSlogan",
+      "params": null,
+      "request_body": " application/json ( { slogan: string } )",
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "更新介绍",
+      "source": "users.md",
+      "method": "POST",
+      "path": "/api/user/updateIntroduction",
+      "params": null,
+      "request_body": " application/json ( { introduction: string } )",
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "更新封面",
+      "source": "users.md",
+      "method": "POST",
+      "path": "/api/user/updateHeaderImage",
+      "params": null,
+      "request_body": " application/json ( { imageID: string | null } )",
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "绑定 RemoteJudge",
+      "source": "users.md",
+      "method": "POST",
+      "path": "/api/user/bindVjudgeAccount",
+      "params": null,
+      "request_body": " application/json ( BindRemoteJudgeAccountRequest )",
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "解除绑定 RemoteJudge",
+      "source": "users.md",
+      "method": "POST",
+      "path": "/api/user/unbindVjudgeAccount",
+      "params": null,
+      "request_body": " application/json ( { oj: string } )",
+      "response_body": " application/json ( {} )",
+      "notes": []
+    },
+    {
+      "title": "绑定 OpenID",
+      "source": "users.md",
+      "method": "GET",
+      "path": "/openid/:id/bind",
+      "params": null,
+      "request_body": null,
+      "response_body": null,
+      "notes": [
+        "**注**: 重定向到对应的认证页面。"
+      ]
+    },
+    {
+      "title": "解绑 OpenID",
+      "source": "users.md",
+      "method": "POST",
+      "path": "/api/user/unbindOpenId/:id",
+      "params": null,
+      "request_body": null,
+      "response_body": " application/json ( {} )",
+      "notes": []
+    }
+  ],
+  "documented_endpoint_count": 161,
+  "document_files": [
+    "activities.md",
+    "articles.md",
+    "auth.md",
+    "blog.md",
+    "chat.md",
+    "contests.md",
+    "discussions.md",
+    "ide.md",
+    "images.md",
+    "index.md",
+    "misc.md",
+    "pastes.md",
+    "problem-sets.md",
+    "problems.md",
+    "records.md",
+    "teams.md",
+    "themes.md",
+    "users.md",
+    "ws.md"
+  ],
+  "official_frontend": {
+    "pages": [
+      "https://www.luogu.com.cn/",
+      "https://www.luogu.com.cn/problem/list",
+      "https://www.luogu.com.cn/problem/P1000",
+      "https://www.luogu.com.cn/contest/list",
+      "https://www.luogu.com.cn/training/list",
+      "https://www.luogu.com.cn/record/list",
+      "https://www.luogu.com.cn/discuss/lists",
+      "https://www.luogu.com.cn/ranking",
+      "https://www.luogu.com.cn/user/1"
+    ],
+    "assets": [
+      "https://cdn.luogu.com.cn/js/ajaxfileupload.js",
+      "https://cdn.luogu.com.cn/js/amazeui.min.js",
+      "https://cdn.luogu.com.cn/js/highcharts-more.js",
+      "https://cdn.luogu.com.cn/js/highcharts.js",
+      "https://cdn.luogu.com.cn/js/jquery-2.1.1.min.js",
+      "https://cdn.luogu.com.cn/js/jquery.pjax.js",
+      "https://cdn.luogu.com.cn/js/jsmind.js",
+      "https://cdn.luogu.com.cn/js/luogu3.js?ver=20190724",
+      "https://cdn.luogu.com.cn/js/luogu3_pre.js?ver=20190101",
+      "https://cdn.luogu.com.cn/js/vendor.js",
+      "https://cdn.luogu.com.cn/markdown-palettes/markdown-palettes.min.js?ver=20190219",
+      "https://fecdn.luogu.com.cn/columba/lauth.20260421-1701.js",
+      "https://fecdn.luogu.com.cn/columba/loader.20260421-1701.js",
+      "https://fecdn.luogu.com.cn/columba/vendor.20260421-1701.js",
+      "https://fecdn.luogu.com.cn/luogu/loader.js?ver=20260422",
+      "https://www.luogu.com.cn/js/ace/ace.js",
+      "https://www.luogu.com.cn/static/katex/contrib/auto-render.min.js",
+      "https://www.luogu.com.cn/static/katex/katex.min.js",
+      "https://www.recaptcha.net/recaptcha/api.js?hl=zh-CN&render=explicit&onload=renderCaptcha"
+    ],
+    "endpoints": [
+      "/_lfe/config",
+      "/_lfe/tags",
+      "/api/feed/delete/",
+      "/api/feed/postBenben",
+      "/api/report/"
+    ],
+    "named_apis": [
+      "api.team.ban_user",
+      "api.team.edit_member",
+      "api.team.kick",
+      "api.team.review",
+      "api.team.set_master",
+      "api.user.get_info",
+      "api.user.update_relation_ship",
+      "article.list",
+      "article.mine",
+      "auth.login",
+      "auth.register",
+      "contest.list",
+      "contest.show",
+      "discuss.list",
+      "problem.list",
+      "record.list",
+      "team.setting",
+      "team.show",
+      "theme.list",
+      "ticket.create",
+      "ticket.list",
+      "training.list",
+      "user.mine.contest_join",
+      "user.mine.problem",
+      "user.mine.team",
+      "user.mine.training_favorite",
+      "user.notification",
+      "user.setting",
+      "user.show",
+      "user.show.practice",
+      "user.sidebar_info"
+    ]
+  },
+  "implemented_endpoint_templates": [
+    "/_lfe/tags",
+    "/api/feed/list",
+    "/api/image/detail/{id}",
+    "/fe/api/problem/editTestCase/{pid}",
+    "/fe/api/problem/submit/{pid}",
+    "/training/{id}",
+    "api/team/contests/{tid}",
+    "api/team/members/{tid}",
+    "api/team/problems/{tid}",
+    "api/team/trainings/{tid}",
+    "api/user/blacklist",
+    "api/user/createdContests",
+    "api/user/createdProblems",
+    "api/user/createdTrainings",
+    "api/user/followers",
+    "api/user/followings",
+    "api/user/info/{uid}",
+    "api/user/search",
+    "article/{lid}",
+    "contest/list",
+    "contest/{id}",
+    "discuss/{id}",
+    "fe/api/problem/delete/{pid}",
+    "fe/api/problem/edit/{pid}",
+    "fe/api/problem/new",
+    "fe/api/problem/transfer/{pid}",
+    "paste/{id}",
+    "problem/edit/{pid}",
+    "problem/list",
+    "problem/solution/{pid}",
+    "problem/{pid}",
+    "problem/{pid}/edit",
+    "record/{rid}",
+    "team/{tid}",
+    "training/list",
+    "user/{uid}"
+  ],
+  "cross_checks": {
+    "documented_paths_seen_in_frontend": [
+      "GET /_lfe/config",
+      "GET /_lfe/tags",
+      "POST /api/feed/postBenben"
+    ],
+    "frontend_paths_not_in_docs": [
+      "/api/feed/delete/",
+      "/api/report/"
+    ]
+  }
+}

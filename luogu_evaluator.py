@@ -225,28 +225,48 @@ def build_html_and_pdf(report_md: str, export_data: dict, html_path: str, pdf_pa
 
     # 动态为表格中的“当前等级”和“优先级”添加圆角徽章颜色样式
     # 使用正则匹配 td 标签里的特定文字，加上 span 标签
-    level_color_map = {
-        r'(稳|强项|覆盖充分|强项但需精炼)': 'bg-green-100 text-green-800 border-green-200',
-        r'(中等偏稳|中上|有基础|基础稳)': 'bg-blue-100 text-blue-800 border-blue-200',
-        r'(待强化|偏弱|会但赛时成本高|需要加强证明|基础稳，高级弱)': 'bg-yellow-100 text-yellow-800 border-yellow-200',
-        r'(短板|明显短板|基础弱，高级弱)': 'bg-red-100 text-red-800 border-red-200'
+    badge_style_base = "display:inline-block;padding:2px 8px;border-radius:9999px;border:1px solid;font-size:12px;font-weight:700;line-height:1.2;white-space:nowrap;"
+    badge_styles = {
+        "green": badge_style_base + "background:#DCFCE7;color:#166534;border-color:#86EFAC;",
+        "orange": badge_style_base + "background:#FFEDD5;color:#9A3412;border-color:#FDBA74;",
+        "red": badge_style_base + "background:#FEE2E2;color:#991B1B;border-color:#FCA5A5;",
+        "gray": badge_style_base + "background:#F3F4F6;color:#374151;border-color:#D1D5DB;",
     }
-    
-    for pattern, color_class in level_color_map.items():
-        # 匹配 <td> 文字 </td>，并在文字外包一层 badge
-        report_html = re.sub(
-            f'<td>({pattern})</td>', 
-            f'<td><span class="px-2 py-1 rounded-full border text-xs font-semibold {color_class}">\\1</span></td>', 
-            report_html
+
+    def _wrap_td_badge(html: str, text_pattern: str, style_key: str) -> str:
+        return re.sub(
+            rf"<td>\s*(?:<p>)?({text_pattern})(?:</p>)?\s*</td>",
+            rf'<td><span style="{badge_styles[style_key]}">\1</span></td>',
+            html,
         )
-        
-    priority_color_map = {
-        r'<td>(S)</td>': r'<td><span class="px-2 py-1 rounded border text-xs font-bold bg-red-100 text-red-800 border-red-200">\1</span></td>',
-        r'<td>(A)</td>': r'<td><span class="px-2 py-1 rounded border text-xs font-bold bg-orange-100 text-orange-800 border-orange-200">\1</span></td>',
-        r'<td>(B)</td>': r'<td><span class="px-2 py-1 rounded border text-xs font-bold bg-blue-100 text-blue-800 border-blue-200">\1</span></td>'
-    }
-    for old, new in priority_color_map.items():
-        report_html = re.sub(old, new, report_html)
+
+    level_maps = [
+        (r"(稳|强项但需精炼|强项|覆盖充分|中上|优秀|熟练|稳定)", "green"),
+        (r"(中等偏稳|有基础|基础稳|会但赛时成本高|待强化|需要加强证明|需要加强|基础稳[，, ]*高级弱)", "orange"),
+        (r"(偏弱|短板|明显短板|弱|无涉及|未涉及|缺失|不会|没有涉及|基础弱[，, ]*高级弱)", "red"),
+        (r"(暂无数据|未知|不确定)", "gray"),
+    ]
+    for text_pattern, style_key in level_maps:
+        report_html = _wrap_td_badge(report_html, text_pattern, style_key)
+
+    priority_maps = [
+        ("S", "S（高/立即处理）", "red"),
+        ("A", "A（中/近期处理）", "orange"),
+        ("B", "B（低/可后置）", "green"),
+    ]
+    for letter, label, style_key in priority_maps:
+        report_html = re.sub(
+            rf"<td>\s*(?:<p>)?({re.escape(letter)})(?:</p>)?\s*</td>",
+            rf'<td><span style="{badge_styles[style_key]}">{label}</span></td>',
+            report_html,
+        )
+
+    report_html = re.sub(
+        r"(<h[1-3][^>]*>[^<]*风险诊断与训练闭环表[^<]*</h[1-3]>)",
+        r'\1<p style="margin:0 0 12px 0;color:#6b7280;font-size:13px;">优先级说明：S（高/立即处理） · A（中/近期处理） · B（低/可后置）。</p>',
+        report_html,
+        count=1,
+    )
 
     # 准备模板数据
     summary = export_data.get("summary", {}) or {}

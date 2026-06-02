@@ -148,9 +148,3 @@ luogu_coach_report*.md
 luogu_coach_report*.html
 luogu_report_assets/
 *.report.pdf
-
-# Local syllabi (may be copyrighted / large)
-GESP考纲.pdf
-GESP考纲.pdf.txt
-noi大纲.pdf
-noi大纲.pdf.txt

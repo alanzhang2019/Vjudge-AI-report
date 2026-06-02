@@ -3,6 +3,7 @@ import json
 import argparse
 import math
 import re
+import base64
 from pathlib import Path
 
 import matplotlib
@@ -133,14 +134,59 @@ def generate_chart_images(export_data: dict, output_dir: str) -> dict[str, str]:
     solved_count = int(export_data.get("solved_count", 0))
     failed_count = int(export_data.get("failed_count", 0))
 
-    labels = sorted(difficulty_histogram.keys(), key=lambda x: int(x) if str(x).isdigit() else str(x))
-    values = [int(difficulty_histogram[k]) for k in labels]
-    if labels:
-        fig, ax = plt.subplots(figsize=(7.2, 4.2))
-        ax.bar(labels, values, color="#4C78A8")
-        ax.set_title("题目难度分布")
-        ax.set_xlabel("难度等级")
+    difficulty_meta = {
+        0: ("暂无评定", "#9CA3AF"),
+        1: ("入门", "#EF4444"),
+        2: ("普及-", "#F97316"),
+        3: ("普及/提高-", "#F59E0B"),
+        4: ("普及+/提高", "#22C55E"),
+        5: ("提高+/省选-", "#3B82F6"),
+        6: ("省选/NOI-", "#A855F7"),
+        7: ("NOI/NOI+/CTSC", "#111827"),
+    }
+
+    def _get_hist_count(key: int | str) -> int:
+        if key in difficulty_histogram:
+            return int(difficulty_histogram[key])
+        skey = str(key)
+        return int(difficulty_histogram.get(skey, 0))
+
+    numeric_levels = []
+    other_keys = []
+    for k in difficulty_histogram.keys():
+        ks = str(k)
+        if ks.isdigit():
+            numeric_levels.append(int(ks))
+        else:
+            other_keys.append(ks)
+
+    numeric_levels = sorted(set(numeric_levels))
+    other_keys = sorted(set(other_keys))
+
+    if numeric_levels or other_keys:
+        labels: list[str] = []
+        values: list[int] = []
+        colors: list[str] = []
+
+        for level in numeric_levels:
+            name, color = difficulty_meta.get(level, (str(level), "#4C78A8"))
+            labels.append(name)
+            values.append(_get_hist_count(level))
+            colors.append(color)
+
+        for k in other_keys:
+            labels.append(k)
+            values.append(_get_hist_count(k))
+            colors.append("#4C78A8")
+
+        fig, ax = plt.subplots(figsize=(7.6, 4.6))
+        x = list(range(len(labels)))
+        ax.bar(x, values, color=colors, edgecolor="#E5E7EB")
+        ax.set_title("题目难度分布（按洛谷难度等级）")
+        ax.set_xlabel("难度")
         ax.set_ylabel("题目数量")
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, rotation=20, ha="right")
         for idx, value in enumerate(values):
             ax.text(idx, value + 0.1, str(value), ha="center", va="bottom", fontsize=9)
         fig.tight_layout()
@@ -232,6 +278,8 @@ def build_html_and_pdf(report_md: str, export_data: dict, html_path: str, pdf_pa
         "red": badge_style_base + "background:#FEE2E2;color:#991B1B;border-color:#FCA5A5;",
         "gray": badge_style_base + "background:#F3F4F6;color:#374151;border-color:#D1D5DB;",
     }
+    risk_legend_html = '<p style="margin:0 0 12px 0;color:#6b7280;font-size:13px;">优先级说明：S（高/立即处理） · A（中/近期处理） · B（低/可后置）。</p>'
+    risk_legend_inserted = False
 
     level_rules = [
         (re.compile(r"(短板|明显短板|偏弱|弱|无涉及|未涉及|缺失|不会|没涉及|没有涉及|基础弱)", re.I), "red"),
@@ -252,8 +300,15 @@ def build_html_and_pdf(report_md: str, export_data: dict, html_path: str, pdf_pa
         return f'<td{attrs}><span style="{badge_styles[style_key]}">{display_text}</span></td>'
 
     def _process_table(table_html: str) -> str:
-        is_ability_table = "<th>当前等级</th>" in table_html and "<th>能力块</th>" in table_html
-        is_risk_table = "<th>优先级</th>" in table_html and "<th>风险项</th>" in table_html
+        nonlocal risk_legend_inserted
+        is_ability_table = bool(
+            re.search(r"<th[^>]*>\s*能力块\s*</th>", table_html, flags=re.I)
+            and re.search(r"<th[^>]*>\s*当前等级\s*</th>", table_html, flags=re.I)
+        )
+        is_risk_table = bool(
+            re.search(r"<th[^>]*>\s*优先级\s*</th>", table_html, flags=re.I)
+            and re.search(r"<th[^>]*>\s*风险项\s*</th>", table_html, flags=re.I)
+        )
         if not (is_ability_table or is_risk_table):
             return table_html
 
@@ -302,16 +357,13 @@ def build_html_and_pdf(report_md: str, export_data: dict, html_path: str, pdf_pa
             new_td = _wrap_td_inner(target_td, label, style_key)
             return row.replace(target_td, new_td, 1)
 
-        return re.sub(r"<tr>.*?</tr>", _row_repl, table_html, flags=re.S | re.I)
+        processed = re.sub(r"<tr>.*?</tr>", _row_repl, table_html, flags=re.S | re.I)
+        if is_risk_table and not risk_legend_inserted:
+            risk_legend_inserted = True
+            return processed + risk_legend_html
+        return processed
 
-    report_html = re.sub(r"<table>.*?</table>", lambda m: _process_table(m.group(0)), report_html, flags=re.S | re.I)
-
-    report_html = re.sub(
-        r"(<h[1-3][^>]*>[^<]*风险诊断与训练闭环表[^<]*</h[1-3]>)",
-        r'\1<p style="margin:0 0 12px 0;color:#6b7280;font-size:13px;">优先级说明：S（高/立即处理） · A（中/近期处理） · B（低/可后置）。</p>',
-        report_html,
-        count=1,
-    )
+    report_html = re.sub(r"<table[^>]*>.*?</table>", lambda m: _process_table(m.group(0)), report_html, flags=re.S | re.I)
 
     # 准备模板数据
     summary = export_data.get("summary", {}) or {}
@@ -333,13 +385,31 @@ def build_html_and_pdf(report_md: str, export_data: dict, html_path: str, pdf_pa
     env = Environment(loader=FileSystemLoader('.'))
     template = env.get_template('report_template.html')
     
-    # 将图表路径转换为绝对路径，并加上 file:/// 协议，确保 Playwright 能够读取本地图片
-    abs_chart_paths = {k: f"file:///{os.path.abspath(v).replace(os.sep, '/')}" for k, v in chart_paths.items()}
+    def _chart_src(value: str) -> str:
+        if not value:
+            return ""
+        if value.startswith("data:"):
+            return value
+        if value.startswith("file:///") or value.startswith("http://") or value.startswith("https://"):
+            return value
+        p = Path(value)
+        if not p.exists():
+            return value
+        ext = p.suffix.lower()
+        mime = "image/png"
+        if ext in {".jpg", ".jpeg"}:
+            mime = "image/jpeg"
+        elif ext == ".webp":
+            mime = "image/webp"
+        data = base64.b64encode(p.read_bytes()).decode("ascii")
+        return f"data:{mime};base64,{data}"
+
+    chart_srcs = {k: _chart_src(v) for k, v in chart_paths.items()}
 
     rendered_html = template.render(
         export_data=export_data,
         report_html=report_html,
-        chart_paths=abs_chart_paths,
+        chart_paths=chart_srcs,
         avg_difficulty=avg_difficulty,
         top_tag=top_tag
     )

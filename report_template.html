@@ -158,19 +158,19 @@
         <h1 class="text-2xl font-bold text-blue-900 mb-6 border-b pb-2">1. 核心数据概览与图表化分析</h1>
         <div class="grid grid-cols-2 gap-8 mb-8">
             <div class="text-center">
-                <img src="{{ chart_paths.radar }}" class="mx-auto" style="max-height: 250px;">
+                {% if chart_paths.radar %}<img src="{{ chart_paths.radar }}" class="mx-auto" style="max-height: 250px;" alt="能力雷达图">{% endif %}
                 <p class="text-sm text-gray-500 mt-2">图 1：能力雷达图</p>
             </div>
             <div class="text-center">
-                <img src="{{ chart_paths.difficulty }}" class="mx-auto" style="max-height: 250px;">
+                {% if chart_paths.difficulty %}<img src="{{ chart_paths.difficulty }}" class="mx-auto" style="max-height: 250px;" alt="题目难度分布">{% endif %}
                 <p class="text-sm text-gray-500 mt-2">图 2：题目难度分布</p>
             </div>
             <div class="text-center">
-                <img src="{{ chart_paths.status }}" class="mx-auto" style="max-height: 250px;">
+                {% if chart_paths.status %}<img src="{{ chart_paths.status }}" class="mx-auto" style="max-height: 250px;" alt="通过未通过占比">{% endif %}
                 <p class="text-sm text-gray-500 mt-2">图 3：通过 / 未通过占比</p>
             </div>
             <div class="text-center">
-                <img src="{{ chart_paths.tags }}" class="mx-auto" style="max-height: 250px;">
+                {% if chart_paths.tags %}<img src="{{ chart_paths.tags }}" class="mx-auto" style="max-height: 250px;" alt="高频标签分布">{% endif %}
                 <p class="text-sm text-gray-500 mt-2">图 4：高频标签分布</p>
             </div>
         </div>

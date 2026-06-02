@@ -233,33 +233,78 @@ def build_html_and_pdf(report_md: str, export_data: dict, html_path: str, pdf_pa
         "gray": badge_style_base + "background:#F3F4F6;color:#374151;border-color:#D1D5DB;",
     }
 
-    def _wrap_td_badge(html: str, text_pattern: str, style_key: str) -> str:
-        return re.sub(
-            rf"<td>\s*(?:<p>)?({text_pattern})(?:</p>)?\s*</td>",
-            rf'<td><span style="{badge_styles[style_key]}">\1</span></td>',
-            html,
-        )
-
-    level_maps = [
-        (r"(稳|强项但需精炼|强项|覆盖充分|中上|优秀|熟练|稳定)", "green"),
-        (r"(中等偏稳|有基础|基础稳|会但赛时成本高|待强化|需要加强证明|需要加强|基础稳[，, ]*高级弱)", "orange"),
-        (r"(偏弱|短板|明显短板|弱|无涉及|未涉及|缺失|不会|没有涉及|基础弱[，, ]*高级弱)", "red"),
-        (r"(暂无数据|未知|不确定)", "gray"),
+    level_rules = [
+        (re.compile(r"(短板|明显短板|偏弱|弱|无涉及|未涉及|缺失|不会|没涉及|没有涉及|基础弱)", re.I), "red"),
+        (re.compile(r"(中等偏稳|有基础|基础稳|待强化|会但赛时成本高|需要加强|高级弱|易错|不熟)", re.I), "orange"),
+        (re.compile(r"(稳|强项|覆盖充分|中上|优秀|熟练|稳定)", re.I), "green"),
     ]
-    for text_pattern, style_key in level_maps:
-        report_html = _wrap_td_badge(report_html, text_pattern, style_key)
 
-    priority_maps = [
-        ("S", "S（高/立即处理）", "red"),
-        ("A", "A（中/近期处理）", "orange"),
-        ("B", "B（低/可后置）", "green"),
-    ]
-    for letter, label, style_key in priority_maps:
-        report_html = re.sub(
-            rf"<td>\s*(?:<p>)?({re.escape(letter)})(?:</p>)?\s*</td>",
-            rf'<td><span style="{badge_styles[style_key]}">{label}</span></td>',
-            report_html,
-        )
+    def _clean_cell_inner(inner: str) -> str:
+        inner = re.sub(r"</?p[^>]*>", "", inner, flags=re.I)
+        inner = re.sub(r"<[^>]+>", "", inner)
+        return inner.strip()
+
+    def _wrap_td_inner(td_html: str, display_text: str, style_key: str) -> str:
+        m = re.match(r"<td(?P<attrs>[^>]*)>(?P<inner>.*)</td>", td_html, flags=re.S | re.I)
+        if not m:
+            return td_html
+        attrs = m.group("attrs") or ""
+        return f'<td{attrs}><span style="{badge_styles[style_key]}">{display_text}</span></td>'
+
+    def _process_table(table_html: str) -> str:
+        is_ability_table = "<th>当前等级</th>" in table_html and "<th>能力块</th>" in table_html
+        is_risk_table = "<th>优先级</th>" in table_html and "<th>风险项</th>" in table_html
+        if not (is_ability_table or is_risk_table):
+            return table_html
+
+        def _row_repl(m: re.Match) -> str:
+            row = m.group(0)
+            if "<th" in row:
+                return row
+            tds = re.findall(r"<td[^>]*>.*?</td>", row, flags=re.S | re.I)
+            if not tds:
+                return row
+
+            if is_ability_table:
+                col_idx = 1
+                if len(tds) <= col_idx:
+                    return row
+                target_td = tds[col_idx]
+                inner = re.sub(r"^<td[^>]*>|</td>$", "", target_td, flags=re.S | re.I)
+                text = _clean_cell_inner(inner)
+                if not text:
+                    return row
+                style_key = None
+                for rule, key in level_rules:
+                    if rule.search(text):
+                        style_key = key
+                        break
+                if not style_key:
+                    return row
+                new_td = _wrap_td_inner(target_td, text, style_key)
+                return row.replace(target_td, new_td, 1)
+
+            col_idx = 0
+            if len(tds) <= col_idx:
+                return row
+            target_td = tds[col_idx]
+            inner = re.sub(r"^<td[^>]*>|</td>$", "", target_td, flags=re.S | re.I)
+            text = _clean_cell_inner(inner)
+            normalized = (text or "").strip().upper()
+            mapping = {
+                "S": ("S（高/立即处理）", "red"),
+                "A": ("A（中/近期处理）", "orange"),
+                "B": ("B（低/可后置）", "green"),
+            }
+            if normalized not in mapping:
+                return row
+            label, style_key = mapping[normalized]
+            new_td = _wrap_td_inner(target_td, label, style_key)
+            return row.replace(target_td, new_td, 1)
+
+        return re.sub(r"<tr>.*?</tr>", _row_repl, table_html, flags=re.S | re.I)
+
+    report_html = re.sub(r"<table>.*?</table>", lambda m: _process_table(m.group(0)), report_html, flags=re.S | re.I)
 
     report_html = re.sub(
         r"(<h[1-3][^>]*>[^<]*风险诊断与训练闭环表[^<]*</h[1-3]>)",

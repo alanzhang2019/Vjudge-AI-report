@@ -197,7 +197,7 @@ class Printable:
             tail = "├─ " if x != list(self.__dict__.keys())[-1] else "└─ "
             addi = "│  " if x != list(self.__dict__.keys())[-1] else "   "
             if y is None:
-                s += offset + tail + f"{str_type(self.__type_dict__[x])} {x}: {decorating("None", 31)}\n"
+                s += offset + tail + f"{str_type(self.__type_dict__[x])} {x}: {decorating('None', 31)}\n"
             elif isinstance(y, list):
                 s += offset + tail + f"{str_type_of(y)} {x}:\n"
                 new_offset = offset + addi

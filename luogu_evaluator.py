@@ -257,6 +257,101 @@ def generate_chart_images(export_data: dict, output_dir: str) -> dict[str, str]:
         fig.savefig(radar_path, dpi=180, bbox_inches="tight")
         plt.close(fig)
         chart_paths["radar"] = radar_path
+        
+    # 生成性格画像雷达图
+    behavior_data = export_data.get("behavior_analysis", {})
+    personality_scores = behavior_data.get("personality_scores", {})
+    if personality_scores:
+        p_labels = list(personality_scores.keys())
+        p_values = [personality_scores[k] for k in p_labels]
+        angles = [n / float(len(p_labels)) * 2 * math.pi for n in range(len(p_labels))]
+        angles += angles[:1]
+        p_plot_values = p_values + p_values[:1]
+        
+        fig = plt.figure(figsize=(6.6, 6.2))
+        ax = plt.subplot(111, polar=True)
+        ax.set_theta_offset(math.pi / 2)
+        ax.set_theta_direction(-1)
+        ax.set_thetagrids([angle * 180 / math.pi for angle in angles[:-1]], p_labels, fontsize=10)
+        ax.set_ylim(0, 100)
+        
+        # 性格雷达图配色使用偏橙色/活力的色调
+        zone_colors = [
+            (0, 40, "#F3F4F6"),
+            (40, 60, "#E5E7EB"),
+            (60, 80, "#FEF3C7"),
+            (80, 100, "#FEF08A"),
+        ]
+        zone_angles = [n / 180.0 * math.pi for n in range(361)]
+        for start, end, zone_color in zone_colors:
+            ax.fill_between(zone_angles, start, end, color=zone_color, alpha=0.35)
+            
+        ax.plot(angles, p_plot_values, color="#D97706", linewidth=2.5)
+        ax.fill(angles, p_plot_values, color="#F59E0B", alpha=0.3)
+        ax.set_rgrids([20, 40, 60, 80, 100], angle=90, fontsize=8, color="#9CA3AF")
+        ax.set_title("性格特质雷达图", pad=18, fontsize=12, fontweight="bold", color="#92400E")
+        
+        p_radar_path = os.path.join(output_dir, "personality_radar.png")
+        fig.savefig(p_radar_path, dpi=180, bbox_inches="tight")
+        plt.close(fig)
+        chart_paths["personality_radar"] = p_radar_path
+
+    # 生成一发入魂率柱状图
+    ac_submit_distribution = behavior_data.get("ac_submit_distribution", {})
+    if ac_submit_distribution:
+        def _dist_get(mapping: dict, key: int) -> int:
+            if key in mapping:
+                return int(mapping[key])
+            return int(mapping.get(str(key), 0))
+
+        # 将字符串键转换为整数排序
+        keys = []
+        for k in ac_submit_distribution.keys():
+            try:
+                keys.append(int(k))
+            except ValueError:
+                pass
+        keys.sort()
+        
+        # 准备 x 和 y 轴数据，合并 >= 10 的部分
+        labels = []
+        values = []
+        count_10_plus = 0
+        total_ac = sum(ac_submit_distribution.values())
+        
+        for k in keys:
+            if k >= 10:
+                count_10_plus += _dist_get(ac_submit_distribution, k)
+            else:
+                labels.append(str(k))
+                values.append(_dist_get(ac_submit_distribution, k))
+                
+        if count_10_plus > 0:
+            labels.append("10+")
+            values.append(count_10_plus)
+
+        if labels:
+            fig, ax = plt.subplots(figsize=(8, 4.5))
+            # 设置颜色：第一发是深蓝色，其他是浅蓝色
+            colors = ["#2563EB" if l == "1" else "#93C5FD" for l in labels]
+            bars = ax.bar(labels, values, color=colors, edgecolor="none")
+            ax.set_title("AC 所需提交次数分布（一发入魂率）", fontsize=12, fontweight="bold")
+            ax.set_xlabel("AC 所需提交次数")
+            ax.set_ylabel("题目数")
+            
+            # 在柱子上添加文字标签
+            for bar, value in zip(bars, values):
+                percentage = (value / total_ac * 100) if total_ac > 0 else 0
+                height = bar.get_height()
+                ax.text(bar.get_x() + bar.get_width()/2., height + 0.5,
+                        f"{value}\n({percentage:.0f}%)",
+                        ha="center", va="bottom", fontsize=8)
+                        
+            fig.tight_layout()
+            ac_dist_path = os.path.join(output_dir, "ac_submit_distribution.png")
+            fig.savefig(ac_dist_path, dpi=180, bbox_inches="tight")
+            plt.close(fig)
+            chart_paths["ac_submit_distribution"] = ac_dist_path
 
     return chart_paths
 
@@ -264,6 +359,11 @@ def generate_chart_images(export_data: dict, output_dir: str) -> dict[str, str]:
 def build_html_and_pdf(report_md: str, export_data: dict, html_path: str, pdf_path: str, chart_paths: dict[str, str]) -> None:
     # 扩展 markdown，支持表格
     report_html = md.markdown(report_md, extensions=['tables', 'fenced_code'])
+    report_html = re.sub(
+        r"((?:⭐|☆){3,5})",
+        lambda m: f'<span style="color:#f59e0b;font-size:1.05em;letter-spacing:1px;">{m.group(1)}</span>',
+        report_html,
+    )
     
     # 替换错题分页
     # 在 6. **【未通过题目专属题解（从暴力到正解）】** 后面的 h3 题目标题前插入分页符
@@ -496,7 +596,7 @@ def generate_ai_report(export_data: dict, api_key: str, base_url: str | None, mo
     solved_count = export_data.get("solved_count", 0)
     failed_count = export_data.get("failed_count", 0)
     summary = export_data.get("summary", {})
-    
+
     # 提取代码样本（通过的题）
     passed_samples = []
     for item in export_data.get("passed_items", []):
@@ -518,21 +618,80 @@ def generate_ai_report(export_data: dict, api_key: str, base_url: str | None, mo
         failed_samples.append(f"### Problem {pid} - {title} (Attempted but NOT passed)\n{code_str}")
         if len(failed_samples) >= 5: # Limit failed examples
             break
-            
+
+    # 行为分析数据
+    behavior_data = export_data.get("behavior_analysis", {})
+    behavior_summary = ""
+    if behavior_data and "error" not in behavior_data:
+        from behavior_analyzer import format_behavior_summary
+        behavior_summary = format_behavior_summary(behavior_data)
+    else:
+        behavior_summary = "**提交行为分析**: 未获取到提交记录数据。"
+
+    # 代码风格静态分析
+    from code_analyzer import analyze_code_style, format_code_analysis
+    code_records = []
+    for item in export_data.get("passed_items", []) + export_data.get("failed_items", []):
+        if "record" in item and isinstance(item["record"], dict):
+            code_records.append(item["record"])
+    
+    code_analysis_data = analyze_code_style(code_records)
+    code_analysis_summary = format_code_analysis(code_analysis_data)
+
+    # 大纲对标数据
+    syllabus_eval = export_data.get("syllabus_evaluation", {})
+    syllabus_summary = ""
+    if syllabus_eval:
+        from syllabus_matcher import format_syllabus_report
+        syllabus_summary = format_syllabus_report(syllabus_eval)
+    else:
+        syllabus_summary = "**大纲知识点对标**: 未获取到评估数据。"
+
+    # 六维评分
+    six_dim = export_data.get("six_dimension_scores", {})
+    six_dim_text = ""
+    if six_dim:
+        six_dim_text = "| 维度 | 评分 |\n|------|------|\n"
+        for dim, score in six_dim.items():
+            six_dim_text += f"| {dim} | {score} |\n"
+
     # Load syllabus contexts if available
     syllabus_context = ""
-    for syllabus_file in ["GESP考纲.pdf.txt", "noi大纲.pdf.txt"]:
+    syllabus_candidates = [
+        "NOI大纲_Syllabus_Edition_2025.pdf.txt",
+        "GESP考纲.pdf.txt",
+        "noi大纲.pdf.txt",
+    ]
+    for syllabus_file in syllabus_candidates:
         syllabus_path = Path(syllabus_file)
         if syllabus_path.exists():
             content = syllabus_path.read_text(encoding="utf-8")
-            # Truncate if too long, but they are ~12k chars each which is fine
-            syllabus_context += f"【{syllabus_file} 内容摘要】\n{content[:15000]}\n\n"
+            syllabus_context += f"【{syllabus_file} 内容摘要】\n{content[:20000]}\n\n"
+            break  # 优先使用最新版大纲
+
+    import datetime
+    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    difficulty_guide = """
+洛谷难度映射请严格使用以下标准名称，不要写“难度1/难度2”：
+- 0: 暂无评定（灰色）
+- 1: 入门（红色）
+- 2: 普及-（橙色）
+- 3: 普及/提高-（黄色）
+- 4: 普及+/提高（绿色）
+- 5: 提高+/省选-（蓝色）
+- 6: 省选/NOI-（紫色）
+- 7: NOI/NOI+/CTSC（黑色）
+"""
 
     prompt = f"""
 你是一位顶级的算法竞赛金牌教练。我导出了一位选手的近期洛谷做题记录（包括已通过和尝试但未通过的题目代码）。
 请你根据我提供的【能力评估参考框架】以及【官方考纲】，对他进行深度的诊断，并针对他【未做完/做错的题目】给出极具启发性的题解。
 
+**报告生成时间**：{current_time}
+
 {DIAGNOSTIC_FRAMEWORK}
+
+{difficulty_guide}
 
 {syllabus_context}
 
@@ -542,39 +701,73 @@ def generate_ai_report(export_data: dict, api_key: str, base_url: str | None, mo
 - 难度分布直方图: {json.dumps(summary.get('difficulty_histogram'))}
 - 偏好的算法标签: {json.dumps(summary.get('top_tags'))}
 
+### 六维能力评分
+{six_dim_text if six_dim_text else '未计算'}
+
+### 提交行为深度分析
+{behavior_summary}
+
+### 大纲知识点对标
+{syllabus_summary}
+
+{code_analysis_summary}
+
 ### 选手最近通过的代码样本（用于评估代码习惯）
 {''.join(passed_samples) if passed_samples else '暂无代码'}
 
 ### 选手未做完/尝试失败的题目（重点出题解部分）
 {''.join(failed_samples) if failed_samples else '暂无未通过的题目'}
 
-请你输出一份结构化的 Markdown 辅导报告，必须包含以下六个部分：
+请你输出一份结构化的 Markdown 辅导报告，必须包含以下部分。在生成 Markdown 时，请务必使用以下视觉元素增强表现力：
+ - 评分请使用黄色星级，如 ⭐⭐⭐⭐☆ (使用 ⭐ 和 ☆)
+ - 难度或占比进度条请使用区块字符，如 ██████████ 16%
+ - 等级前缀符号请使用 🟢精通 | 🟡熟练 | 🟠入门 | 🔵初窥 | 🔴空白
+ - 各处点评或结论段落，请使用 `<p class="text-blue-700 font-semibold">解读：...</p>` 样式包装。
+ - 整个报告尽可能以 Markdown 表格、区块等图表化、直观的形式呈现，少用长篇大论的文字。
 
-1. **【综合能力雷达表与诊断】**：
-   请首先输出一个 Markdown 格式的表格，评估选手在各大能力块的状态。表格必须严格包含以下四列：`| 能力块 | 当前等级 | 数据证据 | 已经具备 |`
-   - **能力块**（参考但不限于）：基础实现/代码落地、输入输出/数值意识、搜索/DFS、基础DP/背包、计数DP/组合推导、图论模板、最短路/差分约束、数据结构基础维护、高级数据结构/平衡树、字符串、贪心/构造/证明。
-   - **当前等级**：用精炼的词语评级（如：稳、中等偏稳、强项但需精炼、覆盖充分、明显短板、有基础、偏弱、中上、会但赛时成本高、基础稳高级弱、需要加强证明等）。
-   - **数据证据**：结合我提供的“全局数据统计”以及“代码样本”来提取证据。
-   - **已经具备**：一句话总结该模块选手目前已经掌握的底线能力。
+ 1. **【选手概览与性格画像】**：
+    基于提交行为数据，提炼选手的性格画像（坚韧度、完美主义、冒险精神、自律性、调试耐心、作息规律）。用黄色星级（如 ⭐⭐⭐⭐☆）评分，并附上数据支撑和拟人化评价。如果数据不足以评估某一项，请标注“无法评估”并说明原因（如：作息规律无法评估是因为未能获取具体的提交时间点数据）。
 
-2. **【考纲精准定级与知识点盲区】**（根据提供的 GESP考纲 和 NOI大纲）：
-   - **当前对应等级水平**：明确指出该选手目前处于 GESP 的几级水平，以及对应 NOI大纲 的哪个阶段（入门级/提高级/NOI级）。
-   - **知识点强弱项**：严格对照考纲中的知识点名词，列出其掌握得最好的 3 个考点，以及最薄弱的 3 个考点。
-   - **训练盲区**：指出他在当前等级中“完全没有涉及/刷题数据中缺失”的必考知识点。
+ 2. **【提交行为深度分析】**：
+    基于提供的提交行为数据，以表格和重点解读的形式，深入分析用户的提交习惯。必须包含以下子模块：
+    - **死磕题目 TOP (提交次数最多)**：列出提交次数最多的几道题，分析原因。
+    - **一次 AC 率**：分析“一发入魂”和多次尝试的比例。
+    - **其他显著行为特征**：如单日高强度刷题记录、长耗时题目等。
+    (注意：此部分请用表格展示数据，并在表下附上 `<p class="text-blue-700 font-semibold">特征：...</p>`)
 
-3. **【风险诊断与训练闭环表】**：
-   输出第二个 Markdown 表格，表头必须严格是：`| 优先级 | 风险项 | 触发场景 | 比赛症状 | 根因判断 | 训练专题 | 验收标准 |`
-   - 行数至少 5 行，优先级使用 `S/A/B`。
-   - 这个表必须是高度可执行的训练方案，结合他的大纲盲区与错题，指出风险和验收标准。
+ 3. **【难度分布与水平研判】**：
+    分析选手的难度分布特征，判断其处于哪个阶段（入门/普及/提高/省选）。使用 HTML 彩色区块（如 `<span style="display:inline-block;width:100px;height:12px;background-color:#3b82f6;"></span>`）生成直观的横向进度条，不同难度使用不同颜色，不要再生成成长曲线。
 
-4. **【代码质量与工程习惯】**：基于他通过的代码样本，指出2个优点和3个必须改掉的坏习惯。
+ 4. **【六维能力雷达表与诊断】（评分参考：85-100 优秀 | 65-84 良好 | 40-64 基础 | <40 薄弱）**：
+      输出 Markdown 表格，评估选手在六大维度的状态：`| 能力块 | 评分 | 当前等级 | 数据证据 | 已经具备 |`
+      六大维度：基础算法、数据结构、图论、动态规划、字符串、数学。当前等级请使用前缀符号（如 🟢精通）。
 
-5. **【定制训练题单】**：
-   根据上述大纲盲区和薄弱项，定制一份包含 5-8 道题型（可以带洛谷题号或题型描述）的训练题单，明确每一道的训练目标。
+  5. **【考纲精准定级与知识点盲区】**（根据提供的 NOI大纲 2025版）：
+     - **当前对应等级水平**：明确指出该选手目前处于 CSP-J / CSP-S / 省选 / NOI 哪个阶段。
+     - **知识点强弱项**：严格对照考纲中的知识点名词，列出其掌握得最好的 3 个考点，以及最薄弱的 3 个考点（使用 🟢🟡🔴 标注）。
+     - **训练盲区**：指出他在当前等级中"完全没有涉及/刷题数据中缺失"的必考知识点。
+     - **分级汇总表**：输出 CSP-J / CSP-S / 省选级 / NOI级 的覆盖率统计表格。
 
-6. **【未通过题目专属题解（从暴力到正解）】**：针对上面列出的“未做完/尝试失败的题目”，逐一出题解。
+  6. **【风险诊断与训练闭环表】**：
+     输出 Markdown 表格：`| 优先级 | 风险项 | 触发场景 | 比赛症状 | 根因判断 | 训练专题 | 验收标准 |`
+     - 行数至少 5 行，优先级使用 `S/A/B`。
+     - 这个表必须是高度可执行的训练方案。
+
+  7. **【代码质量与工程习惯深度分析】**：基于《源码静态风格分析》及代码样本，提供一份来自资深架构师视角的 Review。分析代码长度、宏定义习惯（如 `#define int long long`）、IO 优化、命名、STL 容器使用情况等。指出 2 个优点和 3 个必须改掉的坏习惯。
+
+  8. **【定制训练题单（6个月路线图）】**：
+     根据上述大纲盲区和薄弱项，定制一份分阶段的训练计划：
+     - 第一阶段（Month 1-2）：巩固基础，补齐短板
+     - 第二阶段（Month 3-4）：数据结构/算法突破
+     - 第三阶段（Month 5-6）：提速与稳定
+     每个阶段包含具体知识点 + 推荐题目（带洛谷题号）。
+
+  9. **【核心建议（优先级排序）】**：
+     列出 5-8 条核心建议，按优先级排序（🔴紧急 / 🟡重要 / 🟢建议）。例如：`🔴 紧急: 补加 ios::sync_with_stdio(false) 防止大数据 TLE`。
+
+  10. **【未通过题目专属题解（从暴力到正解）】**：针对上面列出的"未做完/尝试失败的题目"，逐一出题解。
     - 绝不能直接给出最优解！
-    - 必须严格遵循**“从暴力到正解的思考过程”**：
+    - 必须严格遵循**"从暴力到正解的思考过程"**：
       a) **AI 题解摘要**：一句话点出这道题的核心思路或坑点。
       b) 暴力思路怎么想？（复杂度是多少，能拿多少部分分？）
       c) 瓶颈在哪里？（时间卡在哪，空间卡在哪？）
@@ -644,6 +837,30 @@ def main():
             tag_by_id, type_by_id = _build_tag_maps(luogu)
             practice = luogu.get_user_practice(uid)
             
+            from behavior_analyzer import analyze_submission_behavior, compute_six_dimension_scores
+            from syllabus_matcher import evaluate_all_topics
+            
+            # Fetch behavior data by fetching recent submissions
+            try:
+                progress.update(task, description="[cyan]Fetching recent submissions for behavior analysis...")
+                raw_records = []
+                for page in range(1, 26):
+                    record_list = luogu.get_record_list(page=page, uid=uid, user=str(uid))
+                    page_records = getattr(record_list, "records", None) or getattr(record_list, "data", None) or []
+                    normalized_records = [
+                        rec.to_json() if hasattr(rec, "to_json") else rec
+                        for rec in page_records
+                    ]
+                    if not normalized_records:
+                        break
+                    raw_records.extend(normalized_records)
+                    if len(normalized_records) < 20 or len(raw_records) >= 1000:
+                        break
+                behavior_analysis = analyze_submission_behavior(raw_records)
+            except Exception as e:
+                console.print(f"[yellow]Failed to fetch behavior analysis data: {e}[/yellow]")
+                behavior_analysis = {"error": str(e)}
+            
             # Fetch Passed
             all_passed_problems = extract_problems_from_practice(practice.data, "passed")
             all_passed_problems.sort(key=lambda p: (p.difficulty if p.difficulty is not None else 10, p.pid), reverse=True)
@@ -673,6 +890,11 @@ def main():
                 failed_items.append({"problem": problem.to_json(), "record": record})
                 
             summary = _summarize(all_passed_problems + all_failed_problems, tag_by_id=tag_by_id)
+            syllabus_evaluation = evaluate_all_topics(summary.get("top_tags", []))
+            six_dim_scores = compute_six_dimension_scores(
+                {"solved_count": len(all_passed_problems), "summary": summary},
+                behavior_analysis if "error" not in behavior_analysis else {},
+            )
             
             import datetime
             export_data = {
@@ -686,7 +908,10 @@ def main():
                 "failed_count": len(all_failed_problems),
                 "summary": summary,
                 "passed_items": passed_items,
-                "failed_items": failed_items
+                "failed_items": failed_items,
+                "behavior_analysis": behavior_analysis,
+                "syllabus_evaluation": syllabus_evaluation,
+                "six_dimension_scores": six_dim_scores,
             }
             
             progress.update(task, description=f"[cyan]Analyzing with {model_name} (Applying diagnostic framework & generating editorials)...")

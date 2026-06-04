@@ -1,0 +1,5421 @@
+{
+  "student_info": {
+    "name": "黄鼎",
+    "school": "深圳实验学校",
+    "grade": "高二",
+    "eval_time": "2026-06-03 20:40"
+  },
+  "solved_count": 438,
+  "failed_count": 0,
+  "summary": {
+    "difficulty_histogram": {
+      "1": 85,
+      "2": 112,
+      "3": 100,
+      "4": 92,
+      "5": 45,
+      "6": 4
+    },
+    "tag_type_histogram": {},
+    "top_tags": []
+  },
+  "passed_items": [
+    {
+      "problem": {
+        "pid": "P4785",
+        "title": "[BalticOI 2016] 交换 (Day2)",
+        "difficulty": 6,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P3195",
+        "title": "[HNOI2008] 玩具装箱",
+        "difficulty": 6,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P2900",
+        "title": "[USACO08MAR] Land Acquisition G",
+        "difficulty": 6,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P1248",
+        "title": "加工生产调度",
+        "difficulty": 6,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P9097",
+        "title": "[PA 2020] Elektrownie i fabryki",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P8593",
+        "title": "「KDOI-02」一个弹的投",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P7913",
+        "title": "[CSP-S 2021] 廊桥分配",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P5789",
+        "title": "[TJOI2017] 可乐（数据加强版）",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P5017",
+        "title": "[NOIP 2018 普及组] 摆渡车",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P4872",
+        "title": "OIer们的东方梦",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P4782",
+        "title": "【模板】2-SAT",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P4145",
+        "title": "上帝造题的七分钟 2 / 花神游历各国",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P4035",
+        "title": "[JSOI2008] 球形空间产生器",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P3805",
+        "title": "【模板】Manacher",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P3709",
+        "title": "大爷的字符串题",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P3389",
+        "title": "【模板】高斯消元法",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P3384",
+        "title": "【模板】重链剖分 / 树链剖分",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P3275",
+        "title": "[SCOI2011] 糖果",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P3225",
+        "title": "[HNOI2012] 矿场搭建",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P3178",
+        "title": "[HAOI2015] 树上操作",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P3065",
+        "title": "[USACO12DEC] First! G",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P2860",
+        "title": "[USACO06JAN] Redundant Paths G",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P2709",
+        "title": "【模板】莫队 / 小 B 的询问",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P2607",
+        "title": "[ZJOI2008] 骑士",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P2590",
+        "title": "[ZJOI2008] 树的统计",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P2512",
+        "title": "[HAOI2008] 糖果传递",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P2418",
+        "title": "yyy loves OI IV",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P2344",
+        "title": "[USACO11FEB] Generic Cow Protests G",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P2054",
+        "title": "[AHOI2005] 洗牌",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P1972",
+        "title": "[SDOI2009] HH 的项链",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P1967",
+        "title": "[NOIP 2013 提高组] 货车运输",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P1903",
+        "title": "【模板】带修莫队 / [国家集训队] 数颜色 / 维护队列",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P1896",
+        "title": "[SCOI2005] 互不侵犯",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P1783",
+        "title": "海滩防御",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P1641",
+        "title": "[SCOI2010] 生成字符串",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P1494",
+        "title": "[国家集训队] 小 Z 的袜子",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P1471",
+        "title": "方差",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P1453",
+        "title": "城市环路",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P1445",
+        "title": "[Violet] 樱花",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P14362",
+        "title": "[CSP-S 2025] 道路修复",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P13981",
+        "title": "数列分块入门 6",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P13874",
+        "title": "[蓝桥杯 2024 省 Java/Python A] 最大异或结点",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P1337",
+        "title": "[JSOI2004] 平衡点 / 吊打XXX",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P12966",
+        "title": "[CCO 2025] Asteroid Mining",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P1269",
+        "title": "信号放大器",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P1129",
+        "title": "[ZJOI2007] 矩阵游戏",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P11233",
+        "title": "[CSP-S 2024] 染色",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P11226",
+        "title": "[COTS 2019] 排名 Vezuv",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P10266",
+        "title": "高效清理",
+        "difficulty": 5,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P9744",
+        "title": "「KDOI-06-S」消除序列",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P9704",
+        "title": "「TFOI R1」Tree Home",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P8865",
+        "title": "[NOIP2022] 种花",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P8773",
+        "title": "[蓝桥杯 2022 省 A] 选数异或",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P8724",
+        "title": "[蓝桥杯 2020 省 AB3] 限高杆",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P8472",
+        "title": "[Aya Round 1 G] 咕噜论坛（post）",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P8436",
+        "title": "【模板】边双连通分量",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P8093",
+        "title": "[USACO22JAN] Searching for Soulmates S",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P7912",
+        "title": "[CSP-J 2021] 小熊的果篮",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P7333",
+        "title": "[JRKSJ R1] JFCA",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P7074",
+        "title": "[CSP-J 2020] 方格取数",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P5960",
+        "title": "【模板】差分约束",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P5691",
+        "title": "[NOI2001] 方程的解数",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P5663",
+        "title": "[CSP-J 2019] 加工零件",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P5662",
+        "title": "[CSP-J 2019] 纪念品",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P5335",
+        "title": "[THUSC 2016] 补退选",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P5026",
+        "title": "Lycanthropy",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P4939",
+        "title": "Agent2",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P4878",
+        "title": "[USACO05DEC] Layout G",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P4822",
+        "title": "[BJWC2012] 冻结",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P4799",
+        "title": "[CEOI 2015] 世界冰球锦标赛 (Day2)",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P4703",
+        "title": "偷上网",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P4568",
+        "title": "[JLOI2011] 飞行路线",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P4552",
+        "title": "[Poetize6] IncDec Sequence",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": null
+    },
+    {
+      "problem": {
+        "pid": "P4551",
+        "title": "最长异或路径",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P4342",
+        "title": "[IOI 1998] Polygon",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P4281",
+        "title": "[AHOI2008] 紧急集合 / 聚会",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P4231",
+        "title": "三步必杀",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P4071",
+        "title": "[SDOI2016] 排列计数",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P4047",
+        "title": "[JSOI2010] 部落划分",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3956",
+        "title": "[NOIP 2017 普及组] 棋盘",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3758",
+        "title": "[TJOI2017] 可乐",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3572",
+        "title": "[POI 2014] PTA-Little Bird",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3435",
+        "title": "[POI 2006] OKR-Periods of Words",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3398",
+        "title": "仓鼠找 sugar",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3388",
+        "title": "【模板】割点（割顶）",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3386",
+        "title": "【模板】二分图最大匹配",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3375",
+        "title": "【模板】KMP",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3374",
+        "title": "【模板】树状数组 1",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3373",
+        "title": "【模板】线段树 2",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3372",
+        "title": "【模板】线段树 1",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3368",
+        "title": "【模板】树状数组 2",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3128",
+        "title": "[USACO15DEC] Max Flow P",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2939",
+        "title": "[USACO09FEB] Revamping Trails G",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2698",
+        "title": "[USACO12MAR] Flowerpot S",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2671",
+        "title": "[NOIP 2015 普及组] 求和",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2294",
+        "title": "[HNOI2005] 狡猾的商人",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2233",
+        "title": "[HNOI2002] 公交车路线",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2197",
+        "title": "【模板】Nim 游戏",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2119",
+        "title": "[NOIP 2016 普及组] 魔法阵",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2071",
+        "title": "座位安排",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2068",
+        "title": "统计和",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2047",
+        "title": "[NOI2007] 社交网络",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2023",
+        "title": "[AHOI2009] 维护序列",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1993",
+        "title": "小 K 的农场",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1962",
+        "title": "斐波那契数列",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1955",
+        "title": "[NOI2015] 程序自动分析",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1948",
+        "title": "[USACO08JAN] Telephone Lines S",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1939",
+        "title": "矩阵加速（数列）",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1894",
+        "title": "[USACO4.2] 完美的牛栏The Perfect Stall",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1880",
+        "title": "[NOI1995] 石子合并",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1640",
+        "title": "[SCOI2010] 连续攻击游戏",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1558",
+        "title": "色板游戏",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1541",
+        "title": "[NOIP 2010 提高组] 乌龟棋",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1525",
+        "title": "[NOIP 2010 提高组] 关押罪犯",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P14507",
+        "title": "缺零分治 mexdnc",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1438",
+        "title": "无聊的数列",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P12894",
+        "title": "[蓝桥杯 2025 国 Java B] 智能交通信号灯",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1278",
+        "title": "[COI 2001] 单词游戏",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1273",
+        "title": "[CHCI 2002 Final Exam #2] 有线电视网",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1220",
+        "title": "关路灯",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1198",
+        "title": "[JSOI2008] 最大数",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1197",
+        "title": "[JSOI2008] 星球大战",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1175",
+        "title": "表达式的转换",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1171",
+        "title": "售货员的难题",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1144",
+        "title": "最短路计数",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P11289",
+        "title": "【MX-S6-T1】「KDOI-11」打印",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P11232",
+        "title": "[CSP-S 2024] 超速检测",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P11048",
+        "title": "[蓝桥杯 2024 省 Java B] 拼十字",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P10842",
+        "title": "【MX-J2-T3】Piggy and Trees",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1082",
+        "title": "[NOIP 2012 提高组] 同余方程",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P10814",
+        "title": "【模板】离线二维数点",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1073",
+        "title": "[NOIP 2009 提高组] 最优贸易",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P10673",
+        "title": "【MX-S1-T2】催化剂",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P10589",
+        "title": "楼兰图腾",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P10429",
+        "title": "[蓝桥杯 2024 省 B] 拔河",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P10412",
+        "title": "「QFOI R2」钟声远带斜阳",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P10235",
+        "title": "[yLCPC2024] C. 舞萌基本练习",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1020",
+        "title": "[NOIP 1999 提高组] 导弹拦截",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1012",
+        "title": "[NOIP 1998 提高组] 拼数",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P10059",
+        "title": "Choose",
+        "difficulty": 4,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "CF1989D",
+        "title": "Smithing Skill",
+        "difficulty": 4,
+        "type": "CF"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P9957",
+        "title": "[USACO20DEC] Stuck in a Rut B",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P9954",
+        "title": "[USACO20OPEN] Cowntact Tracing B",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P9952",
+        "title": "[USACO20OPEN] Social Distancing I B",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P9951",
+        "title": "[USACO20FEB] Swapity Swap B",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P9948",
+        "title": "[USACO20JAN] Race B",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P9533",
+        "title": "[YsOI2023] 区间翻转区间异或和",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P8899",
+        "title": "[USACO22DEC] Reverse Engineering B",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P8898",
+        "title": "[USACO22DEC] Feeding the Cows B",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P8816",
+        "title": "[CSP-J 2022] 上升点列",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P8683",
+        "title": "[蓝桥杯 2019 省 B] 后缀表达式",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P8306",
+        "title": "【模板】字典树 / Trie",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P8183",
+        "title": "[USACO22FEB] Sleeping in Class B",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P8094",
+        "title": "[USACO22JAN] Cow Frisbee S",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P8092",
+        "title": "[USACO22JAN] Drought B",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P7911",
+        "title": "[CSP-J 2021] 网络连接",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P7910",
+        "title": "[CSP-J 2021] 插入排序",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P7404",
+        "title": "[JOI 2021 Final] 有趣的家庭菜园 4 / Growing Vegetables is Fun 4",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P7113",
+        "title": "[NOIP2020] 排水系统",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P6432",
+        "title": "[USACO3.1] 形成的区域 Shaping Regions",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P6067",
+        "title": "[USACO05JAN] Moo Volume S",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5788",
+        "title": "【模板】单调栈",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5266",
+        "title": "【深基17.例6】学籍管理",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5019",
+        "title": "[NOIP 2018 提高组] 铺设道路",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P4779",
+        "title": "【模板】单源最短路径（标准版）",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P4549",
+        "title": "【模板】裴蜀定理",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P4058",
+        "title": "[Code+#1] 木材",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3958",
+        "title": "[NOIP 2017 提高组] 奶酪",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3865",
+        "title": "【模板】ST 表 & RMQ 问题",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3842",
+        "title": "[TJOI2007] 线段",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3811",
+        "title": "【模板】模意义下的乘法逆元",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3743",
+        "title": "小鸟的设备",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3385",
+        "title": "【模板】负环",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3379",
+        "title": "【模板】最近公共祖先（LCA）",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3378",
+        "title": "【模板】堆",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3371",
+        "title": "【模板】单源最短路径（弱化版）",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3367",
+        "title": "【模板】并查集",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3366",
+        "title": "【模板】最小生成树",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3078",
+        "title": "[USACO13MAR] Poker Hands S",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2918",
+        "title": "[USACO08NOV] Buying Hay S",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2910",
+        "title": "[USACO08OPEN] Clear And Present Danger S",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2872",
+        "title": "[USACO07DEC] Building Roads S",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2822",
+        "title": "[NOIP 2016 提高组] 组合数问题",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2820",
+        "title": "局域网",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2690",
+        "title": "[USACO04NOV] Apple Catching G",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2678",
+        "title": "[NOIP 2015 提高组] 跳石头",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2658",
+        "title": "汽车拉力比赛",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2580",
+        "title": "于是他错误的点名开始了",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2504",
+        "title": "[HAOI2006] 聪明的猴子",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2440",
+        "title": "木材加工",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2280",
+        "title": "[HNOI2003] 激光炸弹",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2239",
+        "title": "[NOIP 2014 普及组] 螺旋矩阵",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2121",
+        "title": "拆地毯",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2082",
+        "title": "区间覆盖（加强版）",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2058",
+        "title": "[NOIP 2016 普及组] 海港",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2016",
+        "title": "[SEERC 2000] 战略游戏",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1991",
+        "title": "无线通讯网",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1944",
+        "title": "最长括号匹配",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1908",
+        "title": "逆序对",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1886",
+        "title": "【模板】单调队列 / 滑动窗口",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1843",
+        "title": "奶牛晒衣服",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1840",
+        "title": "Color the Axis",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1807",
+        "title": "最长路",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1775",
+        "title": "石子合并（弱化版）",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1656",
+        "title": "炸铁路",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1629",
+        "title": "邮递员送信",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1577",
+        "title": "切绳子",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1551",
+        "title": "亲戚",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1550",
+        "title": "[USACO08OCT] Watering Hole G",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1546",
+        "title": "[USACO3.1] 最短网络 Agri-Net",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P14566",
+        "title": "【MX-S12-T1】取模",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1440",
+        "title": "求m区间内的最小值",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P14361",
+        "title": "[CSP-S 2025] 社团招新",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1435",
+        "title": "[IOI 2000] 回文字串",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1434",
+        "title": "[SHOI2002] 滑雪",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1396",
+        "title": "营救",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1364",
+        "title": "医院设置",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1352",
+        "title": "没有上司的舞会",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1334",
+        "title": "瑞瑞的木板",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1330",
+        "title": "封锁阳光大学",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1318",
+        "title": "积水面积",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1250",
+        "title": "种树",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1195",
+        "title": "口袋的天空",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1194",
+        "title": "买礼物",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1182",
+        "title": "数列分段 Section II",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1135",
+        "title": "奇怪的电梯",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P11229",
+        "title": "[CSP-J 2024] 小木棍",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1111",
+        "title": "修复公路",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1106",
+        "title": "删数问题",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1095",
+        "title": "[NOIP 2007 普及组] 守望者的逃离",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1090",
+        "title": "[NOIP 2004 提高组] 合并果子",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P10853",
+        "title": "【MX-X2-T2】「Cfz Round 4」Xor Counting",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1083",
+        "title": "[NOIP 2012 提高组] 借教室",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P10791",
+        "title": "『SpOI - R1』强大到让你们所有人注视",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P10444",
+        "title": "「MYOI-R3」极差",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P10411",
+        "title": "「QFOI R2」树色尤含残雨",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1025",
+        "title": "[NOIP 2001 提高组] 数的划分",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P10152",
+        "title": "「LAOI-5」拼图",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1007",
+        "title": "独木桥",
+        "difficulty": 3,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B3647",
+        "title": "【模板】Floyd",
+        "difficulty": 3,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B3644",
+        "title": "【模板】拓扑排序 / 家谱树",
+        "difficulty": 3,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P9956",
+        "title": "[USACO20DEC] Daisy Chains B",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P9953",
+        "title": "[USACO20OPEN] Social Distancing II B",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P9949",
+        "title": "[USACO20FEB] Triangles B",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P9947",
+        "title": "[USACO20JAN] Photoshoot B",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P9942",
+        "title": "[USACO21JAN] Just Stalling B",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P9868",
+        "title": "[NOIP2023] 词典",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P9752",
+        "title": "[CSP-S 2023] 密码锁",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P8897",
+        "title": "[USACO22DEC] Cow College B",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P8814",
+        "title": "[CSP-J 2022] 解密",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P8781",
+        "title": "[蓝桥杯 2022 省 B] 修剪灌木",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P8772",
+        "title": "[蓝桥杯 2022 省 A] 求和",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P8738",
+        "title": "[蓝桥杯 2020 国 C] 天干地支",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P8723",
+        "title": "[蓝桥杯 2020 省 AB3] 乘法表",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P8697",
+        "title": "[蓝桥杯 2019 国 C] 最长子序列",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P8681",
+        "title": "[蓝桥杯 2019 省 AB] 完全二叉树的权值",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P8647",
+        "title": "[蓝桥杯 2017 省 AB] 分巧克力",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P8597",
+        "title": "[蓝桥杯 2013 省 B] 翻硬币",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P8185",
+        "title": "[USACO22FEB] Blocks B",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P8184",
+        "title": "[USACO22FEB]  Photoshoot 2 B",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P8091",
+        "title": "[USACO22JAN] Non-Transitive Dice B",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5741",
+        "title": "【深基7.例10】旗鼓相当的对手 - 加强版",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5740",
+        "title": "【深基7.例9】最厉害的学生",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5736",
+        "title": "【深基7.例2】质数筛",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5723",
+        "title": "【深基4.例13】质数口袋",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5661",
+        "title": "[CSP-J 2019] 公交换乘",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5638",
+        "title": "【CSGRound2】光骓者的荣耀",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5318",
+        "title": "【深基18.例3】查找文献",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5016",
+        "title": "[NOIP 2018 普及组] 龙虎斗",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3613",
+        "title": "【深基15.例2】寄包柜",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3397",
+        "title": "地毯",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3383",
+        "title": "【模板】线性筛素数",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3353",
+        "title": "在你窗外闪耀的星星",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2695",
+        "title": "骑士的工作",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2676",
+        "title": "[USACO07DEC] Bookshelf B",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2367",
+        "title": "语文成绩",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2249",
+        "title": "【深基13.例1】查找",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2240",
+        "title": "【深基12.例1】部分背包问题",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2142",
+        "title": "高精度减法",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2141",
+        "title": "[NOIP 2014 普及组] 珠心算测验",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2118",
+        "title": "[NOIP 2014 普及组] 比例简化",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2036",
+        "title": "[COCI 2008/2009 #2] PERKET",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2004",
+        "title": "领地选择",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1996",
+        "title": "约瑟夫问题",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1981",
+        "title": "[NOIP 2013 普及组] 表达式求值",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1968",
+        "title": "[CHCI 2001 Regional Competition Seniors] 美元汇率",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1918",
+        "title": "保龄球",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1873",
+        "title": "[COCI 2011/2012 #5] EKO / 砍树",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1832",
+        "title": "A+B Problem（再升级）",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1824",
+        "title": "[USACO05FEB] 进击的奶牛 Aggressive Cows G",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1802",
+        "title": "5 倍经验日",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1781",
+        "title": "宇宙总统",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1706",
+        "title": "全排列问题",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1689",
+        "title": "方程求解",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1616",
+        "title": "疯狂的采药",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1601",
+        "title": "高精度加法",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1595",
+        "title": "信封问题",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1579",
+        "title": "哥德巴赫猜想（升级版）",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1571",
+        "title": "眼红的Medusa",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1553",
+        "title": "数字反转（升级版）",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1536",
+        "title": "村村通",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1507",
+        "title": "NASA的食物计划",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1496",
+        "title": "火烧赤壁",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1451",
+        "title": "求细胞数量",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1449",
+        "title": "后缀表达式",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1443",
+        "title": "马的遍历",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1387",
+        "title": "最大正方形",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1359",
+        "title": "租用游艇",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1308",
+        "title": "[NOIP 2011 普及组] 统计单词数",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1303",
+        "title": "A*B Problem",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1255",
+        "title": "数楼梯",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1234",
+        "title": "小 A 的口头禅",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1226",
+        "title": "【模板】快速幂",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1223",
+        "title": "排队接水",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1218",
+        "title": "[USACO1.5] Superprime Rib",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1208",
+        "title": "[USACO1.3] Mixing Milk",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1181",
+        "title": "数列分段 Section I",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1177",
+        "title": "【模板】排序",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1164",
+        "title": "小 A 点菜",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1147",
+        "title": "连续正整数和",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1143",
+        "title": "进制转换",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P11231",
+        "title": "[CSP-S 2024] 决斗",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1115",
+        "title": "最大子段和",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1102",
+        "title": "A-B 数对",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1087",
+        "title": "[NOIP 2004 普及组] FBI 树",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1086",
+        "title": "[NOIP 2004 普及组] 花生采摘",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P10852",
+        "title": "【MX-X2-T1】「Cfz Round 4」Awaken",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P10841",
+        "title": "【MX-J2-T2】Turtle and Strings",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P10840",
+        "title": "【MX-J2-T1】Turtle and Sequences",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P10781",
+        "title": "【MX-J1-T1】『FLA - III』Spectral",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1077",
+        "title": "[NOIP 2012 普及组] 摆花",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P10765",
+        "title": "「CROI · R2」在相思树下 I",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P10713",
+        "title": "【MX-X1-T1】「KDOI-05」简单的无限网格问题",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1060",
+        "title": "[NOIP 2006 普及组] 开心的金明",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1049",
+        "title": "[NOIP 2001 普及组] 装箱问题",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1048",
+        "title": "[NOIP 2005 普及组] 采药",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P10405",
+        "title": "「SMOI-R1」Queue",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1031",
+        "title": "[NOIP 2002 提高组] 均分纸牌",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1024",
+        "title": "[NOIP 2001 提高组] 一元三次方程求解",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P10233",
+        "title": "[yLCPC2024] A. dx 分计算",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1015",
+        "title": "[NOIP 1999 普及组] 回文数",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1009",
+        "title": "[NOIP 1998 普及组] 阶乘之和",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1002",
+        "title": "[NOIP 2002 普及组] 过河卒",
+        "difficulty": 2,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "CF1989C",
+        "title": "Two Movies",
+        "difficulty": 2,
+        "type": "CF"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B3640",
+        "title": "T3 句子反转",
+        "difficulty": 2,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B3637",
+        "title": "最长上升子序列",
+        "difficulty": 2,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B3636",
+        "title": "文字工作",
+        "difficulty": 2,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B3634",
+        "title": "最大公约数和最小公倍数",
+        "difficulty": 2,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B3630",
+        "title": "排队顺序",
+        "difficulty": 2,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B3629",
+        "title": "吃冰棍",
+        "difficulty": 2,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B3628",
+        "title": "机器猫斗恶龙",
+        "difficulty": 2,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B3627",
+        "title": "立方根",
+        "difficulty": 2,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B3612",
+        "title": "【深进1.例1】求区间和",
+        "difficulty": 2,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P9955",
+        "title": "[USACO20DEC] Do You Know Your ABCs? B",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P9950",
+        "title": "[USACO20FEB] Mad Scientist B",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P9946",
+        "title": "[USACO20JAN] Word Processor B",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P8813",
+        "title": "[CSP-J 2022] 乘方",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P8627",
+        "title": "[蓝桥杯 2015 省 A] 饮料换购",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P8090",
+        "title": "[USACO22JAN] Herdle B",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P7694",
+        "title": "[COCI 2009/2010 #4] AUTORI",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P7071",
+        "title": "[CSP-J 2020] 优秀的拆分",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5744",
+        "title": "【深基7.习9】培训",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5739",
+        "title": "【深基7.例7】计算阶乘",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5733",
+        "title": "【深基6.例1】自动修正",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5725",
+        "title": "【深基4.习8】求三角形",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5718",
+        "title": "【深基4.例2】找最小值",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5715",
+        "title": "【深基3.例8】三位数排序",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5711",
+        "title": "【深基3.例3】闰年判断",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5710",
+        "title": "【深基3.例2】数的性质",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5681",
+        "title": "[CSP-J 2019 江西] 面积",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5660",
+        "title": "[CSP-J 2019] 数字游戏",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5015",
+        "title": "[NOIP 2018 普及组] 标题统计",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3741",
+        "title": "小果的键盘",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2670",
+        "title": "[NOIP 2015 普及组] 扫雷游戏",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P2669",
+        "title": "[NOIP 2015 普及组] 金币",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1980",
+        "title": "[NOIP 2013 普及组] 计数问题",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1909",
+        "title": "[NOIP 2016 普及组] 买铅笔",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1634",
+        "title": "禽兽的传染病",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1597",
+        "title": "语句解析",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1567",
+        "title": "统计天数",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1425",
+        "title": "小鱼的游泳时间",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1421",
+        "title": "小玉买文具",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1321",
+        "title": "单词覆盖还原",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1317",
+        "title": "低洼地",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1307",
+        "title": "[NOIP 2011 普及组] 数字反转",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1179",
+        "title": "[NOIP 2010 普及组] 数字统计",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1150",
+        "title": "Peter 的烟",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P10839",
+        "title": "【MX-J2-T0】Turtle and Equations",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1001",
+        "title": "A+B Problem",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1000",
+        "title": "超级玛丽游戏",
+        "difficulty": 1,
+        "type": "P"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "CF1982A",
+        "title": "Soccer",
+        "difficulty": 1,
+        "type": "CF"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B3719",
+        "title": "[语言月赛202303] Factorial B",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2132",
+        "title": "素数对",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2121",
+        "title": "最长最短单词",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2114",
+        "title": "配对碱基链",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2112",
+        "title": "石头剪子布",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2111",
+        "title": "基因相关性",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2109",
+        "title": "统计数字字符个数",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2107",
+        "title": "图像旋转",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2104",
+        "title": "矩阵加法",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2103",
+        "title": "图像相似度",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2101",
+        "title": "计算矩阵边缘元素之和",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2099",
+        "title": "矩阵交换行",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2095",
+        "title": "白细胞计数",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2093",
+        "title": "查找特定的值",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2090",
+        "title": "年龄与疾病",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2089",
+        "title": "数组逆序重存放",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2088",
+        "title": "计算书费",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2087",
+        "title": "与指定数字相同的数的个数",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2078",
+        "title": "含 k 个 3 的数",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2077",
+        "title": "角谷猜想",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2074",
+        "title": "计算星期几",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2072",
+        "title": "分苹果",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2071",
+        "title": "余数相同问题",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2062",
+        "title": "乘方计算",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2061",
+        "title": "整数的个数",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2060",
+        "title": "满足条件的数累加",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2059",
+        "title": "奇数求和",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2057",
+        "title": "最高的分数",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2056",
+        "title": "求整数的和与均值",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2050",
+        "title": "三角形判断",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2049",
+        "title": "最大数输出",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2045",
+        "title": "晶晶赴约会",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2043",
+        "title": "判断能否被 3，5，7 整除",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2042",
+        "title": "判断一个数能否同时被 3 和 5 整除",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2041",
+        "title": "收集瓶盖赢大奖",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2040",
+        "title": "判断是否为两位数",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2037",
+        "title": "奇偶数判断",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2023",
+        "title": "空格分隔输出",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2022",
+        "title": "输出保留 12 位小数的浮点数",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2021",
+        "title": "输出保留 3 位小数的浮点数",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2020",
+        "title": "分糖果",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2017",
+        "title": "打印 ASCII 码",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2016",
+        "title": "浮点数向零舍入",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2004",
+        "title": "对齐输出",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2003",
+        "title": "输出第二个整数",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2002",
+        "title": "Hello,World!",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2001",
+        "title": "入门测试题目",
+        "difficulty": 1,
+        "type": "B"
+      },
+      "record": {
+        "error": "Failed to decode JSON response"
+      }
+    }
+  ],
+  "failed_items": [],
+  "behavior_analysis": {
+    "error": "Failed to decode JSON response"
+  },
+  "syllabus_evaluation": {
+    "csp_j": {
+      "details": [
+        {
+          "topic": "枚举法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "模拟法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "贪心法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "递推法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "递归法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "二分法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "倍增法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "前缀和",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "差分",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "排序",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "DFS",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "BFS",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Flood Fill",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "DP基础",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "背包DP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "区间DP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "图遍历",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "链表",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "栈",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "队列",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "二叉树遍历",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "哈夫曼树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "BST",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "GCD",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "素数筛法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "排列组合",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "杨辉三角",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "进制转换",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        }
+      ],
+      "stats": {
+        "total": 28,
+        "精通": 0,
+        "熟练": 0,
+        "入门": 0,
+        "初窥": 0,
+        "空白": 28
+      },
+      "coverage": 0.0,
+      "total_ac": 0
+    },
+    "csp_s": {
+      "details": [
+        {
+          "topic": "单调栈/队列",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "双端队列",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "ST表",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "并查集",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "树状数组",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "线段树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "优先队列/堆",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "字典树Trie",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "笛卡尔树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "平衡树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "二分图",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "欧拉图",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "强连通图",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "分治",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "离散化",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "扫描线",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "归并排序",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "快速排序",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "KMP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Manacher",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "剪枝优化",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "记忆化搜索",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "启发式搜索",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "双向BFS",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "迭代加深",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "树形DP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "状压DP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "多维DP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "DP优化",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "最小生成树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "最短路",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Floyd",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "拓扑排序",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "单源次短路",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "欧拉道路",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "同余式",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "欧拉定理/函数",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "费马小定理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "逆元",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "扩展欧几里得",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "中国剩余定理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "快速幂",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "容斥原理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "卡特兰数",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "矩阵运算",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "高斯消元",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "鸽巢原理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "二项式定理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "错排列/圆排列",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        }
+      ],
+      "stats": {
+        "total": 49,
+        "精通": 0,
+        "熟练": 0,
+        "入门": 0,
+        "初窥": 0,
+        "空白": 49
+      },
+      "coverage": 0.0,
+      "total_ac": 0
+    },
+    "provincial": {
+      "details": [
+        {
+          "topic": "匈牙利算法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "网络流",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "分块",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Nim博弈/SG",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "离线处理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "可持久化线段树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "块状链表",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "随机化",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "复杂DP模型",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "构造",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        }
+      ],
+      "stats": {
+        "total": 10,
+        "精通": 0,
+        "熟练": 0,
+        "入门": 0,
+        "初窥": 0,
+        "空白": 10
+      },
+      "coverage": 0.0,
+      "total_ac": 0
+    },
+    "noi": {
+      "details": [
+        {
+          "topic": "后缀数组",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "后缀自动机",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "AC自动机",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "树链剖分",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "LCT",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "CDQ分治",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "点分治",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "虚树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "FFT/NTT",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "FWT",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "斜率优化DP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "四边形不等式",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "线性基",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Pollard-Rho",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Miller-Rabin",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "杜教筛",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Min_25筛",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "圆方树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "2-SAT",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "差分约束",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "无源汇上下界",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "有源汇上下界",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "KM算法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "一般图匹配",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "莫比乌斯反演",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Burnside引理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Polya定理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "原根",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "BSGS",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "扩展BSGS",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "单位根反演",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "单纯形",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "计算几何基础",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "半平面交",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "旋转卡壳",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "扫描线(几何)",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "k-d树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "替罪羊树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Treap",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Splay",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "WBLT",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "析合树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "笛卡尔树(高级)",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        }
+      ],
+      "stats": {
+        "total": 43,
+        "精通": 0,
+        "熟练": 0,
+        "入门": 0,
+        "初窥": 0,
+        "空白": 43
+      },
+      "coverage": 0.0,
+      "total_ac": 0
+    },
+    "overall": {
+      "total_topics": 130,
+      "covered_topics": 0,
+      "coverage_rate": 0.0
+    }
+  },
+  "six_dimension_scores": {
+    "基础算法": 53,
+    "数据结构": 41,
+    "图论": 41,
+    "动态规划": 48,
+    "字符串": 33,
+    "数学": 28
+  }
+}

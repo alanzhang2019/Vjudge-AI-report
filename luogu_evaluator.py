@@ -4,7 +4,13 @@ import argparse
 import math
 import re
 import base64
+import hashlib
+import time
+import urllib.request
+import zipfile
 from pathlib import Path
+from datetime import datetime
+from typing import Any
 
 import matplotlib
 matplotlib.use("Agg")
@@ -16,7 +22,14 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from openai import OpenAI
 import pyLuogu
-from examples.export_for_ai import _build_tag_maps, _summarize, _pick_record_for_problem
+from pyLuogu.errors import AuthenticationError, ForbiddenError, RequestError
+from examples.export_for_ai import (
+    DETAIL_FETCH_SAMPLE_LIMIT_FAILED,
+    DETAIL_FETCH_SAMPLE_LIMIT_PASSED,
+    _build_tag_maps,
+    _summarize,
+    _pick_record_for_problem,
+)
 
 import markdown as md
 from jinja2 import Environment, FileSystemLoader
@@ -43,27 +56,200 @@ DIAGNOSTIC_FRAMEWORK = """
 
 
 def find_chinese_font_path() -> str | None:
+    def _try_download_lxgw_wenkai(dest_dir: Path) -> str | None:
+        auto = os.environ.get("LUOGU_REPORT_AUTO_FONT_DOWNLOAD", "").strip().lower() in {"1", "true", "yes", "on"}
+        if not auto:
+            return None
+
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        version = "1.520"
+        zip_name = f"lxgw-wenkai-v{version}.zip"
+        url = f"https://github.com/lxgw/LxgwWenKai/releases/download/v{version}/{zip_name}"
+        expected_sha256 = "3a763543bec896e3c1badc9808bc804116a5e3d26f9f9592dacc834c9e799d8c"
+        zip_path = dest_dir / zip_name
+        extracted_font = dest_dir / "LXGWWenKai-Regular.ttf"
+
+        if extracted_font.exists():
+            return str(extracted_font)
+
+        if zip_path.exists():
+            try:
+                h = hashlib.sha256()
+                with open(zip_path, "rb") as f:
+                    for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                        h.update(chunk)
+                if h.hexdigest().lower() != expected_sha256:
+                    zip_path.unlink(missing_ok=True)
+            except Exception:
+                try:
+                    zip_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+        if not zip_path.exists():
+            tmp_path = dest_dir / (zip_name + ".tmp")
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "luogu-ai-report/1.0"})
+                with urllib.request.urlopen(req, timeout=20) as resp, open(tmp_path, "wb") as out:
+                    while True:
+                        buf = resp.read(1024 * 1024)
+                        if not buf:
+                            break
+                        out.write(buf)
+                h = hashlib.sha256()
+                with open(tmp_path, "rb") as f:
+                    for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                        h.update(chunk)
+                if h.hexdigest().lower() != expected_sha256:
+                    tmp_path.unlink(missing_ok=True)
+                    return None
+                tmp_path.replace(zip_path)
+            except Exception:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                return None
+
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                member = f"lxgw-wenkai-v{version}/LXGWWenKai-Regular.ttf"
+                if member not in zf.namelist():
+                    return None
+                tmp_extract = dest_dir / (extracted_font.name + ".tmp")
+                with zf.open(member) as src, open(tmp_extract, "wb") as dst:
+                    dst.write(src.read())
+                tmp_extract.replace(extracted_font)
+            return str(extracted_font) if extracted_font.exists() else None
+        except Exception:
+            return None
+
+    env_font = os.environ.get("CHINESE_FONT_PATH") or os.environ.get("LUOGU_REPORT_FONT_PATH")
+    if env_font and os.path.exists(env_font):
+        return env_font
+
+    local_candidates: list[str] = []
+    try:
+        base = Path(__file__).resolve().parent
+        downloaded = _try_download_lxgw_wenkai(base / "assets" / "fonts")
+        if downloaded and os.path.exists(downloaded):
+            return downloaded
+        local_candidates.extend(
+            [
+                str(base / "assets" / "fonts" / "NotoSansCJKsc-Regular.otf"),
+                str(base / "assets" / "fonts" / "NotoSansSC-Regular.otf"),
+                str(base / "assets" / "fonts" / "SourceHanSansCN-Regular.otf"),
+                str(base / "assets" / "fonts" / "wqy-zenhei.ttc"),
+                str(base / "assets" / "fonts" / "LXGWWenKai-Regular.ttf"),
+            ]
+        )
+    except Exception:
+        pass
+
     candidates = [
-        r"C:\Windows\Fonts\simhei.ttf",
+        *local_candidates,
+        r"C:\Windows\Fonts\msyh.ttc",
         r"C:\Windows\Fonts\msyh.ttf",
         r"C:\Windows\Fonts\msyhbd.ttf",
+        r"C:\Windows\Fonts\simhei.ttf",
         r"C:\Windows\Fonts\simkai.ttf",
         r"C:\Windows\Fonts\simsun.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJKsc-Regular.otf",
+        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        "/usr/share/fonts/truetype/arphic/ukai.ttc",
+        "/usr/share/fonts/truetype/arphic/uming.ttc",
     ]
     for candidate in candidates:
         if os.path.exists(candidate):
             return candidate
+    try:
+        from matplotlib import font_manager
+
+        preferred_families = [
+            "Noto Sans CJK SC",
+            "Noto Sans SC",
+            "Source Han Sans CN",
+            "WenQuanYi Zen Hei",
+            "WenQuanYi Micro Hei",
+            "Microsoft YaHei",
+            "SimHei",
+            "PingFang SC",
+            "Arial Unicode MS",
+        ]
+        for family in preferred_families:
+            try:
+                fp = font_manager.FontProperties(family=family)
+                font_file = font_manager.findfont(fp, fallback_to_default=False)
+                if font_file and os.path.exists(font_file):
+                    return font_file
+            except Exception:
+                continue
+    except Exception:
+        pass
+    try:
+        from matplotlib import font_manager
+
+        keywords = (
+            "notosanscjk",
+            "notosanssc",
+            "sourcehansans",
+            "noto sans cjk",
+            "noto sans sc",
+            "wqy",
+            "wenquanyi",
+            "droidsansfallback",
+            "arphic",
+            "ukai",
+            "uming",
+            "simhei",
+            "msyh",
+            "yahei",
+            "pingfang",
+        )
+        for font_path in font_manager.findSystemFonts(fontpaths=None, fontext="ttf") + font_manager.findSystemFonts(fontpaths=None, fontext="ttc") + font_manager.findSystemFonts(fontpaths=None, fontext="otf"):
+            lower = font_path.lower()
+            if any(k in lower for k in keywords) and os.path.exists(font_path):
+                return font_path
+    except Exception:
+        pass
     return None
 
 
 def configure_matplotlib_font() -> str | None:
     font_path = find_chinese_font_path()
+    family_fallback = [
+        "Noto Sans CJK SC",
+        "Noto Sans SC",
+        "Source Han Sans CN",
+        "WenQuanYi Zen Hei",
+        "WenQuanYi Micro Hei",
+        "Microsoft YaHei",
+        "SimHei",
+        "PingFang SC",
+        "Arial Unicode MS",
+        "DejaVu Sans",
+    ]
     if font_path:
-        from matplotlib import font_manager
+        try:
+            from matplotlib import font_manager
 
-        font_name = font_manager.FontProperties(fname=font_path).get_name()
-        plt.rcParams["font.sans-serif"] = [font_name]
+            font_name = font_manager.FontProperties(fname=font_path).get_name()
+            plt.rcParams["font.sans-serif"] = [font_name, *family_fallback]
+        except Exception:
+            plt.rcParams["font.sans-serif"] = family_fallback
+    else:
+        plt.rcParams["font.sans-serif"] = family_fallback
+    plt.rcParams["font.family"] = "sans-serif"
     plt.rcParams["axes.unicode_minus"] = False
+    plt.rcParams["font.size"] = 12
+    plt.rcParams["axes.titlesize"] = 14
+    plt.rcParams["axes.labelsize"] = 12
+    plt.rcParams["xtick.labelsize"] = 11
+    plt.rcParams["ytick.labelsize"] = 11
     return font_path
 
 
@@ -83,9 +269,581 @@ def ensure_dir(path: str) -> str:
     return path
 
 
+DIFFICULTY_NAME_MAP = {
+    0: "暂无评定",
+    1: "入门",
+    2: "普及-",
+    3: "普及/提高-",
+    4: "普及+/提高",
+    5: "提高+/省选-",
+    6: "省选/NOI-",
+    7: "NOI/NOI+/CTSC",
+}
+
+DIFFICULTY_COLOR_MAP = {
+    0: "#9CA3AF",
+    1: "#FE4C61",
+    2: "#F39C12",
+    3: "#FFC116",
+    4: "#52C41A",
+    5: "#3498DB",
+    6: "#9D4EDD",
+    7: "#0E1D69",
+}
+
+DIFFICULTY_TEXT_COLOR_MAP = {
+    0: "#111827",
+    1: "#FFFFFF",
+    2: "#111827",
+    3: "#111827",
+    4: "#FFFFFF",
+    5: "#FFFFFF",
+    6: "#FFFFFF",
+    7: "#FFFFFF",
+}
+
+TAG_CHART_PALETTE = [
+    "#52C41A",
+    "#3498DB",
+    "#9D4EDD",
+    "#FE4C61",
+    "#F39C12",
+    "#14B8A6",
+    "#FFC116",
+    "#0EA5E9",
+]
+
+
+def _render_progress_bar(percentage: float, color: str, width_px: int = 150) -> str:
+    pct = max(0.0, min(100.0, float(percentage)))
+    return (
+        f'<span style="display:inline-block;width:{width_px}px;height:12px;'
+        'background:#E5E7EB;border-radius:9999px;overflow:hidden;vertical-align:middle;">'
+        f'<span style="display:block;width:{pct:.1f}%;height:12px;background:{color};"></span>'
+        "</span>"
+    )
+
+
+def get_difficulty_style(level: int) -> tuple[str, str, str]:
+    return (
+        DIFFICULTY_NAME_MAP.get(level, str(level)),
+        DIFFICULTY_COLOR_MAP.get(level, "#4B5563"),
+        DIFFICULTY_TEXT_COLOR_MAP.get(level, "#FFFFFF"),
+    )
+
+
+def summarize_average_difficulty(difficulty_histogram: dict) -> dict[str, str | int | float]:
+    total = 0
+    weighted = 0
+    for key, value in difficulty_histogram.items():
+        if str(key).isdigit():
+            level = int(key)
+            if level <= 0:
+                continue
+            total += int(value)
+            weighted += level * int(value)
+
+    average_value = weighted / total if total else 0.0
+    candidate_levels = [k for k in DIFFICULTY_NAME_MAP.keys() if int(k) > 0]
+    nearest_level = min(candidate_levels, key=lambda level: abs(level - average_value)) if total and candidate_levels else 0
+    label, color, text_color = get_difficulty_style(nearest_level)
+    return {
+        "average_value": average_value,
+        "nearest_level": nearest_level,
+        "label": label,
+        "color": color,
+        "text_color": text_color,
+    }
+
+
+def render_star_rating_html(stars: str) -> str:
+    filled_count = stars.count("⭐")
+    empty_count = stars.count("☆")
+    total_count = filled_count + empty_count
+    if total_count == 0 or total_count > 5:
+        return stars
+
+    star_items = []
+    for ch in stars:
+        if ch == "⭐":
+            star_items.append('<span style="color:#F5C542;text-shadow:0 1px 0 rgba(0,0,0,0.18);">★</span>')
+        elif ch == "☆":
+            star_items.append('<span style="color:#94A3B8;">★</span>')
+        else:
+            star_items.append(ch)
+
+    return (
+        '<span style="display:inline-flex;align-items:center;gap:2px;'
+        'padding:2px 8px;border-radius:9999px;background:#111827;'
+        'border:1px solid #374151;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06);'
+        'font-size:1.02em;line-height:1.1;vertical-align:middle;">'
+        + "".join(star_items)
+        + f'<span style="margin-left:6px;color:#CBD5E1;font-size:12px;font-weight:700;">{filled_count}/{total_count}</span>'
+        "</span>"
+    )
+
+
+def split_practice_problems(practice) -> tuple[list[pyLuogu.ProblemSummary], list[pyLuogu.ProblemSummary]]:
+    practice_problems = list(getattr(practice, "problems", []) or [])
+    if practice_problems:
+        passed = [p for p in practice_problems if getattr(p, "accepted", False)]
+        failed = [p for p in practice_problems if getattr(p, "submitted", False) and not getattr(p, "accepted", False)]
+        if passed or failed:
+            return passed, failed
+
+    raw = practice.data if isinstance(getattr(practice, "data", None), dict) else None
+    passed: list[pyLuogu.ProblemSummary] = []
+    failed: list[pyLuogu.ProblemSummary] = []
+    passed_ids: set[str] = set()
+
+    for key, target, accepted in (("passed", passed, True), ("submitted", failed, False), ("failed", failed, False)):
+        items = raw.get(key) if isinstance(raw, dict) else None
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            pid = item.get("pid")
+            if not pid:
+                continue
+            pid = str(pid)
+            if accepted:
+                passed_ids.add(pid)
+            elif pid in passed_ids:
+                continue
+            target.append(
+                pyLuogu.ProblemSummary(
+                    {
+                        "pid": pid,
+                        "title": item.get("title") or item.get("name") or "",
+                        "difficulty": item.get("difficulty"),
+                        "type": item.get("type"),
+                        "submitted": True,
+                        "accepted": accepted,
+                        "tags": item.get("tags") or [],
+                        "totalSubmit": item.get("totalSubmit"),
+                        "totalAccepted": item.get("totalAccepted"),
+                        "flag": item.get("flag"),
+                        "fullScore": item.get("fullScore"),
+                    }
+                )
+            )
+    return passed, failed
+
+
+def collect_record_dicts(items: list[dict]) -> list[dict]:
+    records: list[dict] = []
+    for item in items:
+        record = item.get("record")
+        if isinstance(record, dict) and record.get("submitTime"):
+            records.append(record)
+    return records
+
+
+def summarize_detail_fetch_stats(
+    passed_items: list[dict] | None,
+    failed_items: list[dict] | None,
+    detail_fetch_state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    items = list(passed_items or []) + list(failed_items or [])
+    stats = {
+        "total_items": len(items),
+        "source_code_success": 0,
+        "summary_only": 0,
+        "detail_requested": 0,
+        "detail_skipped": 0,
+        "detail_errors": 0,
+        "pure_error_records": 0,
+        "blocker_reason": "",
+    }
+    for item in items:
+        record = item.get("record")
+        if not isinstance(record, dict):
+            continue
+        if record.get("_detail_requested"):
+            stats["detail_requested"] += 1
+        if record.get("sourceCode"):
+            stats["source_code_success"] += 1
+            continue
+        if record.get("submitTime"):
+            stats["summary_only"] += 1
+        if record.get("_detail_skipped"):
+            stats["detail_skipped"] += 1
+            if not stats["blocker_reason"]:
+                stats["blocker_reason"] = str(record.get("_detail_skipped") or "")
+        if record.get("_detail_error"):
+            stats["detail_errors"] += 1
+            if not stats["blocker_reason"]:
+                stats["blocker_reason"] = str(record.get("_detail_error") or "")
+        if record.get("error") and not record.get("submitTime"):
+            stats["pure_error_records"] += 1
+            if not stats["blocker_reason"]:
+                stats["blocker_reason"] = str(record.get("error") or "")
+
+    if isinstance(detail_fetch_state, dict) and detail_fetch_state.get("last_detail_error"):
+        stats["blocker_reason"] = str(detail_fetch_state.get("last_detail_error") or stats["blocker_reason"])
+    return stats
+
+
+def build_detail_fetch_overview(detail_fetch_stats: dict | None) -> dict[str, Any]:
+    stats = detail_fetch_stats or {}
+    total_items = int(stats.get("total_items", 0))
+    source_code_success = int(stats.get("source_code_success", 0))
+    summary_only = int(stats.get("summary_only", 0))
+    detail_skipped = int(stats.get("detail_skipped", 0))
+    pure_error_records = int(stats.get("pure_error_records", 0))
+    blocker_reason = str(stats.get("blocker_reason") or "")
+
+    if total_items <= 0:
+        status_label = "未抓取详情"
+        status_bg = "#E5E7EB"
+        status_fg = "#374151"
+    elif pure_error_records > 0:
+        status_label = "存在失败"
+        status_bg = "#FEE2E2"
+        status_fg = "#991B1B"
+    elif detail_skipped > 0:
+        status_label = "已触发止损"
+        status_bg = "#FEF3C7"
+        status_fg = "#92400E"
+    elif source_code_success > 0:
+        status_label = "抓取稳定"
+        status_bg = "#DCFCE7"
+        status_fg = "#166534"
+    else:
+        status_label = "仅摘要保底"
+        status_bg = "#DBEAFE"
+        status_fg = "#1D4ED8"
+
+    return {
+        "status_label": status_label,
+        "status_bg": status_bg,
+        "status_fg": status_fg,
+        "source_code_success": source_code_success,
+        "summary_only": summary_only,
+        "detail_skipped": detail_skipped,
+        "pure_error_records": pure_error_records,
+        "blocker_reason": blocker_reason or "无",
+    }
+
+
+def describe_behavior_fetch_error(exc: Exception) -> str:
+    if isinstance(exc, AuthenticationError):
+        return "未登录或 Cookies 已失效，无法读取提交记录列表"
+    if isinstance(exc, ForbiddenError):
+        return f"无权访问提交记录列表：{exc}"
+    if isinstance(exc, RequestError):
+        if getattr(exc, "status_code", None) == 429:
+            return "请求提交记录过于频繁，请稍后重试"
+        return f"请求提交记录失败：{exc}"
+    message = str(exc).strip()
+    if message:
+        return message
+    return "未获取到有效提交记录"
+
+
+def enrich_problem_tags(
+    luogu: pyLuogu.luoguAPI,
+    problems: list[pyLuogu.ProblemSummary],
+    *,
+    max_fetch: int | None = None,
+) -> int:
+    """
+    为缺失 tags 的题目按需补全标签。
+    优先使用 practice.problems 自带标签；只有为空时才走 problem_detail 兜底。
+    返回本次成功补全的题目数量。
+    """
+    enriched = 0
+    fetched = 0
+    cache: dict[str, list[int]] = {}
+
+    for problem in problems:
+        existing_tags = list(getattr(problem, "tags", []) or [])
+        if existing_tags:
+            continue
+        if max_fetch is not None and fetched >= max_fetch:
+            break
+
+        pid = str(getattr(problem, "pid", "") or "")
+        if not pid:
+            continue
+
+        try:
+            if pid not in cache:
+                fetched += 1
+                detail = luogu.get_problem(pid)
+                problem_detail = getattr(detail, "problem", None)
+                cache[pid] = list(getattr(problem_detail, "tags", []) or [])
+            if cache[pid]:
+                problem.tags = list(cache[pid])
+                enriched += 1
+        except Exception:
+            continue
+
+    return enriched
+
+
+def fetch_behavior_analysis(luogu: pyLuogu.luoguAPI, uid: int, fallback_items: list[dict] | None = None) -> dict:
+    from behavior_analyzer import analyze_submission_behavior
+
+    raw_records: list[dict] = []
+    last_error = None
+    for page in range(1, 26):
+        try:
+            record_list = luogu.get_record_list(page=page, uid=uid, user=str(uid))
+            page_records = getattr(record_list, "records", None) or getattr(record_list, "data", None) or []
+            normalized_records = [
+                rec.to_json() if hasattr(rec, "to_json") else rec
+                for rec in page_records
+            ]
+        except Exception as e:
+            last_error = describe_behavior_fetch_error(e)
+            break
+
+        if not normalized_records:
+            break
+        raw_records.extend(normalized_records)
+        if len(normalized_records) < 20 or len(raw_records) >= 1000:
+            break
+
+    if raw_records:
+        behavior = analyze_submission_behavior(raw_records)
+        behavior["_source"] = "record_list"
+        if last_error:
+            behavior["_warning"] = last_error
+        return behavior
+
+    fallback_records = collect_record_dicts(fallback_items or [])
+    if fallback_records:
+        behavior = analyze_submission_behavior(fallback_records)
+        behavior["_source"] = "record_detail_fallback"
+        if last_error:
+            behavior["_warning"] = last_error
+        return behavior
+
+    return {"error": last_error or "未获取到有效提交记录"}
+
+
+def repair_behavior_analysis_from_items(export_data: dict) -> dict:
+    behavior = export_data.get("behavior_analysis", {}) or {}
+    if behavior and "error" not in behavior and behavior.get("personality_scores"):
+        return behavior
+
+    fallback_records = collect_record_dicts(
+        list(export_data.get("passed_items", []) or []) + list(export_data.get("failed_items", []) or [])
+    )
+    if not fallback_records:
+        return behavior or {"error": "未获取到有效提交记录"}
+
+    from behavior_analyzer import analyze_submission_behavior
+
+    repaired = analyze_submission_behavior(fallback_records)
+    repaired["_source"] = "record_detail_fallback_repaired"
+    if behavior.get("_warning"):
+        repaired["_warning"] = str(behavior["_warning"])
+    elif behavior.get("error"):
+        repaired["_warning"] = str(behavior["error"])
+    export_data["behavior_analysis"] = repaired
+    return repaired
+
+
+def build_trusted_data_summary_md(export_data: dict) -> str:
+    student_info = export_data.get("student_info", {}) or {}
+    eval_time = str(student_info.get("eval_time") or "")
+    summary = export_data.get("summary", {}) or {}
+    difficulty_histogram = summary.get("difficulty_histogram", {}) or {}
+    level_experience = summary.get("level_experience", {}) or {}
+    behavior = export_data.get("behavior_analysis", {}) or {}
+    detail_fetch_stats = export_data.get("detail_fetch_stats", {}) or {}
+    syllabus_eval = export_data.get("syllabus_evaluation", {}) or {}
+
+    total = 0
+    for level in range(1, 8):
+        total += int(difficulty_histogram.get(str(level), difficulty_histogram.get(level, 0)))
+    total = total or 1
+    lines = [
+        "## 数据校准与真实统计",
+        f"- 报告生成时间：{eval_time or '未知'}",
+    ]
+    font_path = find_chinese_font_path()
+    lines.append(f"- 图表中文字体：{font_path or '未检测到（可能出现方框，建议安装 fonts-noto-cjk / wqy-zenhei 或设置 CHINESE_FONT_PATH）'}")
+
+    if behavior and "error" not in behavior:
+        time_points = sum(int(v) for v in (behavior.get("time_slot_distribution", {}) or {}).values())
+        source = behavior.get("_source", "record_list")
+        source_label = "提交记录列表" if source == "record_list" else "题目记录详情回退"
+        lines.append(f"- 提交时间数据：已获取，时间戳样本 {time_points} 条，来源：{source_label}")
+    else:
+        lines.append(f"- 提交时间数据：未完成有效分析，原因：{behavior.get('error', '未知')}")
+
+    lines.extend([
+        "- 说明：下方本节为程序直出的真实统计；若与后续 AI 解读冲突，以本节为准。",
+        "",
+        "### 难度分布（程序生成）",
+        '<table><thead><tr><th>洛谷难度</th><th>题数</th><th>占比</th><th>分布图</th></tr></thead><tbody>',
+    ])
+
+    for level in range(1, 8):
+        count = int(difficulty_histogram.get(str(level), difficulty_histogram.get(level, 0)))
+        name = DIFFICULTY_NAME_MAP[level]
+        color = DIFFICULTY_COLOR_MAP[level]
+        pct = count * 100 / total
+        badge = (
+            f'<span style="display:inline-block;padding:2px 10px;border-radius:6px;'
+            f'background:{color};color:#fff;font-weight:600;">{name}</span>'
+        )
+        lines.append(
+            "<tr>"
+            f"<td>{badge}</td>"
+            f"<td>{count}</td>"
+            f"<td>{pct:.1f}%</td>"
+            f"<td>{_render_progress_bar(pct, color)} <span style=\"margin-left:8px;\">{pct:.1f}%</span></td>"
+            "</tr>"
+        )
+    lines.extend([
+        "</tbody></table>",
+    ])
+    lines.extend(
+        [
+            "",
+            "### 知识点覆盖统计表（按算法标签）",
+            '<table><thead><tr><th>级别</th><th>已覆盖/总数</th><th>覆盖率</th><th>详细情况</th></tr></thead><tbody>',
+        ]
+    )
+
+    for key, label in (
+        ("csp_j", "入门级（CSP-J）"),
+        ("csp_s", "提高级（CSP-S）"),
+        ("provincial", "省选级"),
+        ("noi", "NOI级"),
+    ):
+        group = syllabus_eval.get(key, {}) or {}
+        stats = group.get("stats", {}) or {}
+        total_topics = int(stats.get("total", 0))
+        covered = total_topics - int(stats.get("空白", 0))
+        coverage = group.get("coverage", 0)
+        green = int(stats.get("精通", 0))
+        yellow = int(stats.get("熟练", 0))
+        orange = int(stats.get("入门", 0))
+        blue = int(stats.get("初窥", 0))
+        red = int(stats.get("空白", 0))
+        details = f"🟢{green}项 🟡{yellow}项 🟠{orange}项 🔵{blue}项 🔴{red}项"
+        lines.append(f"<tr><td><strong>{label.split('（')[0].replace('级','')}</strong></td><td>{covered}/{total_topics}</td><td>{coverage}%</td><td>{details}</td></tr>")
+
+    lines.extend(
+        [
+            "</tbody></table>",
+            "",
+            "- 口径说明：本表只根据题目的算法标签评估知识点覆盖，表示“接触过”，不等于“熟练掌握”。",
+        ]
+    )
+
+    return "\n".join(lines)
+
+
+def normalize_report_markdown(report_md: str, export_data: dict) -> str:
+    """对 AI 输出做最小必要的纠偏，锁定难度名称并修正明显错误表述。"""
+    normalized = report_md
+
+    normalized = re.sub(
+        r"(?ms)^\s{0,3}#{2,6}\s*知识点覆盖统计表（按算法标签）\s*\n+.*?(?=^\s{0,3}#{2,6}\s|\Z)",
+        "",
+        normalized,
+    )
+    normalized = re.sub(
+        r"(?ms)^\s{0,3}#{2,6}\s*知识点覆盖表（按算法标签统计）\s*\n+.*?(?=^\s{0,3}#{2,6}\s|\Z)",
+        "",
+        normalized,
+    )
+
+    for idx, name in DIFFICULTY_NAME_MAP.items():
+        normalized = re.sub(rf"难度\s*{idx}\b", name, normalized)
+        normalized = re.sub(rf"难度{idx}\b", name, normalized)
+
+    eval_time = str((export_data.get("student_info", {}) or {}).get("eval_time") or "").strip()
+    if not eval_time:
+        eval_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+    if eval_time:
+        date_only = eval_time.split(" ")[0]
+        normalized = re.sub(r"(诊断日期[：:]\s*)([^\n<]+)", rf"\1{date_only}", normalized)
+        normalized = re.sub(r"(\*\*生成时间\*\*[:：]\s*)([^\n<]+)", rf"\1{eval_time}", normalized)
+        normalized = re.sub(r"(\*\*报告生成时间\*\*[:：]\s*)([^\n<]+)", rf"\1{eval_time}", normalized)
+        normalized = re.sub(r"((?<!\*)生成时间(?!\*)[：:]\s*)([^\n<]+)", rf"\1{eval_time}", normalized)
+        normalized = re.sub(r"((?<!\*)报告生成时间(?!\*)[：:]\s*)([^\n<]+)", rf"\1{eval_time}", normalized)
+        normalized = re.sub(r"(<strong>\s*生成时间\s*</strong>\s*[：:]\s*)([^<\n]+)", rf"\1{eval_time}", normalized, flags=re.I)
+        normalized = re.sub(r"(<strong>\s*报告生成时间\s*</strong>\s*[：:]\s*)([^<\n]+)", rf"\1{eval_time}", normalized, flags=re.I)
+        normalized = normalized.replace("2025年4月", eval_time)
+
+    behavior = export_data.get("behavior_analysis", {}) or {}
+    if behavior and "error" not in behavior:
+        time_points = sum(int(v) for v in (behavior.get("time_slot_distribution", {}) or {}).values())
+        if time_points > 0:
+            normalized = re.sub(r"无时间戳数据[^。！!\n]*[。！!]?", "已获取真实提交时间戳数据，并完成时段分布统计。", normalized)
+            normalized = normalized.replace("无法分析。根据大量AC的记录，推测训练是其日常生活的重要组成。", "已依据真实提交时间戳、活跃天数与时段分布完成分析。")
+
+    normalized = normalized.replace("一发入魂率", "首次 AC 通过分布")
+    normalized = normalized.replace("一发入魂", "首次 AC 通过")
+
+    def _build_difficulty_chart_section_md() -> str:
+        summary = export_data.get("summary", {}) or {}
+        hist = summary.get("difficulty_histogram", {}) or {}
+        solved = int(export_data.get("solved_count", 0))
+        failed = int(export_data.get("failed_count", 0))
+        total_attempted = solved + failed
+
+        def _count(levels: list[int]) -> int:
+            s = 0
+            for lv in levels:
+                s += int(hist.get(str(lv), hist.get(lv, 0)))
+            return s
+
+        z1 = _count([1, 2, 3])
+        z2 = _count([4, 5])
+        z3 = _count([6])
+        z4 = _count([7])
+        z_total = max(1, z1 + z2 + z3 + z4)
+
+        def _pct(v: int) -> str:
+            return f"{(v * 100 / z_total):.1f}%"
+
+        avg_info = summarize_average_difficulty(hist)
+        avg_label = str(avg_info.get("label") or "")
+
+        lines = [
+            "## 3. 难度分布与水平研判",
+            "",
+            "![](assets/difficulty_histogram.png)",
+            "",
+            "![](assets/status_ratio.png)",
+            "",
+            f"- 平均难度：{avg_label}（均值 {float(avg_info.get('average_value') or 0):.2f}）",
+            f"- 题目覆盖区间：入门~普及/提高-(1-3) {z1} 题（{_pct(z1)}）；普及+/提高~提高+/省选-(4-5) {z2} 题（{_pct(z2)}）；省选/NOI-(6) {z3} 题（{_pct(z3)}）；NOI/NOI+/CTSC(7) {z4} 题（{_pct(z4)}）。",
+        ]
+        if total_attempted > 0:
+            lines.append(f"- 通过/未通过：已通过 {solved} 题，未通过 {failed} 题（总尝试 {total_attempted}）。")
+        lines.append("")
+        lines.append("结论：以难度分布与通过比例为准，当前训练重心应优先覆盖 4-6 档的典型模型题，避免只在 1-3 档堆题量。")
+        return "\n".join(lines)
+
+    # 用“图表 + 程序生成说明”替换 AI 的 ASCII 条形图段落，避免乱码/难读
+    normalized = re.sub(
+        r"(?ms)^\s{0,3}#{2,6}\s*3\.\s*难度分布与水平研判\s*\n+.*?(?=^\s{0,3}#{2,6}\s|\Z)",
+        _build_difficulty_chart_section_md() + "\n\n",
+        normalized,
+    )
+
+    trusted_block = build_trusted_data_summary_md(export_data)
+    heading_match = re.match(r"^(# .+\n+)", normalized)
+    if heading_match:
+        head = heading_match.group(1)
+        tail = normalized[len(head):]
+        return f"{head}{trusted_block}\n\n{tail}"
+    return f"{trusted_block}\n\n{normalized}"
+
+
 def compute_ability_scores(export_data: dict) -> dict[str, int]:
     summary = export_data.get("summary", {}) or {}
-    top_tags = summary.get("top_tags", []) or []
+    top_tags = summary.get("top_algorithm_tags", []) or summary.get("top_tags", []) or []
     difficulty_histogram = summary.get("difficulty_histogram", {}) or {}
     solved_count = int(export_data.get("solved_count", 0))
     failed_count = int(export_data.get("failed_count", 0))
@@ -126,24 +884,17 @@ def compute_ability_scores(export_data: dict) -> dict[str, int]:
 def generate_chart_images(export_data: dict, output_dir: str) -> dict[str, str]:
     ensure_dir(output_dir)
     configure_matplotlib_font()
+    plt.style.use("default")
+    repair_behavior_analysis_from_items(export_data)
 
     chart_paths: dict[str, str] = {}
     summary = export_data.get("summary", {}) or {}
     difficulty_histogram = summary.get("difficulty_histogram", {}) or {}
-    top_tags = summary.get("top_tags", []) or []
+    top_tags = summary.get("top_algorithm_tags", []) or summary.get("top_tags", []) or []
     solved_count = int(export_data.get("solved_count", 0))
     failed_count = int(export_data.get("failed_count", 0))
 
-    difficulty_meta = {
-        0: ("暂无评定", "#9CA3AF"),
-        1: ("入门", "#EF4444"),
-        2: ("普及-", "#F97316"),
-        3: ("普及/提高-", "#F59E0B"),
-        4: ("普及+/提高", "#22C55E"),
-        5: ("提高+/省选-", "#3B82F6"),
-        6: ("省选/NOI-", "#A855F7"),
-        7: ("NOI/NOI+/CTSC", "#111827"),
-    }
+    difficulty_meta = {level: get_difficulty_style(level) for level in DIFFICULTY_NAME_MAP}
 
     def _get_hist_count(key: int | str) -> int:
         if key in difficulty_histogram:
@@ -156,7 +907,9 @@ def generate_chart_images(export_data: dict, output_dir: str) -> dict[str, str]:
     for k in difficulty_histogram.keys():
         ks = str(k)
         if ks.isdigit():
-            numeric_levels.append(int(ks))
+            level = int(ks)
+            if level > 0:
+                numeric_levels.append(level)
         else:
             other_keys.append(ks)
 
@@ -169,7 +922,7 @@ def generate_chart_images(export_data: dict, output_dir: str) -> dict[str, str]:
         colors: list[str] = []
 
         for level in numeric_levels:
-            name, color = difficulty_meta.get(level, (str(level), "#4C78A8"))
+            name, color, _ = difficulty_meta.get(level, (str(level), "#4C78A8", "#FFFFFF"))
             labels.append(name)
             values.append(_get_hist_count(level))
             colors.append(color)
@@ -179,51 +932,84 @@ def generate_chart_images(export_data: dict, output_dir: str) -> dict[str, str]:
             values.append(_get_hist_count(k))
             colors.append("#4C78A8")
 
-        fig, ax = plt.subplots(figsize=(7.6, 4.6))
+        fig, ax = plt.subplots(figsize=(8.6, 5.0), facecolor="#FFFFFF")
         x = list(range(len(labels)))
-        ax.bar(x, values, color=colors, edgecolor="#E5E7EB")
+        bars = ax.bar(x, values, color=colors, width=0.68, edgecolor="none")
         ax.set_title("题目难度分布（按洛谷难度等级）")
         ax.set_xlabel("难度")
         ax.set_ylabel("题目数量")
         ax.set_xticks(x)
-        ax.set_xticklabels(labels, rotation=20, ha="right")
-        for idx, value in enumerate(values):
-            ax.text(idx, value + 0.1, str(value), ha="center", va="bottom", fontsize=9)
+        ax.set_xticklabels(labels, rotation=20, ha="right", fontsize=12)
+        ax.yaxis.grid(True, linestyle="--", linewidth=0.8, color="#E5E7EB")
+        ax.set_axisbelow(True)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_color("#CBD5E1")
+        ax.spines["bottom"].set_color("#CBD5E1")
+        max_value = max(values) if values else 0
+        total_count = sum(values)
+        for idx, (bar, value) in enumerate(zip(bars, values)):
+            pct = (value / total_count * 100) if total_count else 0
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                value + max(max_value * 0.03, 0.12),
+                f"{value} 题\n{pct:.1f}%",
+                ha="center",
+                va="bottom",
+                fontsize=11,
+                color=colors[idx],
+                fontweight="bold",
+            )
         fig.tight_layout()
         difficulty_path = os.path.join(output_dir, "difficulty_histogram.png")
-        fig.savefig(difficulty_path, dpi=180, bbox_inches="tight")
+        fig.savefig(difficulty_path, dpi=200, bbox_inches="tight", facecolor=fig.get_facecolor())
         plt.close(fig)
         chart_paths["difficulty"] = difficulty_path
 
-    fig, ax = plt.subplots(figsize=(6.2, 4.2))
+    fig, ax = plt.subplots(figsize=(6.4, 4.4), facecolor="#FFFFFF")
     counts = [solved_count, failed_count]
     labels = ["已通过", "未通过"]
-    colors_list = ["#59A14F", "#E15759"]
+    colors_list = ["#52C41A", "#FE4C61"]
     if sum(counts) == 0:
         counts = [1]
         labels = ["暂无数据"]
         colors_list = ["#BAB0AC"]
-    ax.pie(counts, labels=labels, autopct="%1.0f%%", startangle=90, colors=colors_list)
+    ax.pie(
+        counts,
+        labels=labels,
+        autopct="%1.0f%%",
+        startangle=90,
+        colors=colors_list,
+        wedgeprops={"width": 0.45, "edgecolor": "#FFFFFF"},
+        textprops={"fontsize": 12},
+    )
     ax.set_title("通过 / 未通过占比")
     fig.tight_layout()
     status_path = os.path.join(output_dir, "status_ratio.png")
-    fig.savefig(status_path, dpi=180, bbox_inches="tight")
+    fig.savefig(status_path, dpi=200, bbox_inches="tight", facecolor=fig.get_facecolor())
     plt.close(fig)
     chart_paths["status"] = status_path
 
     selected_tags = top_tags[:8]
     if selected_tags:
-        fig, ax = plt.subplots(figsize=(8, 4.8))
+        fig, ax = plt.subplots(figsize=(8.4, 5.0), facecolor="#FFFFFF")
         tag_names = [str(item.get("name") or item.get("id")) for item in selected_tags][::-1]
         tag_counts = [int(item.get("count", 0)) for item in selected_tags][::-1]
-        ax.barh(tag_names, tag_counts, color="#F28E2B")
-        ax.set_title("高频标签 Top 8")
+        tag_colors = [TAG_CHART_PALETTE[idx % len(TAG_CHART_PALETTE)] for idx in range(len(tag_names))]
+        bars = ax.barh(tag_names, tag_counts, color=tag_colors, edgecolor="none")
+        ax.set_title("高频算法标签 Top 8")
         ax.set_xlabel("出现次数")
-        for idx, value in enumerate(tag_counts):
-            ax.text(value + 0.1, idx, str(value), va="center", fontsize=9)
+        ax.xaxis.grid(True, linestyle="--", linewidth=0.8, color="#E5E7EB")
+        ax.set_axisbelow(True)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_color("#CBD5E1")
+        ax.spines["bottom"].set_color("#CBD5E1")
+        for idx, (bar, value) in enumerate(zip(bars, tag_counts)):
+            ax.text(value + 0.1, idx, str(value), va="center", fontsize=11, color=tag_colors[idx], fontweight="bold")
         fig.tight_layout()
         tags_path = os.path.join(output_dir, "top_tags.png")
-        fig.savefig(tags_path, dpi=180, bbox_inches="tight")
+        fig.savefig(tags_path, dpi=200, bbox_inches="tight", facecolor=fig.get_facecolor())
         plt.close(fig)
         chart_paths["tags"] = tags_path
 
@@ -238,7 +1024,7 @@ def generate_chart_images(export_data: dict, output_dir: str) -> dict[str, str]:
         ax = plt.subplot(111, polar=True)
         ax.set_theta_offset(math.pi / 2)
         ax.set_theta_direction(-1)
-        ax.set_thetagrids([angle * 180 / math.pi for angle in angles[:-1]], radar_labels, fontsize=9)
+        ax.set_thetagrids([angle * 180 / math.pi for angle in angles[:-1]], radar_labels, fontsize=11)
         ax.set_ylim(0, 100)
         zone_colors = [
             (0, 40, "#FDECEC"),
@@ -251,7 +1037,7 @@ def generate_chart_images(export_data: dict, output_dir: str) -> dict[str, str]:
             ax.fill_between(zone_angles, start, end, color=zone_color, alpha=0.35)
         ax.plot(angles, radar_plot_values, color="#4C78A8", linewidth=2)
         ax.fill(angles, radar_plot_values, color="#4C78A8", alpha=0.25)
-        ax.set_rgrids([20, 40, 60, 80, 100], angle=90, fontsize=8, color="#8A96A3")
+        ax.set_rgrids([20, 40, 60, 80, 100], angle=90, fontsize=10, color="#8A96A3")
         ax.set_title("能力雷达图", pad=18)
         radar_path = os.path.join(output_dir, "ability_radar.png")
         fig.savefig(radar_path, dpi=180, bbox_inches="tight")
@@ -272,7 +1058,7 @@ def generate_chart_images(export_data: dict, output_dir: str) -> dict[str, str]:
         ax = plt.subplot(111, polar=True)
         ax.set_theta_offset(math.pi / 2)
         ax.set_theta_direction(-1)
-        ax.set_thetagrids([angle * 180 / math.pi for angle in angles[:-1]], p_labels, fontsize=10)
+        ax.set_thetagrids([angle * 180 / math.pi for angle in angles[:-1]], p_labels, fontsize=12)
         ax.set_ylim(0, 100)
         
         # 性格雷达图配色使用偏橙色/活力的色调
@@ -288,7 +1074,7 @@ def generate_chart_images(export_data: dict, output_dir: str) -> dict[str, str]:
             
         ax.plot(angles, p_plot_values, color="#D97706", linewidth=2.5)
         ax.fill(angles, p_plot_values, color="#F59E0B", alpha=0.3)
-        ax.set_rgrids([20, 40, 60, 80, 100], angle=90, fontsize=8, color="#9CA3AF")
+        ax.set_rgrids([20, 40, 60, 80, 100], angle=90, fontsize=10, color="#9CA3AF")
         ax.set_title("性格特质雷达图", pad=18, fontsize=12, fontweight="bold", color="#92400E")
         
         p_radar_path = os.path.join(output_dir, "personality_radar.png")
@@ -296,7 +1082,7 @@ def generate_chart_images(export_data: dict, output_dir: str) -> dict[str, str]:
         plt.close(fig)
         chart_paths["personality_radar"] = p_radar_path
 
-    # 生成一发入魂率柱状图
+    # 生成首次 AC 提交次数分布柱状图
     ac_submit_distribution = behavior_data.get("ac_submit_distribution", {})
     if ac_submit_distribution:
         def _dist_get(mapping: dict, key: int) -> int:
@@ -335,7 +1121,7 @@ def generate_chart_images(export_data: dict, output_dir: str) -> dict[str, str]:
             # 设置颜色：第一发是深蓝色，其他是浅蓝色
             colors = ["#2563EB" if l == "1" else "#93C5FD" for l in labels]
             bars = ax.bar(labels, values, color=colors, edgecolor="none")
-            ax.set_title("AC 所需提交次数分布（一发入魂率）", fontsize=12, fontweight="bold")
+            ax.set_title("首次 AC 提交次数分布", fontsize=12, fontweight="bold")
             ax.set_xlabel("AC 所需提交次数")
             ax.set_ylabel("题目数")
             
@@ -345,7 +1131,7 @@ def generate_chart_images(export_data: dict, output_dir: str) -> dict[str, str]:
                 height = bar.get_height()
                 ax.text(bar.get_x() + bar.get_width()/2., height + 0.5,
                         f"{value}\n({percentage:.0f}%)",
-                        ha="center", va="bottom", fontsize=8)
+                        ha="center", va="bottom", fontsize=10)
                         
             fig.tight_layout()
             ac_dist_path = os.path.join(output_dir, "ac_submit_distribution.png")
@@ -360,8 +1146,8 @@ def build_html_and_pdf(report_md: str, export_data: dict, html_path: str, pdf_pa
     # 扩展 markdown，支持表格
     report_html = md.markdown(report_md, extensions=['tables', 'fenced_code'])
     report_html = re.sub(
-        r"((?:⭐|☆){3,5})",
-        lambda m: f'<span style="color:#f59e0b;font-size:1.05em;letter-spacing:1px;">{m.group(1)}</span>',
+        r"((?:⭐|☆){1,5})",
+        lambda m: render_star_rating_html(m.group(1)),
         report_html,
     )
     
@@ -468,16 +1254,12 @@ def build_html_and_pdf(report_md: str, export_data: dict, html_path: str, pdf_pa
     # 准备模板数据
     summary = export_data.get("summary", {}) or {}
     difficulty_histogram = summary.get("difficulty_histogram", {}) or {}
-    total = 0
-    weighted = 0
-    for key, value in difficulty_histogram.items():
-        if str(key).isdigit():
-            total += int(value)
-            weighted += int(key) * int(value)
-    avg_difficulty = f"{(weighted / total):.1f}" if total else "0.0"
+    avg_difficulty_info = summarize_average_difficulty(difficulty_histogram)
+    avg_difficulty = f"{float(avg_difficulty_info['average_value']):.1f}"
+    detail_fetch_overview = build_detail_fetch_overview(export_data.get("detail_fetch_stats", {}) or {})
     
     top_tag = "暂无"
-    top_tags = summary.get("top_tags", []) or []
+    top_tags = summary.get("top_algorithm_tags", []) or summary.get("top_tags", []) or []
     if top_tags:
         top_tag = str(top_tags[0].get("name") or top_tags[0].get("id"))
 
@@ -511,6 +1293,10 @@ def build_html_and_pdf(report_md: str, export_data: dict, html_path: str, pdf_pa
         report_html=report_html,
         chart_paths=chart_srcs,
         avg_difficulty=avg_difficulty,
+        avg_difficulty_label=str(avg_difficulty_info["label"]),
+        avg_difficulty_color=str(avg_difficulty_info["color"]),
+        avg_difficulty_text_color=str(avg_difficulty_info["text_color"]),
+        detail_fetch_overview=detail_fetch_overview,
         top_tag=top_tag
     )
 
@@ -587,6 +1373,10 @@ def load_or_prompt_cookies():
     return cookies
 
 def generate_ai_report(export_data: dict, api_key: str, base_url: str | None, model_name: str) -> str:
+    from syllabus_matcher import format_syllabus_report, load_syllabus_context
+
+    repair_behavior_analysis_from_items(export_data)
+
     client_kwargs = {"api_key": api_key}
     if base_url:
         client_kwargs["base_url"] = base_url
@@ -626,7 +1416,7 @@ def generate_ai_report(export_data: dict, api_key: str, base_url: str | None, mo
         from behavior_analyzer import format_behavior_summary
         behavior_summary = format_behavior_summary(behavior_data)
     else:
-        behavior_summary = "**提交行为分析**: 未获取到提交记录数据。"
+        behavior_summary = f"**提交行为分析**: {behavior_data.get('error', '未获取到提交记录数据。')}"
 
     # 代码风格静态分析
     from code_analyzer import analyze_code_style, format_code_analysis
@@ -642,7 +1432,6 @@ def generate_ai_report(export_data: dict, api_key: str, base_url: str | None, mo
     syllabus_eval = export_data.get("syllabus_evaluation", {})
     syllabus_summary = ""
     if syllabus_eval:
-        from syllabus_matcher import format_syllabus_report
         syllabus_summary = format_syllabus_report(syllabus_eval)
     else:
         syllabus_summary = "**大纲知识点对标**: 未获取到评估数据。"
@@ -655,19 +1444,14 @@ def generate_ai_report(export_data: dict, api_key: str, base_url: str | None, mo
         for dim, score in six_dim.items():
             six_dim_text += f"| {dim} | {score} |\n"
 
-    # Load syllabus contexts if available
+    syllabus_context_info = load_syllabus_context(max_chars=20000)
     syllabus_context = ""
-    syllabus_candidates = [
-        "NOI大纲_Syllabus_Edition_2025.pdf.txt",
-        "GESP考纲.pdf.txt",
-        "noi大纲.pdf.txt",
-    ]
-    for syllabus_file in syllabus_candidates:
-        syllabus_path = Path(syllabus_file)
-        if syllabus_path.exists():
-            content = syllabus_path.read_text(encoding="utf-8")
-            syllabus_context += f"【{syllabus_file} 内容摘要】\n{content[:20000]}\n\n"
-            break  # 优先使用最新版大纲
+    if syllabus_context_info.get("content"):
+        source_path = syllabus_context_info.get("path") or "未知路径"
+        syllabus_context = (
+            f"【2025 大纲真实来源】{syllabus_context_info.get('source')} | {source_path}\n"
+            f"{syllabus_context_info['content']}\n\n"
+        )
 
     import datetime
     current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -698,8 +1482,9 @@ def generate_ai_report(export_data: dict, api_key: str, base_url: str | None, mo
 ### 选手的全局数据统计
 - 本次导出中已通过题数: {solved_count}
 - 本次导出中未通过/卡住题数: {failed_count}
+- 卡题数（定义：同一道题提交>=3次且最终未AC）: {len((behavior_data or {}).get('stuck_problems', [])) if isinstance(behavior_data, dict) else 0}
 - 难度分布直方图: {json.dumps(summary.get('difficulty_histogram'))}
-- 偏好的算法标签: {json.dumps(summary.get('top_tags'))}
+- 偏好的算法标签: {json.dumps(summary.get('top_algorithm_tags') or summary.get('top_tags'))}
 
 ### 六维能力评分
 {six_dim_text if six_dim_text else '未计算'}
@@ -720,23 +1505,24 @@ def generate_ai_report(export_data: dict, api_key: str, base_url: str | None, mo
 
 请你输出一份结构化的 Markdown 辅导报告，必须包含以下部分。在生成 Markdown 时，请务必使用以下视觉元素增强表现力：
  - 评分请使用黄色星级，如 ⭐⭐⭐⭐☆ (使用 ⭐ 和 ☆)
- - 难度或占比进度条请使用区块字符，如 ██████████ 16%
+ - 难度名称必须使用洛谷官方口径，如“入门 / 普及- / 普及+/提高 / 提高+/省选- / 省选/NOI-”，严禁写“难度1/难度2”
+ - 不要生成黑白字符图表或黑白直方图；如果需要表达占比或难度，请优先使用 HTML 彩色徽章、彩色表格，或直接引用上方图表结论
  - 等级前缀符号请使用 🟢精通 | 🟡熟练 | 🟠入门 | 🔵初窥 | 🔴空白
  - 各处点评或结论段落，请使用 `<p class="text-blue-700 font-semibold">解读：...</p>` 样式包装。
  - 整个报告尽可能以 Markdown 表格、区块等图表化、直观的形式呈现，少用长篇大论的文字。
 
  1. **【选手概览与性格画像】**：
-    基于提交行为数据，提炼选手的性格画像（坚韧度、完美主义、冒险精神、自律性、调试耐心、作息规律）。用黄色星级（如 ⭐⭐⭐⭐☆）评分，并附上数据支撑和拟人化评价。如果数据不足以评估某一项，请标注“无法评估”并说明原因（如：作息规律无法评估是因为未能获取具体的提交时间点数据）。
+    基于提交行为数据，提炼选手的性格画像（坚韧度、完美主义、冒险精神、自律性、调试耐心、作息规律）。用黄色星级（如 ⭐⭐⭐⭐☆）评分，并附上数据支撑和拟人化评价。只要上文已经给出了提交时间分布、活跃天数、重交间隔等行为数据，就严禁写“提交记录缺失”“作息规律无法评估”“行为数据不足”等表述。
 
  2. **【提交行为深度分析】**：
     基于提供的提交行为数据，以表格和重点解读的形式，深入分析用户的提交习惯。必须包含以下子模块：
     - **死磕题目 TOP (提交次数最多)**：列出提交次数最多的几道题，分析原因。
-    - **一次 AC 率**：分析“一发入魂”和多次尝试的比例。
+     - **首次 AC 情况**：分析首次通过和多次尝试后通过的比例。
     - **其他显著行为特征**：如单日高强度刷题记录、长耗时题目等。
     (注意：此部分请用表格展示数据，并在表下附上 `<p class="text-blue-700 font-semibold">特征：...</p>`)
 
  3. **【难度分布与水平研判】**：
-    分析选手的难度分布特征，判断其处于哪个阶段（入门/普及/提高/省选）。使用 HTML 彩色区块（如 `<span style="display:inline-block;width:100px;height:12px;background-color:#3b82f6;"></span>`）生成直观的横向进度条，不同难度使用不同颜色，不要再生成成长曲线。
+    分析选手的难度分布特征，判断其处于哪个阶段（入门/普及/提高/省选）。必须使用洛谷官方难度名称：暂无评定、入门、普及-、普及/提高-、普及+/提高、提高+/省选-、省选/NOI-、NOI/NOI+/CTSC。严禁输出“难度1/难度2/难度3”。
 
  4. **【六维能力雷达表与诊断】（评分参考：85-100 优秀 | 65-84 良好 | 40-64 基础 | <40 薄弱）**：
       输出 Markdown 表格，评估选手在六大维度的状态：`| 能力块 | 评分 | 当前等级 | 数据证据 | 已经具备 |`
@@ -746,7 +1532,8 @@ def generate_ai_report(export_data: dict, api_key: str, base_url: str | None, mo
      - **当前对应等级水平**：明确指出该选手目前处于 CSP-J / CSP-S / 省选 / NOI 哪个阶段。
      - **知识点强弱项**：严格对照考纲中的知识点名词，列出其掌握得最好的 3 个考点，以及最薄弱的 3 个考点（使用 🟢🟡🔴 标注）。
      - **训练盲区**：指出他在当前等级中"完全没有涉及/刷题数据中缺失"的必考知识点。
-     - **分级汇总表**：输出 CSP-J / CSP-S / 省选级 / NOI级 的覆盖率统计表格。
+     - **知识点覆盖表**：输出 CSP-J / CSP-S / 省选级 / NOI级 的知识点覆盖率统计表格，并明确说明这是按算法标签统计，不等于做过该级别题目。
+     - **题目级别经历表**：单独说明做过多少道 CSP-S / 省选 / NOI 级别题，按来源标签与难度双证据解释，不要与知识点覆盖混为一谈。
 
   6. **【风险诊断与训练闭环表】**：
      输出 Markdown 表格：`| 优先级 | 风险项 | 触发场景 | 比赛症状 | 根因判断 | 训练专题 | 验收标准 |`
@@ -783,8 +1570,9 @@ def generate_ai_report(export_data: dict, api_key: str, base_url: str | None, mo
             {"role": "user", "content": prompt}
         ]
     )
-    
-    return response.choices[0].message.content
+
+    content = response.choices[0].message.content or ""
+    return normalize_report_markdown(content, export_data)
 
 def extract_problems_from_practice(practice_data, key: str):
     problems = []
@@ -801,6 +1589,7 @@ def extract_problems_from_practice(practice_data, key: str):
                             "title": item.get("title") or item.get("name") or "",
                             "difficulty": item.get("difficulty"),
                             "type": item.get("type"),
+                            "tags": item.get("tags") or [],
                         })
                     )
     return problems
@@ -837,60 +1626,63 @@ def main():
             tag_by_id, type_by_id = _build_tag_maps(luogu)
             practice = luogu.get_user_practice(uid)
             
-            from behavior_analyzer import analyze_submission_behavior, compute_six_dimension_scores
+            from behavior_analyzer import compute_six_dimension_scores
             from syllabus_matcher import evaluate_all_topics
-            
-            # Fetch behavior data by fetching recent submissions
-            try:
-                progress.update(task, description="[cyan]Fetching recent submissions for behavior analysis...")
-                raw_records = []
-                for page in range(1, 26):
-                    record_list = luogu.get_record_list(page=page, uid=uid, user=str(uid))
-                    page_records = getattr(record_list, "records", None) or getattr(record_list, "data", None) or []
-                    normalized_records = [
-                        rec.to_json() if hasattr(rec, "to_json") else rec
-                        for rec in page_records
-                    ]
-                    if not normalized_records:
-                        break
-                    raw_records.extend(normalized_records)
-                    if len(normalized_records) < 20 or len(raw_records) >= 1000:
-                        break
-                behavior_analysis = analyze_submission_behavior(raw_records)
-            except Exception as e:
-                console.print(f"[yellow]Failed to fetch behavior analysis data: {e}[/yellow]")
-                behavior_analysis = {"error": str(e)}
-            
-            # Fetch Passed
-            all_passed_problems = extract_problems_from_practice(practice.data, "passed")
+
+            all_passed_problems, all_failed_problems = split_practice_problems(practice)
+            progress.update(task, description="[cyan]Backfilling missing problem tags when needed...")
+            enrich_problem_tags(luogu, all_passed_problems)
             all_passed_problems.sort(key=lambda p: (p.difficulty if p.difficulty is not None else 10, p.pid), reverse=True)
             passed_problems = all_passed_problems[:args.max_passed]
-            
-            # Fetch Failed (Attempted but not passed)
-            all_failed_problems = extract_problems_from_practice(practice.data, "failed")
             all_failed_problems.sort(key=lambda p: (p.difficulty if p.difficulty is not None else 10, p.pid), reverse=True)
             failed_problems = all_failed_problems[:args.max_failed]
             
             progress.update(task, description=f"[cyan]Fetching submissions for {len(passed_problems)} passed and {len(failed_problems)} failed problems...")
             
+            detail_fetch_state: dict[str, object] = {}
             passed_items = []
-            for problem in passed_problems:
+            for idx, problem in enumerate(passed_problems):
                 try:
-                    record = _pick_record_for_problem(luogu=luogu, uid=uid, pid=problem.pid, max_records_to_try=2)
+                    record = _pick_record_for_problem(
+                        luogu=luogu,
+                        uid=uid,
+                        pid=problem.pid,
+                        max_records_to_try=2,
+                        require_source_code=idx < DETAIL_FETCH_SAMPLE_LIMIT_PASSED,
+                        detail_fetch_state=detail_fetch_state,
+                    )
                 except Exception as e:
                     record = {"error": str(e)}
                 passed_items.append({"problem": problem.to_json(), "record": record})
                 
             failed_items = []
-            for problem in failed_problems:
+            for idx, problem in enumerate(failed_problems):
                 try:
-                    record = _pick_record_for_problem(luogu=luogu, uid=uid, pid=problem.pid, max_records_to_try=2)
+                    record = _pick_record_for_problem(
+                        luogu=luogu,
+                        uid=uid,
+                        pid=problem.pid,
+                        max_records_to_try=2,
+                        require_source_code=idx < DETAIL_FETCH_SAMPLE_LIMIT_FAILED,
+                        detail_fetch_state=detail_fetch_state,
+                    )
                 except Exception as e:
                     record = {"error": str(e)}
                 failed_items.append({"problem": problem.to_json(), "record": record})
-                
-            summary = _summarize(all_passed_problems + all_failed_problems, tag_by_id=tag_by_id)
-            syllabus_evaluation = evaluate_all_topics(summary.get("top_tags", []))
+
+            progress.update(task, description="[cyan]Fetching recent submissions for behavior analysis...")
+            behavior_analysis = fetch_behavior_analysis(luogu, uid, passed_items + failed_items)
+            behavior_analysis = repair_behavior_analysis_from_items(
+                {
+                    "passed_items": passed_items,
+                    "failed_items": failed_items,
+                    "behavior_analysis": behavior_analysis,
+                }
+            )
+            detail_fetch_stats = summarize_detail_fetch_stats(passed_items, failed_items, detail_fetch_state)
+
+            summary = _summarize(all_passed_problems, tag_by_id=tag_by_id)
+            syllabus_evaluation = evaluate_all_topics(summary.get("top_algorithm_tags", []) or summary.get("top_tags", []))
             six_dim_scores = compute_six_dimension_scores(
                 {"solved_count": len(all_passed_problems), "summary": summary},
                 behavior_analysis if "error" not in behavior_analysis else {},
@@ -909,6 +1701,7 @@ def main():
                 "summary": summary,
                 "passed_items": passed_items,
                 "failed_items": failed_items,
+                "detail_fetch_stats": detail_fetch_stats,
                 "behavior_analysis": behavior_analysis,
                 "syllabus_evaluation": syllabus_evaluation,
                 "six_dimension_scores": six_dim_scores,

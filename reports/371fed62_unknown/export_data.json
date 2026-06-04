@@ -1,0 +1,758 @@
+{
+  "student_info": {
+    "name": "????",
+    "school": "????",
+    "grade": "????",
+    "eval_time": "2026-06-03 21:46"
+  },
+  "solved_count": 67,
+  "failed_count": 0,
+  "summary": {
+    "difficulty_histogram": {
+      "1": 3,
+      "2": 8,
+      "3": 22,
+      "4": 12,
+      "5": 14,
+      "6": 8
+    },
+    "tag_type_histogram": {},
+    "top_tags": []
+  },
+  "passed_items": [
+    {
+      "problem": {
+        "pid": "P4980",
+        "title": "【模板】Pólya 定理",
+        "difficulty": 6,
+        "type": "P"
+      },
+      "record": null
+    }
+  ],
+  "failed_items": [],
+  "behavior_analysis": {
+    "error": "未获取提交记录"
+  },
+  "syllabus_evaluation": {
+    "csp_j": {
+      "details": [
+        {
+          "topic": "枚举法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "模拟法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "贪心法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "递推法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "递归法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "二分法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "倍增法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "前缀和",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "差分",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "排序",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "DFS",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "BFS",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Flood Fill",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "DP基础",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "背包DP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "区间DP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "图遍历",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "链表",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "栈",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "队列",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "二叉树遍历",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "哈夫曼树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "BST",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "GCD",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "素数筛法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "排列组合",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "杨辉三角",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "进制转换",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        }
+      ],
+      "stats": {
+        "total": 28,
+        "精通": 0,
+        "熟练": 0,
+        "入门": 0,
+        "初窥": 0,
+        "空白": 28
+      },
+      "coverage": 0.0,
+      "total_ac": 0
+    },
+    "csp_s": {
+      "details": [
+        {
+          "topic": "单调栈/队列",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "双端队列",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "ST表",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "并查集",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "树状数组",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "线段树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "优先队列/堆",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "字典树Trie",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "笛卡尔树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "平衡树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "二分图",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "欧拉图",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "强连通图",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "分治",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "离散化",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "扫描线",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "归并排序",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "快速排序",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "KMP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Manacher",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "剪枝优化",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "记忆化搜索",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "启发式搜索",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "双向BFS",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "迭代加深",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "树形DP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "状压DP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "多维DP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "DP优化",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "最小生成树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "最短路",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Floyd",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "拓扑排序",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "单源次短路",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "欧拉道路",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "同余式",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "欧拉定理/函数",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "费马小定理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "逆元",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "扩展欧几里得",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "中国剩余定理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "快速幂",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "容斥原理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "卡特兰数",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "矩阵运算",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "高斯消元",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "鸽巢原理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "二项式定理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "错排列/圆排列",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        }
+      ],
+      "stats": {
+        "total": 49,
+        "精通": 0,
+        "熟练": 0,
+        "入门": 0,
+        "初窥": 0,
+        "空白": 49
+      },
+      "coverage": 0.0,
+      "total_ac": 0
+    },
+    "provincial": {
+      "details": [
+        {
+          "topic": "匈牙利算法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "网络流",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "分块",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Nim博弈/SG",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "离线处理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "可持久化线段树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "块状链表",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "随机化",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "复杂DP模型",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "构造",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        }
+      ],
+      "stats": {
+        "total": 10,
+        "精通": 0,
+        "熟练": 0,
+        "入门": 0,
+        "初窥": 0,
+        "空白": 10
+      },
+      "coverage": 0.0,
+      "total_ac": 0
+    },
+    "noi": {
+      "details": [
+        {
+          "topic": "后缀数组",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "后缀自动机",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "AC自动机",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "树链剖分",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "LCT",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "CDQ分治",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "点分治",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "虚树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "FFT/NTT",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "FWT",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "斜率优化DP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "四边形不等式",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "线性基",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Pollard-Rho",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Miller-Rabin",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "杜教筛",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Min_25筛",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "圆方树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "2-SAT",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "差分约束",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "无源汇上下界",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "有源汇上下界",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "KM算法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "一般图匹配",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "莫比乌斯反演",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Burnside引理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Polya定理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "原根",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "BSGS",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "扩展BSGS",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "单位根反演",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "单纯形",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "计算几何基础",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "半平面交",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "旋转卡壳",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "扫描线(几何)",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "k-d树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "替罪羊树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Treap",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Splay",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "WBLT",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "析合树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "笛卡尔树(高级)",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        }
+      ],
+      "stats": {
+        "total": 43,
+        "精通": 0,
+        "熟练": 0,
+        "入门": 0,
+        "初窥": 0,
+        "空白": 43
+      },
+      "coverage": 0.0,
+      "total_ac": 0
+    },
+    "overall": {
+      "total_topics": 130,
+      "covered_topics": 0,
+      "coverage_rate": 0.0
+    }
+  },
+  "six_dimension_scores": {
+    "基础算法": 58,
+    "数据结构": 44,
+    "图论": 44,
+    "动态规划": 53,
+    "字符串": 36,
+    "数学": 31
+  }
+}

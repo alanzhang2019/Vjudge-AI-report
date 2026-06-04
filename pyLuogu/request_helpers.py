@@ -1,4 +1,6 @@
+import json
 import re
+import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
@@ -21,6 +23,38 @@ CONTENT_ONLY_HEADERS = {
     "x-luogu-type": "content-only",
     "x-lentille-request": "content-only",
 }
+
+
+# #region debug-point A:record-list-html-classification
+def _debug_report(hypothesis_id: str, location: str, msg: str, data: dict[str, Any] | None = None) -> None:
+    env_path = ".dbg/record-list-html.env"
+    debug_url = "http://127.0.0.1:7777/event"
+    session_id = "record-list-html"
+    try:
+        with open(env_path, "r", encoding="utf-8") as env_file:
+            for line in env_file:
+                line = line.strip()
+                if line.startswith("DEBUG_SERVER_URL="):
+                    debug_url = line.split("=", 1)[1]
+                elif line.startswith("DEBUG_SESSION_ID="):
+                    session_id = line.split("=", 1)[1]
+        payload = {
+            "sessionId": session_id,
+            "runId": "pre-fix",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "msg": msg,
+            "data": data or {},
+        }
+        request = urllib.request.Request(
+            debug_url,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        urllib.request.urlopen(request, timeout=0.4).read()
+    except Exception:
+        return
+# #endregion
 
 
 @dataclass
@@ -72,7 +106,39 @@ def decode_json_response(response: httpx.Response) -> Any:
     try:
         return response.json()
     except ValueError:
-        raise RequestError("Failed to decode JSON response") from None
+        content_type = response.headers.get("content-type", "")
+        prefix = response.text[:120].replace("\r", "\\r").replace("\n", "\\n")
+        text_lower = response.text[:2048].lower()
+        debug_kind = "non_html"
+        if "text/html" in content_type.lower():
+            if "login" in text_lower or "登录" in text_lower or "auth" in text_lower:
+                debug_kind = "html-login-like"
+            elif "captcha" in text_lower or "验证" in text_lower or "shield" in text_lower or "安全" in text_lower:
+                debug_kind = "html-risk-like"
+            else:
+                debug_kind = "html-other"
+        _debug_report(
+            "A",
+            "pyLuogu/request_helpers.py:decode_json_response",
+            "[DEBUG] JSON decode failed",
+            {
+                "url": str(response.request.url),
+                "status": response.status_code,
+                "content_type": content_type,
+                "kind": debug_kind,
+                "prefix": prefix,
+            },
+        )
+        if (
+            "text/html" in content_type.lower()
+            and ("login" in text_lower or "登录" in text_lower or "auth" in text_lower)
+        ):
+            raise AuthenticationError("Need Login") from None
+        raise RequestError(
+            f"Failed to decode JSON response "
+            f"[url={response.request.url}, status={response.status_code}, "
+            f"content_type={content_type}, prefix={prefix}]"
+        ) from None
 
 
 def unwrap_luogu_data(payload: Any) -> Any:
@@ -97,6 +163,8 @@ def handle_luogu_json_payload(payload: Any, endpoint: str) -> Any:
         return payload
 
     if payload.get("currentTemplate") == "AuthLogin":
+        raise AuthenticationError("Need Login")
+    if payload.get("instance") == "auth" and payload.get("template") == "login":
         raise AuthenticationError("Need Login")
 
     code = payload.get("code")

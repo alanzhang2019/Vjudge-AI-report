@@ -241,6 +241,44 @@ class TestLuoguAPI(unittest.TestCase):
         self.assertEqual(call_args.kwargs["form"], {"method": "update"})
         self.assertEqual(call_args.kwargs["response_type"], "text")
 
+    def test_get_user_following_list_accepts_plain_user_arrays(self):
+        payload = {
+            "users": [
+                {
+                    "uid": 1,
+                    "name": "user",
+                    "avatar": "avatar",
+                    "slogan": "",
+                    "badge": "",
+                    "isAdmin": False,
+                    "isBanned": False,
+                    "isRoot": False,
+                    "color": "Blue",
+                    "ccfLevel": 0,
+                    "background": "",
+                    "followingCount": 1,
+                    "followerCount": 2,
+                    "ranking": 3,
+                    "registerTime": 4,
+                    "introduction": "",
+                    "prize": [],
+                    "elo": None,
+                    "eloMax": None,
+                    "userRelationship": 0,
+                    "reverseUserRelationship": 0,
+                    "passedProblemCount": 5,
+                    "submittedProblemCount": 6,
+                }
+            ]
+        }
+
+        with patch.object(self.api, "_send_request", return_value=payload):
+            users = self.api.get_user_following_list(1)
+
+        self.assertEqual(len(users), 1)
+        self.assertEqual(users[0].uid, 1)
+        self.assertEqual(users[0].submittedProblemCount, 6)
+
     def test_static_api_exposes_cache_pools(self):
         api = staticLuoguAPI()
 

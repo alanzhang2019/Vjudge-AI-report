@@ -35,9 +35,22 @@ def init_db():
             solved_count INTEGER DEFAULT 0,
             failed_count INTEGER DEFAULT 0,
             eval_time TEXT DEFAULT '',
+            stage TEXT DEFAULT '',
+            source_code_success INTEGER DEFAULT 0,
+            source_code_total INTEGER DEFAULT 0,
             created_at TEXT DEFAULT ''
         )
     """)
+    # 兼容历史数据库：旧表可能缺字段，做增量迁移
+    for ddl in (
+        "ALTER TABLE tasks ADD COLUMN stage TEXT DEFAULT ''",
+        "ALTER TABLE tasks ADD COLUMN source_code_success INTEGER DEFAULT 0",
+        "ALTER TABLE tasks ADD COLUMN source_code_total INTEGER DEFAULT 0",
+    ):
+        try:
+            conn.execute(ddl)
+        except sqlite3.OperationalError:
+            pass
     conn.commit()
     conn.close()
 

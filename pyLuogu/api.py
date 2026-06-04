@@ -188,17 +188,17 @@ class luoguAPI(SyncLuoguTransportMixin):
     def get_user_following_list(self, uid: int, page: int | None = None) -> List[UserDetails]:
         params = user_list_params(uid, page)
         res = self._send_request(endpoint=user_followings_endpoint(), params=params)
-        return [UserDetails(user) for user in res["users"]["result"]]
+        return [UserDetails(user) for user in extract_list_or_paged_results(res.get("users"))]
 
     def get_user_follower_list(self, uid: int, page: int | None = None) -> List[UserDetails]:
         params = user_list_params(uid, page)
         res = self._send_request(endpoint=user_followers_endpoint(), params=params)
-        return [UserDetails(user) for user in res["users"]["result"]]
+        return [UserDetails(user) for user in extract_list_or_paged_results(res.get("users"))]
 
     def get_user_blacklist(self, uid: int, page: int | None = None) -> List[UserDetails]:
         params = user_list_params(uid, page)
         res = self._send_request(endpoint=user_blacklist_endpoint(), params=params)
-        return [UserDetails(user) for user in res["users"]["result"]]
+        return [UserDetails(user) for user in extract_list_or_paged_results(res.get("users"))]
     
     def search_user(self, keyword: str) -> List[UserSummary]:
         params = UserSearchRequestParams({"keyword" : keyword})

@@ -79,6 +79,14 @@ def normalize_optional_paged_field(data: dict[str, Any], candidates: tuple[str, 
     return data
 
 
+def extract_list_or_paged_results(value: Any) -> list[Any]:
+    if isinstance(value, dict) and isinstance(value.get("result"), list):
+        return value["result"]
+    if isinstance(value, list):
+        return value
+    return []
+
+
 def normalize_problem_list(data: dict[str, Any]) -> dict[str, Any]:
     data = flatten_paged_field(data, "problems")
     problems = data.get("problems")

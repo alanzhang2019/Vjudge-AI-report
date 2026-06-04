@@ -15,6 +15,7 @@ from .request_helpers import (
     captcha_headers,
     csrf_fetch_headers,
     decode_json_response,
+    _debug_report,
     extract_c3vk,
     handle_http_status_error,
     handle_luogu_json_payload,
@@ -115,6 +116,19 @@ class LuoguTransportBase:
             endpoint: str,
             response_type: Literal["json", "bytes", "text", "response"],
     ) -> Any | RetryRequest:
+        content_type = response.headers.get("content-type", "").lower()
+        if response_type == "json" and "text/html" in content_type and self._store_c3vk_from_html(response.text):
+            _debug_report(
+                "B",
+                "pyLuogu/transport.py:_response_data_or_retry",
+                "[DEBUG] C3VK challenge detected, retrying request",
+                {
+                    "endpoint": endpoint,
+                    "url": str(response.request.url),
+                    "status": response.status_code,
+                },
+            )
+            return RetryRequest(delay=0.2)
         try:
             return self._raw_response_data(response, response_type, endpoint)
         except httpx.HTTPStatusError as e:

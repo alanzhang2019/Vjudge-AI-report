@@ -4,7 +4,12 @@ NOI 大纲知识点对标模块
 """
 
 from pathlib import Path
+import re
 from typing import Any
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+SYLLABUS_2025_PDF = PROJECT_ROOT / "NOI大纲_Syllabus_Edition_2025.pdf"
+SYLLABUS_2025_TEXT = PROJECT_ROOT / "NOI大纲_Syllabus_Edition_2025.pdf.txt"
 
 # CSP-J 知识点定义 (入门级)
 CSP_J_TOPICS = {
@@ -40,6 +45,7 @@ CSP_J_TOPICS = {
 
 # CSP-S 知识点定义 (提高级)
 CSP_S_TOPICS = {
+    "位集合bitset": ["bitset", "位集合"],
     "单调栈/队列": ["单调栈", "单调队列"],
     "双端队列": ["双端队列"],
     "ST表": ["st表", "稀疏表"],
@@ -119,7 +125,7 @@ NOI_TOPICS = {
     "FWT": ["fwt"],
     "斜率优化DP": ["斜率优化"],
     "四边形不等式": ["四边形不等式"],
-    "线性基": ["线性基"],
+    "基与线性基": ["线性基", "基"],
     "Pollard-Rho": ["pollard", "rho"],
     "Miller-Rabin": ["miller", "rabin"],
     "杜教筛": ["杜教筛"],
@@ -151,6 +157,204 @@ NOI_TOPICS = {
     "析合树": ["析合树"],
     "笛卡尔树(高级)": ["笛卡尔树"],
 }
+
+
+def _normalize_syllabus_text(raw_text: str) -> str:
+    text = (raw_text or "").replace("\x00", "")
+    raw_lines = [line.strip() for line in text.splitlines()]
+
+    def _is_noise_line(line: str) -> bool:
+        if not line:
+            return True
+        if line in {
+            "LoN",
+            "OV",
+            "NOI",
+            ">>>>",
+            "CHINA COMPUTERFEDERATION",
+            "CHINACOMPUTERFEDERATION",
+            "CCFNOI科学委员会全体审定",
+            "中国计耳栈学会",
+            "中国計算栈学会",
+            "全国青少年信息学奥林匹克系列竞赛大纲",
+        }:
+            return True
+        if line.startswith("Email:") or line.startswith("网址：http"):
+            return True
+        if re.fullmatch(r"[A-Za-z][A-Za-z\s]{0,30}", line):
+            return True
+        if re.fullmatch(r"\d+", line):
+            return True
+        return False
+
+    def _is_new_block(line: str) -> bool:
+        if re.match(r"^[（(]\d+[）)]", line):
+            return True
+        if re.match(r"^\d+(?:\.\d+)*\s*", line):
+            return True
+        if re.match(r"^[·•\-]", line):
+            return True
+        if line in {"序", "目录", "简介", "内容", "附录", "索引"}:
+            return True
+        return False
+
+    filtered_lines: list[str] = []
+    skip_preface_credit_block = False
+    kept_titles: set[str] = set()
+    for line in raw_lines:
+        if _is_noise_line(line):
+            continue
+        if re.match(r"^20(?:21|23|25)版(?:修订|调研|起草|审阅)：", line):
+            skip_preface_credit_block = True
+            continue
+        if skip_preface_credit_block:
+            if line in {"2025年4月", "日期：2025-4-15", "目录"}:
+                skip_preface_credit_block = False
+            else:
+                continue
+        # 去掉 OCR 误识别的多余空格与英文拼写断裂。
+        line = re.sub(r"\s+", " ", line).strip()
+        line = line.replace("OlympiadinInformatics", "Olympiad in Informatics")
+        line = line.replace("Olympiad inInformatics", "Olympiad in Informatics")
+        line = line.replace("ChinaTeam", "China Team")
+        line = line.replace("NOl级", "NOI级")
+
+        if line.startswith("序") and len(line) > 3:
+            filtered_lines.append("序")
+            line = line[1:].strip()
+
+        if re.match(r"^全国青少年信息学奥林匹克系列竞赛大纲[（(].*版[）)]?$", line):
+            if "title-main" in kept_titles:
+                continue
+            kept_titles.add("title-main")
+        elif line == "全国青少年信息学奥林匹克竞赛（CCF NOI）":
+            if "title-sub" in kept_titles:
+                continue
+            kept_titles.add("title-sub")
+
+        if line:
+            filtered_lines.append(line)
+
+    merged_lines: list[str] = []
+    for line in filtered_lines:
+        if not merged_lines:
+            merged_lines.append(line)
+            continue
+
+        prev = merged_lines[-1]
+        if (
+            not _is_new_block(line)
+            and not _is_new_block(prev)
+            and not re.search(r"[。！？；：:）)]$", prev)
+        ):
+            merged_lines[-1] = prev + line
+        else:
+            merged_lines.append(line)
+
+    compact = "\n".join(line for line in merged_lines if line)
+    compact = re.sub(r"\n{3,}", "\n\n", compact)
+    return compact.strip()
+
+
+def _extract_text_with_pypdf(pdf_path: Path) -> str:
+    try:
+        from pypdf import PdfReader
+    except Exception:
+        return ""
+
+    try:
+        reader = PdfReader(str(pdf_path))
+        return "\n".join((page.extract_text() or "") for page in reader.pages)
+    except Exception:
+        return ""
+
+
+def _extract_text_with_pymupdf(pdf_path: Path) -> str:
+    try:
+        import fitz
+    except Exception:
+        return ""
+
+    try:
+        doc = fitz.open(str(pdf_path))
+        return "\n".join(doc.load_page(i).get_text() for i in range(doc.page_count))
+    except Exception:
+        return ""
+
+
+def _extract_text_with_ocr(pdf_path: Path) -> str:
+    """
+    针对扫描版 PDF 的 OCR 回退方案。
+    依赖: pymupdf + rapidocr_onnxruntime + numpy
+    """
+    try:
+        import fitz
+        import numpy as np
+        from rapidocr_onnxruntime import RapidOCR
+    except Exception:
+        return ""
+
+    try:
+        doc = fitz.open(str(pdf_path))
+        engine = RapidOCR()
+        page_texts: list[str] = []
+
+        for page_index in range(doc.page_count):
+            page = doc.load_page(page_index)
+            # 2x 放大提升 OCR 效果，同时保持可接受的处理时间。
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+            img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+            result, _ = engine(img)
+            lines = [str(item[1]).strip() for item in (result or []) if len(item) > 1 and str(item[1]).strip()]
+            if lines:
+                page_texts.append("\n".join(lines))
+
+        return "\n\n".join(page_texts)
+    except Exception:
+        return ""
+
+
+def load_syllabus_context(max_chars: int = 20000) -> dict[str, Any]:
+    """
+    优先使用 2025 大纲文本缓存；若缓存不存在，则尝试从 PDF 自动提取并生成缓存。
+    返回内容与来源元数据，便于报告中明确标注数据来源。
+    """
+    if SYLLABUS_2025_TEXT.exists():
+        raw_cached = SYLLABUS_2025_TEXT.read_text(encoding="utf-8", errors="replace")
+        content = _normalize_syllabus_text(raw_cached)
+        if content:
+            if content != raw_cached.strip():
+                SYLLABUS_2025_TEXT.write_text(content, encoding="utf-8")
+            return {
+                "content": content[:max_chars],
+                "source": "txt-cache",
+                "path": str(SYLLABUS_2025_TEXT),
+                "full_length": len(content),
+            }
+
+    if SYLLABUS_2025_PDF.exists():
+        for extractor_name, extractor in (
+            ("pypdf", _extract_text_with_pypdf),
+            ("pymupdf", _extract_text_with_pymupdf),
+            ("ocr-rapidocr", _extract_text_with_ocr),
+        ):
+            extracted = _normalize_syllabus_text(extractor(SYLLABUS_2025_PDF))
+            if len(extracted) >= 500:
+                SYLLABUS_2025_TEXT.write_text(extracted, encoding="utf-8")
+                return {
+                    "content": extracted[:max_chars],
+                    "source": f"pdf-extracted:{extractor_name}",
+                    "path": str(SYLLABUS_2025_PDF),
+                    "full_length": len(extracted),
+                }
+        return {
+            "content": "",
+            "source": "pdf-unextractable",
+            "path": str(SYLLABUS_2025_PDF),
+            "full_length": 0,
+        }
+
+    return {"content": "", "source": "missing", "path": str(SYLLABUS_2025_PDF), "full_length": 0}
 
 
 def _match_topic(tag_name: str, keywords: list[str]) -> bool:
@@ -247,6 +451,7 @@ def evaluate_all_topics(top_tags: list[dict]) -> dict[str, Any]:
             "covered_topics": all_total - all_red,
             "coverage_rate": all_coverage,
         },
+        "source": load_syllabus_context(max_chars=0),
     }
 
 
@@ -254,6 +459,19 @@ def format_syllabus_report(evaluation: dict[str, Any]) -> str:
     """将大纲评估结果格式化为 Markdown 报告"""
     lines = []
     lines.append("## CSP-NOI 2025 大纲知识点对标")
+    lines.append("")
+    source_info = evaluation.get("source", {}) or {}
+    source_name_map = {
+        "txt-cache": "2025 大纲文本缓存",
+        "pdf-unextractable": "2025 大纲 PDF（未能自动提取正文，当前按内置 2025 主题表匹配）",
+        "missing": "未找到 2025 大纲文件",
+    }
+    source_label = source_name_map.get(source_info.get("source"), source_info.get("source", "未知来源"))
+    lines.append(f"**当前考纲来源**: {source_label}")
+    if source_info.get("path"):
+        lines.append(f"**来源路径**: {source_info.get('path')}")
+    lines.append("")
+    lines.append("**口径说明**: 本节只根据题目的算法标签评估知识点覆盖，不直接等同于做过某级别来源题。题目级别经历请以下方程序统计表为准。")
     lines.append("")
     lines.append("评级标准: 🟢 精通(20+) | 🟡 熟练(10-19) | 🟠 入门(3-9) | 🔵 初窥(1-2) | 🔴 空白(0)")
     lines.append("")

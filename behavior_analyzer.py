@@ -57,7 +57,7 @@ def analyze_submission_behavior(records: list[dict[str, Any]]) -> dict[str, Any]
     total_tried_pids = 0
     max_submit_pid = None
     max_submit_count = 0
-    stuck_pids = []  # 死磕题（提交>=5次）
+    stuck_pids = []  # 卡题（提交>=3次且最终未AC）
     long_time_pids = []  # 长耗时题
     ac_submit_distribution = Counter() # 记录每次 AC 之前提交的次数
 
@@ -77,13 +77,14 @@ def analyze_submission_behavior(records: list[dict[str, Any]]) -> dict[str, Any]
             if ac_idx == 0:
                 first_try_ac += 1
 
-        # 死磕题
-        if len(submits) >= 5:
+        # 卡题：三次及以上提交且最终未通过
+        has_ac = any(s.get("status") == 12 for s in submits)
+        if len(submits) >= 3 and not has_ac:
             stuck_pids.append({
                 "pid": pid,
                 "title": submits[0].get("problem", {}).get("title", ""),
                 "submit_count": len(submits),
-                "final_status": "AC" if any(s.get("status") == 12 for s in submits) else "未AC",
+                "final_status": "未AC",
             })
 
         if len(submits) > max_submit_count:
@@ -263,7 +264,7 @@ def compute_six_dimension_scores(export_data: dict, behavior_data: dict) -> dict
     参考 report_public.pdf 中的评分体系
     """
     summary = export_data.get("summary", {}) or {}
-    top_tags = summary.get("top_tags", []) or []
+    top_tags = summary.get("top_algorithm_tags", []) or summary.get("top_tags", []) or []
     difficulty_histogram = summary.get("difficulty_histogram", {}) or {}
     solved_count = int(export_data.get("solved_count", 0))
 
@@ -353,6 +354,7 @@ def format_behavior_summary(behavior_data: dict) -> str:
     lines.append(f"- **整体 AC 率**: {behavior_data.get('ac_rate', 0) * 100:.1f}%")
     lines.append(f"- **一次 AC 率**: {behavior_data.get('first_try_ac_rate', 0) * 100:.1f}%")
     lines.append(f"- **编译错误 (CE) 次数**: {behavior_data.get('ce_count', 0)} ({behavior_data.get('ce_rate', 0) * 100:.1f}%)")
+    lines.append(f"- **卡题数（>=3次提交且最终未AC）**: {len(behavior_data.get('stuck_problems', []))}")
     lines.append("")
 
     lines.append("### 作息规律")

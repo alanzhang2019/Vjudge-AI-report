@@ -7,6 +7,23 @@ from typing import Any
 
 import pyLuogu
 from pyLuogu.api_helpers import raw_params
+from pyLuogu.errors import AuthenticationError, ForbiddenError, RequestError, RateLimitError
+from pyLuogu.request_helpers import _debug_report
+
+
+LEVEL_LABELS = {
+    "csp_j": "CSP-J",
+    "csp_s": "CSP-S",
+    "provincial": "省选",
+    "noi": "NOI",
+}
+
+DETAIL_FETCH_SAMPLE_LIMIT_PASSED = 30
+DETAIL_FETCH_SAMPLE_LIMIT_FAILED = 20
+DETAIL_FETCH_SLEEP_SECONDS = 1.8
+DETAIL_FETCH_MAX_RETRIES = 5
+RECORD_LIST_PAGES_TO_TRY = 3
+RECORD_LIST_MAX_RETRIES = 4
 
 
 def _safe_makedirs_for_file(path: str) -> None:
@@ -26,10 +43,65 @@ def _build_tag_maps(luogu: pyLuogu.luoguAPI) -> tuple[dict[int, dict[str, Any]],
     return tag_by_id, type_by_id
 
 
+def _empty_level_experience() -> dict[str, dict[str, int | str]]:
+    return {
+        key: {
+            "label": label,
+            "solved": 0,
+            "by_difficulty": 0,
+            "by_origin": 0,
+        }
+        for key, label in LEVEL_LABELS.items()
+    }
+
+
+def _infer_problem_level_flags(problem: pyLuogu.ProblemSummary, tag_by_id: dict[int, dict[str, Any]]) -> dict[str, tuple[bool, bool]]:
+    difficulty_raw = getattr(problem, "difficulty", None)
+    difficulty = None if difficulty_raw is None else int(difficulty_raw)
+    tag_names: list[str] = []
+    origin_tag_names: list[str] = []
+    for tag_id in list(getattr(problem, "tags", []) or []):
+        tag = tag_by_id.get(int(tag_id)) or {}
+        name = str(tag.get("name") or "").strip().lower()
+        if not name:
+            continue
+        tag_names.append(name)
+        if int(tag.get("type") or 0) == 3:
+            origin_tag_names.append(name)
+
+    all_names = " ".join(tag_names)
+    origin_names = " ".join(origin_tag_names)
+
+    difficulty_flags = {
+        "csp_j": difficulty is not None and difficulty >= 1,
+        "csp_s": difficulty is not None and difficulty >= 4,
+        "provincial": difficulty is not None and difficulty >= 6,
+        "noi": difficulty is not None and difficulty >= 7,
+    }
+    origin_flags = {
+        "csp_j": any(keyword in all_names for keyword in ("入门", "普及", "noip 普及组", "csp-j")),
+        "csp_s": any(keyword in origin_names for keyword in ("提高组", "csp-s", "普及+/提高", "提高+/省选-", "省选", "noi", "hnoi", "noi-")),
+        "provincial": any(keyword in origin_names for keyword in ("省选", "省队", "hnoi", "noi-")),
+        "noi": any(keyword in origin_names for keyword in ("noi", "ctsc", "ioi", "apio")),
+    }
+    if origin_flags["noi"]:
+        origin_flags["provincial"] = True
+        origin_flags["csp_s"] = True
+    if origin_flags["provincial"]:
+        origin_flags["csp_s"] = True
+
+    flags: dict[str, tuple[bool, bool]] = {}
+    for key in LEVEL_LABELS:
+        flags[key] = (difficulty_flags[key], origin_flags[key])
+    return flags
+
+
 def _summarize(problems: list[pyLuogu.ProblemSummary], tag_by_id: dict[int, dict[str, Any]]) -> dict[str, Any]:
     difficulty_counter: Counter[int] = Counter()
     tag_counter: Counter[int] = Counter()
+    algorithm_tag_counter: Counter[int] = Counter()
     tag_type_counter: Counter[int] = Counter()
+    level_experience = _empty_level_experience()
 
     for p in problems:
         if p.difficulty is not None:
@@ -40,6 +112,15 @@ def _summarize(problems: list[pyLuogu.ProblemSummary], tag_by_id: dict[int, dict
                 tag_type = tag_by_id.get(int(tag_id), {}).get("type")
                 if tag_type is not None:
                     tag_type_counter[int(tag_type)] += 1
+                    if int(tag_type) == 2:
+                        algorithm_tag_counter[int(tag_id)] += 1
+        for level_key, (by_difficulty, by_origin) in _infer_problem_level_flags(p, tag_by_id).items():
+            if by_difficulty or by_origin:
+                level_experience[level_key]["solved"] = int(level_experience[level_key]["solved"]) + 1
+            if by_difficulty:
+                level_experience[level_key]["by_difficulty"] = int(level_experience[level_key]["by_difficulty"]) + 1
+            if by_origin:
+                level_experience[level_key]["by_origin"] = int(level_experience[level_key]["by_origin"]) + 1
 
     top_tags = []
     for tag_id, count in tag_counter.most_common(30):
@@ -53,10 +134,24 @@ def _summarize(problems: list[pyLuogu.ProblemSummary], tag_by_id: dict[int, dict
             }
         )
 
+    top_algorithm_tags = []
+    for tag_id, count in algorithm_tag_counter.most_common():
+        tag = tag_by_id.get(tag_id)
+        top_algorithm_tags.append(
+            {
+                "id": tag_id,
+                "name": None if tag is None else tag.get("name"),
+                "type": None if tag is None else tag.get("type"),
+                "count": int(count),
+            }
+        )
+
     return {
         "difficulty_histogram": {str(k): int(v) for k, v in sorted(difficulty_counter.items())},
         "tag_type_histogram": {str(k): int(v) for k, v in sorted(tag_type_counter.items())},
         "top_tags": top_tags,
+        "top_algorithm_tags": top_algorithm_tags,
+        "level_experience": level_experience,
     }
 
 
@@ -88,25 +183,171 @@ def _pick_record_for_problem(
         uid: int,
         pid: str,
         max_records_to_try: int,
+        *,
+        require_source_code: bool = True,
+        detail_fetch_state: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    record_list = luogu.get_record_list(page=1, uid=uid, pid=pid, user=str(uid))
-    if not record_list.records:
+    def _to_summary_record(record_obj: Any) -> dict[str, Any]:
+        summary_json = record_obj.to_json() if hasattr(record_obj, "to_json") else dict(record_obj)
+        summary_json.setdefault("sourceCode", None)
+        return summary_json
+
+    def _merge_record_dict(base: dict[str, Any], update: dict[str, Any]) -> dict[str, Any]:
+        merged = dict(base)
+        for key, value in update.items():
+            if value is not None:
+                merged[key] = value
+        merged.setdefault("sourceCode", None)
+        return merged
+
+    def _is_blocking_detail_error(exc: Exception) -> bool:
+        if isinstance(exc, (AuthenticationError, ForbiddenError)):
+            return True
+        if isinstance(exc, RateLimitError):
+            return False
+        if isinstance(exc, RequestError) and getattr(exc, "status_code", None) == 429:
+            return False
+        message = str(exc).strip().lower()
+        return ("need login" in message) or ("auth" in message and "login" in message)
+
+    def _build_list_level_fallback(reason: str) -> dict[str, Any]:
+        return {
+            "sourceCode": None,
+            "_detail_requested": bool(require_source_code),
+            "_detail_skipped": reason,
+            "_record_list_unavailable": True,
+        }
+
+    state = detail_fetch_state if isinstance(detail_fetch_state, dict) else {}
+    if state.get("stop_detail_fetch"):
+        return _build_list_level_fallback(str(state.get("last_detail_error") or "detail fetch stopped"))
+    record_list = None
+    merged_records: list[Any] = []
+    seen_record_ids: set[str] = set()
+    last_list_exc: Exception | None = None
+    for page in range(1, RECORD_LIST_PAGES_TO_TRY + 1):
+        last_list_exc = None
+        for attempt in range(RECORD_LIST_MAX_RETRIES):
+            if DETAIL_FETCH_SLEEP_SECONDS > 0:
+                time.sleep(DETAIL_FETCH_SLEEP_SECONDS * (1 + attempt * 0.7))
+            try:
+                record_list = luogu.get_record_list(page=page, uid=uid, pid=pid, user=str(uid))
+                last_list_exc = None
+                break
+            except Exception as exc:
+                last_list_exc = exc
+                if isinstance(exc, RateLimitError) or (isinstance(exc, RequestError) and getattr(exc, "status_code", None) == 429):
+                    continue
+                break
+        if record_list and getattr(record_list, "records", None):
+            for r in record_list.records:
+                rid = str(getattr(r, "id", ""))
+                if rid and rid not in seen_record_ids:
+                    merged_records.append(r)
+                    seen_record_ids.add(rid)
+            if merged_records:
+                break
+
+    if not merged_records and last_list_exc is not None:
+        _debug_report(
+            "D",
+            "examples/export_for_ai.py:_pick_record_for_problem:list",
+            "[DEBUG] record list fetch failed before fallback",
+            {
+                "uid": uid,
+                "pid": pid,
+                "require_source_code": bool(require_source_code),
+                "error": str(last_list_exc),
+                "state_stop_detail_fetch": bool(state.get("stop_detail_fetch")),
+            },
+        )
+        if _is_blocking_detail_error(last_list_exc):
+            state["stop_detail_fetch"] = True
+            state["last_detail_error"] = str(last_list_exc)
+            return _build_list_level_fallback(str(last_list_exc))
+        raise last_list_exc
+
+    if not merged_records:
+        _debug_report(
+            "D",
+            "examples/export_for_ai.py:_pick_record_for_problem:empty",
+            "[DEBUG] record list returned no records",
+            {
+                "uid": uid,
+                "pid": pid,
+                "require_source_code": bool(require_source_code),
+            },
+        )
         return None
 
     tried = 0
-    for record in record_list.records:
+    best_effort_record: dict[str, Any] | None = None
+    if state.get("stop_detail_fetch"):
+        first_record = merged_records[0]
+        best_effort_record = _to_summary_record(first_record)
+        best_effort_record["_detail_requested"] = bool(require_source_code)
+        best_effort_record["_detail_skipped"] = str(state.get("last_detail_error") or "detail fetch stopped")
+        _debug_report(
+            "D",
+            "examples/export_for_ai.py:_pick_record_for_problem:skip",
+            "[DEBUG] detail fetch skipped and summary fallback kept",
+            {
+                "uid": uid,
+                "pid": pid,
+                "error": str(state.get("last_detail_error") or ""),
+            },
+        )
+        return best_effort_record
+
+    for record in merged_records:
         if tried >= max_records_to_try:
             break
         tried += 1
-        detail = luogu.get_record(str(record.id)).record
-        detail_json = detail.to_json()
-        code = detail.sourceCode
-        detail_json["sourceCode"] = code
-        if code:
-            return detail_json
-        if tried == 1:
-            return detail_json
-    return None
+        summary_json = _to_summary_record(record)
+        summary_json["_detail_requested"] = bool(require_source_code)
+        if best_effort_record is None and isinstance(summary_json, dict):
+            best_effort_record = dict(summary_json)
+        if not require_source_code:
+            continue
+
+        last_exc: Exception | None = None
+        for attempt in range(DETAIL_FETCH_MAX_RETRIES):
+            if DETAIL_FETCH_SLEEP_SECONDS > 0:
+                time.sleep(DETAIL_FETCH_SLEEP_SECONDS * (1 + attempt * 0.5))
+            try:
+                detail = luogu.get_record(str(record.id)).record
+                detail_json = detail.to_json()
+                code = detail.sourceCode
+                detail_json["sourceCode"] = code
+                detail_json["_detail_requested"] = True
+                if code:
+                    return detail_json
+                best_effort_record = _merge_record_dict(best_effort_record or summary_json, detail_json)
+                last_exc = None
+                break
+            except Exception as exc:
+                last_exc = exc
+                if best_effort_record is not None:
+                    best_effort_record.setdefault("sourceCode", None)
+                    best_effort_record["_detail_error"] = str(exc)
+                if _is_blocking_detail_error(exc):
+                    state["stop_detail_fetch"] = True
+                    state["last_detail_error"] = str(exc)
+                    _debug_report(
+                        "D",
+                        "examples/export_for_ai.py:_pick_record_for_problem:block",
+                        "[DEBUG] detail fetch triggered circuit breaker",
+                        {
+                            "uid": uid,
+                            "pid": pid,
+                            "record_id": str(getattr(record, "id", "")),
+                            "error": str(exc),
+                        },
+                    )
+                    break
+        if state.get("stop_detail_fetch"):
+            break
+    return best_effort_record
 
 
 def _is_code_file(path: str) -> bool:

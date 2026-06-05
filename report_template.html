@@ -235,6 +235,18 @@
                 <p class="text-sm text-gray-500 mt-2">图 4：首次 AC 提交次数分布</p>
             </div>
             {% endif %}
+            {% if chart_paths.status %}
+            <div class="text-center">
+                <img src="{{ chart_paths.status }}" class="mx-auto" style="max-height: 250px;" alt="通过/未通过占比">
+                <p class="text-sm text-gray-500 mt-2">图 5：通过/未通过占比</p>
+            </div>
+            {% endif %}
+            {% if chart_paths.tags %}
+            <div class="text-center">
+                <img src="{{ chart_paths.tags }}" class="mx-auto" style="max-height: 250px;" alt="高频算法标签 Top 8">
+                <p class="text-sm text-gray-500 mt-2">图 6：高频算法标签 Top 8</p>
+            </div>
+            {% endif %}
         </div>
     </div>
 

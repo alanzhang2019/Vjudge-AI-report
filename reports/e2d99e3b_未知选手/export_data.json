@@ -1,0 +1,905 @@
+{
+  "student_info": {
+    "name": "未知选手",
+    "school": "未知学校",
+    "grade": "未知年级",
+    "eval_time": "2026-06-04 17:17"
+  },
+  "solved_count": 0,
+  "failed_count": 1,
+  "summary": {
+    "difficulty_histogram": {},
+    "tag_type_histogram": {},
+    "top_tags": [],
+    "top_algorithm_tags": [],
+    "level_experience": {
+      "csp_j": {
+        "label": "CSP-J",
+        "solved": 0,
+        "by_difficulty": 0,
+        "by_origin": 0
+      },
+      "csp_s": {
+        "label": "CSP-S",
+        "solved": 0,
+        "by_difficulty": 0,
+        "by_origin": 0
+      },
+      "provincial": {
+        "label": "省选",
+        "solved": 0,
+        "by_difficulty": 0,
+        "by_origin": 0
+      },
+      "noi": {
+        "label": "NOI",
+        "solved": 0,
+        "by_difficulty": 0,
+        "by_origin": 0
+      }
+    }
+  },
+  "passed_items": [],
+  "failed_items": [
+    {
+      "problem": {
+        "pid": "P1000",
+        "title": "超级玛丽游戏",
+        "difficulty": 1,
+        "type": "P",
+        "submitted": true,
+        "accepted": false
+      },
+      "record": {
+        "time": 0,
+        "memory": 0,
+        "problem": {
+          "pid": "P1000",
+          "title": "超级玛丽游戏",
+          "difficulty": 1,
+          "type": "P"
+        },
+        "sourceCodeLength": 1127,
+        "submitTime": 1776844163,
+        "language": 28,
+        "user": {
+          "uid": 2155944,
+          "name": "meide",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/2155944.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 275081744,
+        "status": 2,
+        "enableO2": true,
+        "detail": {
+          "compileResult": {
+            "success": false,
+            "message": "/tmp/compiler_vdh70ulm/src:3:16: 错误：程序中有游离的‘##’\n    3 |                ####....#.\n      |                ^~\n/tmp/compiler_vdh70ulm/src:3:18: 错误：程序中有游离的‘##’\n    3 |                ####....#.\n      |                  ^~\n/tmp/compiler_vdh70ulm/src:3:24: 错误：程序中有游离的‘#’\n    3 |                ####....#.\n      |                        ^\n/tmp/compiler_vdh70ulm/src:4:15: 错误：无效的预处理指示 #.\n    4 |              #..###.....##....\n      |               ^\n/tmp/compiler_vdh70ulm/src:5:14: 错误：程序中有游离的‘##’\n    5 |              ###.......######              ###            ###\n      |              ^~\n/tmp/compiler_vdh70ulm/src:5:16: 错误：程序中有游离的‘#’\n    5 |              ###.......######              ###            ###\n      |                ^\n/tmp/compiler_vdh70ulm/src:5:24: 错误：程序中有游离的‘##’\n    5 |              ###.......######              ###            ###\n      |                        ^~\n/tmp/compiler_vdh70ulm/src:5:26: 错误：程序中有游离的‘##’\n    5 |              ###.......######              ###            ###\n      |                          ^~\n/tmp/compiler_vdh70ulm/src:5:28: 错误：程序中有游离的‘##’\n    5 |              ###.......######              ###            ###\n      |                            ^~\n/tmp/compiler_vdh70ulm/src:5:44: 错误：程序中有游离的‘##’\n    5 |              ###.......######              ###            ###\n      |                                            ^~\n/tmp/compiler_vdh70ulm/src:5:46: 错误：程序中有游离的‘#’\n    5 |              ###.......######              ###            ###\n      |                                              ^\n/tmp/compiler_vdh70ulm/src:5:59: 错误：程序中有游离的‘##’\n    5 |              ###.......######              ###            ###\n      |                                                           ^~\n/tmp/compiler_vdh70ulm/src:5:61: 错误：程序中有游离的‘#’\n    5 |              ###.......######              ###            ###\n      |                                                             ^\n/tmp/compiler_vdh70ulm/src:6:43: 错误：程序中有游离的‘#’\n    6 |                 ...........               #...#          #...#\n      |                                           ^\n/tmp/compiler_vdh70ulm/src:6:47: 错误：程序中有游离的‘#’\n    6 |                 ...........               #...#          #...#\n      |                                               ^\n/tmp/compiler_vdh70ulm/src:6:58: 错误：程序中有游离的‘#’\n    6 |                 ...........               #...#          #...#\n      |                                                          ^\n/tmp/compiler_vdh70ulm/src:6:62: 错误：程序中有游离的‘#’\n    6 |                 ...........               #...#          #...#\n      |                                                              ^\n/tmp/compiler_vdh70ulm/src:7:16: 错误：程序中有游离的‘##’\n    7 |                ##*#######                 #.#.#          #.#.#\n      |                ^~\n/tmp/compiler_vdh70ulm/src:7:19: 错误：程序中有游离的‘##’\n    7 |                ##*#######                 #.#.#          #.#.#\n      |                   ^~\n/tmp/compiler_vdh70ulm/src:7:21: 错误：程序中有游离的‘##’\n    7 |                ##*#######                 #.#.#          #.#.#\n      |                     ^~\n/tmp/compiler_vdh70ulm/src:7:23: 错误：程序中有游离的‘##’\n    7 |                ##*#######                 #.#.#          #.#.#\n      |                       ^~\n/tmp/compiler_vdh70ulm/src:7:25: 错误：程序中有游离的‘#’\n    7 |                ##*#######                 #.#.#          #.#.#\n      |                         ^\n/tmp/compiler_vdh70ulm/src:7:43: 错误：程序中有游离的‘#’\n    7 |                ##*#######                 #.#.#          #.#.#\n      |                                           ^\n/tmp/compiler_vdh70ulm/src:7:45: 错误：程序中有游离的‘#’\n    7 |                ##*#######                 #.#.#          #.#.#\n      |                                             ^\n/tmp/compiler_vdh70ulm/src:7:47: 错误：程序中有游离的‘#’\n    7 |                ##*#######                 #.#.#          #.#.#\n      |                                               ^\n/tmp/compiler_vdh70ulm/src:7:58: 错误：程序中有游离的‘#’\n    7 |                ##*#######                 #.#.#          #.#.#\n      |                                                          ^\n/tmp/compiler_vdh70ulm/src:7:60: 错误：程序中有游离的‘#’\n    7 |                ##*#######                 #.#.#          #.#.#\n      |                                                            ^\n/tmp/compiler_vdh70ulm/src:7:62: 错误：程序中有游离的‘#’\n    7 |                ##*#######                 #.#.#          #.#.#\n      |                                                              ^\n/tmp/compiler_vdh70ulm/src:8:13: 错误：程序中有游离的‘##’\n    8 |             ####*******######             #.#.#          #.#.#\n      |             ^~\n/tmp/compiler_vdh70ulm/src:8:15: 错误：程序中有游离的‘##’\n    8 |             ####*******######             #.#.#          #.#.#\n      |               ^~\n/tmp/compiler_vdh70ulm/src:8:24: 错误：程序中有游离的‘##’\n    8 |             ####*******######             #.#.#          #.#.#\n      |                        ^~\n/tmp/compiler_vdh70ulm/src:8:26: 错误：程序中有游离的‘##’\n    8 |             ####*******######             #.#.#          #.#.#\n      |                          ^~\n/tmp/compiler_vdh70ulm/src:8:28: 错误：程序中有游离的‘##’\n    8 |             ####*******######             #.#.#          #.#.#\n      |                            ^~\n/tmp/compiler_vdh70ulm/src:8:43: 错误：程序中有游离的‘#’\n    8 |             ####*******######             #.#.#          #.#.#\n      |                                           ^\n/tmp/compiler_vdh70ulm/src:8:45: 错误：程序中有游离的‘#’\n    8 |             ####*******######             #.#.#          #.#.#\n      |                                             ^\n/tmp/compiler_vdh70ulm/src:8:47: 错误：程序中有游离的‘#’\n    8 |             ####*******######             #.#.#          #.#.#\n      |                                               ^\n/tmp/compiler_vdh70ulm/src:8:58: 错误：程序中有游离的‘#’\n    8 |             ####*******######             #.#.#          #.#.#\n      |                                                          ^\n/tmp/compiler_vdh70ulm/src:8:60: 错误：程序中有游离的‘#’\n    8 |             ####*******######             #.#.#          #.#.#\n      |                                                            ^\n/tmp/compiler_vdh70ulm/src:8:62: 错误：程序中有游离的‘#’\n    8 |             ####*******######             #.#.#          #.#.#\n      |                                                              ^\n/tmp/compiler_vdh70ulm/src:9:15: 错误：程序中有游离的‘#’\n    9 |            ...#***.****.*###....          #...#          #...#\n      |               ^\n/tmp/compiler_vdh70ulm/src:9:26: 错误：程序中有游离的‘##’\n    9 |            ...#***.****.*###....          #...#          #...#\n      |                          ^~\n/tmp/compiler_vdh70ulm/src:9:28: 错误：程序中有游离的‘#’\n    9 |            ...#***.****.*###....          #...#          #...#\n      |                            ^\n/tmp/compiler_vdh70ulm/src:9:43: 错误：程序中有游离的‘#’\n    9 |            ...#***.****.*###....          #...#          #...#\n      |                                           ^\n/tmp/compiler_vdh70ulm/src:9:47: 错误：程序中有游离的‘#’\n    9 |            ...#***.****.*###....          #...#          #...#\n      |                                               ^\n/tmp/compiler_vdh70ulm/src:9:58: 错误：程序中有游离的‘#’\n    9 |            ...#***.****.*###....          #...#          #...#\n      |                                                          ^\n/tmp/compiler_vdh70ulm/src:9:62: 错误：程序中有游离的‘#’\n    9 |            ...#***.****.*###....          #...#          #...#\n      |                                                              ^\n/tmp/compiler_vdh70ulm/src:10:26: 错误：程序中有游离的‘##’\n   10 |            ....**********##.....           ###            ###\n      |                          ^~\n/tmp/compiler_vdh70ulm/src:10:44: 错误：程序中有游离的‘##’\n   10 |            ....**********##.....           ###            ###\n      |                                            ^~\n/tmp/compiler_vdh70ulm/src:10:46: 错误：程序中有游离的‘#’\n   10 |            ....**********##.....           ###            ###\n      |                                              ^\n/tmp/compiler_vdh70ulm/src:10:59: 错误：程序中有游离的‘##’\n   10 |            ....**********##.....           ###            ###\n      |                                                           ^~\n/tmp/compiler_vdh70ulm/src:10:61: 错误：程序中有游离的‘#’\n   10 |            ....**********##.....           ###            ###\n      |                                                             ^\n/tmp/compiler_vdh70ulm/src:12:14: 错误：程序中有游离的‘##’\n   12 |              ####        ####\n      |              ^~\n/tmp/compiler_vdh70ulm/src:12:16: 错误：程序中有游离的‘##’\n   12 |              ####        ####\n      |                ^~\n/tmp/compiler_vdh70ulm/src:12:26: 错误：程序中有游离的‘##’\n   12 |              ####        ####\n      |                          ^~\n/tmp/compiler_vdh70ulm/src:12:28: 错误：程序中有游离的‘##’\n   12 |              ####        ####\n      |                            ^~\n/tmp/compiler_vdh70ulm/src:13:12: 错误：程序中有游离的‘##’\n   13 |            ######        ######\n      |            ^~\n/tmp/compiler_vdh70ulm/src:13:14: 错误：程序中有游离的‘##’\n   13 |            ######        ######\n      |              ^~\n/tmp/compiler_vdh70ulm/src:13:16: 错误：程序中有游离的‘##’\n   13 |            ######        ######\n      |                ^~\n/tmp/compiler_vdh70ulm/src:13:26: 错误：程序中有游离的‘##’\n   13 |            ######        ######\n      |                          ^~\n/tmp/compiler_vdh70ulm/src:13:28: 错误：程序中有游离的‘##’\n   13 |            ######        ######\n      |                            ^~\n/tmp/compiler_vdh70ulm/src:13:30: 错误：程序中有游离的‘##’\n   13 |            ######        ######\n      |                              ^~\n/tmp/compiler_vdh70ulm/src:14:1: 错误：程序中有游离的‘##’\n   14 | ##############################################################\n      | ^~\n/tmp/compiler_vdh70ulm/src:14:3: 错误：程序中有游离的‘##’\n   14 | ##############################################################\n      |   ^~\n/tmp/compiler_vdh70ulm/src:14:5: 错误：程序中有游离的‘##’\n   14 | ##############################################################\n      |     ^~\n/tmp/compiler_vdh70ulm/src:14:7: 错误：程序中有游离的‘##’\n   14 | ##############################################################\n      |       ^~\n/tmp/compiler_vdh70ulm/src:14:9: 错误：程序中有游离的‘##’\n   14 | ##############################################################\n      |         ^~\n/tmp/compiler_vdh70ulm/src:14:11: 错误：程序中有游离的‘##’\n   14\n...",
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 0,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "                ********\n               ************\n               ####....#.\n             #..###.....##....\n             ###.......######              ###            ###\n                ...........               #...#          #...#\n               ##*#######                 #.#.#          #.#.#\n            ####*******######             #.#.#          #.#.#\n           ...#***.****.*###....          #...#          #...#\n           ....**********##.....           ###            ###\n           ....****    *****....\n             ####        ####\n           ######        ######\n##############################################################\n#...#......#.##...#......#.##...#......#.##------------------#\n###########################################------------------#\n#..#....#....##..#....#....##..#....#....#####################\n##########################################    #----------#\n#.....#......##.....#......##.....#......#    #----------#\n##########################################    #----------#\n#.#..#....#..##.#..#....#..##.#..#....#..#    #----------#\n##########################################    ############",
+        "_detail_requested": true
+      }
+    }
+  ],
+  "detail_fetch_stats": {
+    "total_items": 1,
+    "source_code_success": 1,
+    "summary_only": 0,
+    "detail_requested": 1,
+    "detail_skipped": 0,
+    "detail_errors": 0,
+    "pure_error_records": 0,
+    "blocker_reason": ""
+  },
+  "behavior_analysis": {
+    "total_records": 1,
+    "total_unique_problems": 1,
+    "ac_count": 0,
+    "ac_rate": 0.0,
+    "first_try_ac_rate": 0.0,
+    "ce_count": 0,
+    "ce_rate": 0.0,
+    "status_distribution": {
+      "2": 1
+    },
+    "hourly_distribution": {
+      "15": 1
+    },
+    "time_slot_distribution": {
+      "凌晨 (0-5点)": 0,
+      "早晨 (6-9点)": 0,
+      "上午 (9-12点)": 0,
+      "下午 (13-17点)": 1,
+      "傍晚 (17-20点)": 0,
+      "晚上 (20-23点)": 0
+    },
+    "peak_hour": 15,
+    "peak_hour_count": 1,
+    "weekday_distribution": {
+      "周一": 0,
+      "周二": 0,
+      "周三": 1,
+      "周四": 0,
+      "周五": 0,
+      "周六": 0,
+      "周日": 0
+    },
+    "weekend_vs_weekday": {
+      "周末": 0,
+      "工作日": 1
+    },
+    "active_days": 1,
+    "total_days_span": 1,
+    "active_rate": 1.0,
+    "max_daily_submits": 1,
+    "max_daily_date": "2026-04-22",
+    "max_consecutive_days": 1,
+    "stuck_problems": [],
+    "max_submit_single_problem": {
+      "pid": "P1000",
+      "count": 1
+    },
+    "debug_patience": {
+      "median_resubmit_interval_seconds": null,
+      "quick_resubmit_under_60s_rate": 0
+    },
+    "ac_submit_distribution": {},
+    "personality_scores": {
+      "坚韧度": 35,
+      "完美主义": 40,
+      "冒险精神": 60,
+      "自律性": 65,
+      "调试耐心": 20,
+      "作息规律": 100
+    },
+    "_source": "record_list"
+  },
+  "syllabus_evaluation": {
+    "csp_j": {
+      "details": [
+        {
+          "topic": "枚举法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "模拟法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "贪心法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "递推法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "递归法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "二分法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "倍增法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "前缀和",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "差分",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "排序",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "DFS",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "BFS",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Flood Fill",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "DP基础",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "背包DP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "区间DP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "图遍历",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "链表",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "栈",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "队列",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "二叉树遍历",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "哈夫曼树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "BST",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "GCD",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "素数筛法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "排列组合",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "杨辉三角",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "进制转换",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        }
+      ],
+      "stats": {
+        "total": 28,
+        "精通": 0,
+        "熟练": 0,
+        "入门": 0,
+        "初窥": 0,
+        "空白": 28
+      },
+      "coverage": 0.0,
+      "total_ac": 0
+    },
+    "csp_s": {
+      "details": [
+        {
+          "topic": "位集合bitset",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "单调栈/队列",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "双端队列",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "ST表",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "并查集",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "树状数组",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "线段树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "优先队列/堆",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "字典树Trie",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "笛卡尔树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "平衡树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "二分图",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "欧拉图",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "强连通图",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "分治",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "离散化",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "扫描线",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "归并排序",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "快速排序",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "KMP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Manacher",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "剪枝优化",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "记忆化搜索",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "启发式搜索",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "双向BFS",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "迭代加深",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "树形DP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "状压DP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "多维DP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "DP优化",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "最小生成树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "最短路",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Floyd",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "拓扑排序",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "单源次短路",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "欧拉道路",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "同余式",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "欧拉定理/函数",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "费马小定理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "逆元",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "扩展欧几里得",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "中国剩余定理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "快速幂",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "容斥原理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "卡特兰数",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "矩阵运算",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "高斯消元",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "鸽巢原理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "二项式定理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "错排列/圆排列",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        }
+      ],
+      "stats": {
+        "total": 50,
+        "精通": 0,
+        "熟练": 0,
+        "入门": 0,
+        "初窥": 0,
+        "空白": 50
+      },
+      "coverage": 0.0,
+      "total_ac": 0
+    },
+    "provincial": {
+      "details": [
+        {
+          "topic": "匈牙利算法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "网络流",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "分块",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Nim博弈/SG",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "离线处理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "可持久化线段树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "块状链表",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "随机化",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "复杂DP模型",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "构造",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        }
+      ],
+      "stats": {
+        "total": 10,
+        "精通": 0,
+        "熟练": 0,
+        "入门": 0,
+        "初窥": 0,
+        "空白": 10
+      },
+      "coverage": 0.0,
+      "total_ac": 0
+    },
+    "noi": {
+      "details": [
+        {
+          "topic": "后缀数组",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "后缀自动机",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "AC自动机",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "树链剖分",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "LCT",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "CDQ分治",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "点分治",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "虚树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "FFT/NTT",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "FWT",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "斜率优化DP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "四边形不等式",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "基与线性基",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Pollard-Rho",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Miller-Rabin",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "杜教筛",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Min_25筛",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "圆方树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "2-SAT",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "差分约束",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "无源汇上下界",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "有源汇上下界",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "KM算法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "一般图匹配",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "莫比乌斯反演",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Burnside引理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Polya定理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "原根",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "BSGS",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "扩展BSGS",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "单位根反演",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "单纯形",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "计算几何基础",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "半平面交",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "旋转卡壳",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "扫描线(几何)",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "k-d树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "替罪羊树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Treap",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Splay",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "WBLT",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "析合树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "笛卡尔树(高级)",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        }
+      ],
+      "stats": {
+        "total": 43,
+        "精通": 0,
+        "熟练": 0,
+        "入门": 0,
+        "初窥": 0,
+        "空白": 43
+      },
+      "coverage": 0.0,
+      "total_ac": 0
+    },
+    "overall": {
+      "total_topics": 131,
+      "covered_topics": 0,
+      "coverage_rate": 0.0
+    },
+    "source": {
+      "content": "",
+      "source": "txt-cache",
+      "path": "D:\\AItrade\\luoguAI\\luogu-AI-report\\NOI大纲_Syllabus_Edition_2025.pdf.txt",
+      "full_length": 8283
+    }
+  },
+  "six_dimension_scores": {
+    "基础算法": 30,
+    "数据结构": 20,
+    "图论": 20,
+    "动态规划": 25,
+    "字符串": 20,
+    "数学": 20
+  }
+}

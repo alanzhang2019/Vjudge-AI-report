@@ -3,7 +3,6 @@ import json
 import argparse
 import math
 import re
-import base64
 import hashlib
 import time
 import urllib.request
@@ -11,6 +10,8 @@ import zipfile
 from pathlib import Path
 from datetime import datetime
 from typing import Any
+
+from env_loader import load_dotenv
 
 import matplotlib
 matplotlib.use("Agg")
@@ -32,6 +33,8 @@ from examples.export_for_ai import (
 )
 
 import markdown as md
+
+load_dotenv(Path(__file__).resolve().parent / ".env")
 from jinja2 import Environment, FileSystemLoader
 from playwright.sync_api import sync_playwright
 
@@ -237,6 +240,7 @@ def configure_matplotlib_font() -> str | None:
         try:
             from matplotlib import font_manager
 
+            font_manager.fontManager.addfont(font_path)
             font_name = font_manager.FontProperties(fname=font_path).get_name()
             plt.rcParams["font.sans-serif"] = [font_name, *family_fallback]
         except Exception:
@@ -653,7 +657,6 @@ def build_trusted_data_summary_md(export_data: dict) -> str:
     summary = export_data.get("summary", {}) or {}
     difficulty_histogram = summary.get("difficulty_histogram", {}) or {}
     level_experience = summary.get("level_experience", {}) or {}
-    behavior = export_data.get("behavior_analysis", {}) or {}
     detail_fetch_stats = export_data.get("detail_fetch_stats", {}) or {}
     syllabus_eval = export_data.get("syllabus_evaluation", {}) or {}
 
@@ -665,19 +668,7 @@ def build_trusted_data_summary_md(export_data: dict) -> str:
         "## 数据校准与真实统计",
         f"- 报告生成时间：{eval_time or '未知'}",
     ]
-    font_path = find_chinese_font_path()
-    lines.append(f"- 图表中文字体：{font_path or '未检测到（可能出现方框，建议安装 fonts-noto-cjk / wqy-zenhei 或设置 CHINESE_FONT_PATH）'}")
-
-    if behavior and "error" not in behavior:
-        time_points = sum(int(v) for v in (behavior.get("time_slot_distribution", {}) or {}).values())
-        source = behavior.get("_source", "record_list")
-        source_label = "提交记录列表" if source == "record_list" else "题目记录详情回退"
-        lines.append(f"- 提交时间数据：已获取，时间戳样本 {time_points} 条，来源：{source_label}")
-    else:
-        lines.append(f"- 提交时间数据：未完成有效分析，原因：{behavior.get('error', '未知')}")
-
     lines.extend([
-        "- 说明：下方本节为程序直出的真实统计；若与后续 AI 解读冲突，以本节为准。",
         "",
         "### 难度分布（程序生成）",
         '<table><thead><tr><th>洛谷难度</th><th>题数</th><th>占比</th><th>分布图</th></tr></thead><tbody>',
@@ -883,8 +874,8 @@ def compute_ability_scores(export_data: dict) -> dict[str, int]:
 
 def generate_chart_images(export_data: dict, output_dir: str) -> dict[str, str]:
     ensure_dir(output_dir)
-    configure_matplotlib_font()
     plt.style.use("default")
+    configure_matplotlib_font()
     repair_behavior_analysis_from_items(export_data)
 
     chart_paths: dict[str, str] = {}
@@ -1142,7 +1133,14 @@ def generate_chart_images(export_data: dict, output_dir: str) -> dict[str, str]:
     return chart_paths
 
 
-def build_html_and_pdf(report_md: str, export_data: dict, html_path: str, pdf_path: str, chart_paths: dict[str, str]) -> None:
+def build_html_and_pdf(
+    report_md: str,
+    export_data: dict,
+    html_path: str,
+    pdf_path: str,
+    chart_paths: dict[str, str],
+    export_pdf: bool = True,
+) -> None:
     # 扩展 markdown，支持表格
     report_html = md.markdown(report_md, extensions=['tables', 'fenced_code'])
     report_html = re.sub(
@@ -1266,6 +1264,7 @@ def build_html_and_pdf(report_md: str, export_data: dict, html_path: str, pdf_pa
     # 渲染 HTML
     env = Environment(loader=FileSystemLoader('.'))
     template = env.get_template('report_template.html')
+    html_dir = Path(html_path).resolve().parent
     
     def _chart_src(value: str) -> str:
         if not value:
@@ -1277,14 +1276,15 @@ def build_html_and_pdf(report_md: str, export_data: dict, html_path: str, pdf_pa
         p = Path(value)
         if not p.exists():
             return value
-        ext = p.suffix.lower()
-        mime = "image/png"
-        if ext in {".jpg", ".jpeg"}:
-            mime = "image/jpeg"
-        elif ext == ".webp":
-            mime = "image/webp"
-        data = base64.b64encode(p.read_bytes()).decode("ascii")
-        return f"data:{mime};base64,{data}"
+        resolved = p.resolve()
+        try:
+            relative = resolved.relative_to(html_dir)
+            return relative.as_posix()
+        except ValueError:
+            try:
+                return resolved.relative_to(html_dir.parent).as_posix()
+            except ValueError:
+                return resolved.as_uri()
 
     chart_srcs = {k: _chart_src(v) for k, v in chart_paths.items()}
 
@@ -1303,9 +1303,15 @@ def build_html_and_pdf(report_md: str, export_data: dict, html_path: str, pdf_pa
     with open(html_path, 'w', encoding='utf-8') as f:
         f.write(rendered_html)
 
+    if not export_pdf:
+        return
+
     # 导出为 PDF
     console.print("[cyan]正在调用 Playwright 将 HTML 导出为高质量 PDF...[/cyan]")
+    temp_pdf_path = f"{pdf_path}.tmp"
     try:
+        if os.path.exists(temp_pdf_path):
+            os.remove(temp_pdf_path)
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
@@ -1314,17 +1320,23 @@ def build_html_and_pdf(report_md: str, export_data: dict, html_path: str, pdf_pa
             page.goto(file_url)
             page.wait_for_load_state("networkidle")
             page.pdf(
-                path=pdf_path,
+                path=temp_pdf_path,
                 format="A4",
                 print_background=True,
                 margin={"top": "0", "right": "0", "bottom": "0", "left": "0"}
             )
             browser.close()
+        os.replace(temp_pdf_path, pdf_path)
     except Exception as e:
+        if os.path.exists(temp_pdf_path):
+            try:
+                os.remove(temp_pdf_path)
+            except OSError:
+                pass
         console.print(f"[red]PDF 导出失败（Playwright 错误），请确保已运行 `playwright install chromium`。\n错误详情：{e}[/red]")
 
 def load_or_prompt_openai_config():
-    key = os.environ.get("OPENAI_API_KEY")
+    key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_ADMIN_KEY")
     base_url = os.environ.get("OPENAI_BASE_URL")
     
     if not key:

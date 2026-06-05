@@ -38,6 +38,8 @@ def init_db():
             stage TEXT DEFAULT '',
             source_code_success INTEGER DEFAULT 0,
             source_code_total INTEGER DEFAULT 0,
+            ai_progress INTEGER DEFAULT 0,
+            ai_elapsed_seconds INTEGER DEFAULT 0,
             created_at TEXT DEFAULT ''
         )
     """)
@@ -46,6 +48,8 @@ def init_db():
         "ALTER TABLE tasks ADD COLUMN stage TEXT DEFAULT ''",
         "ALTER TABLE tasks ADD COLUMN source_code_success INTEGER DEFAULT 0",
         "ALTER TABLE tasks ADD COLUMN source_code_total INTEGER DEFAULT 0",
+        "ALTER TABLE tasks ADD COLUMN ai_progress INTEGER DEFAULT 0",
+        "ALTER TABLE tasks ADD COLUMN ai_elapsed_seconds INTEGER DEFAULT 0",
     ):
         try:
             conn.execute(ddl)

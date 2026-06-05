@@ -1,6 +1,8 @@
 import unittest
+import tempfile
 from types import SimpleNamespace
 from unittest.mock import patch
+from pathlib import Path
 
 from pyLuogu.errors import AuthenticationError
 from pyLuogu.types import ProblemSummary
@@ -8,6 +10,7 @@ from pyLuogu.types import ProblemSummary
 from behavior_analyzer import compute_six_dimension_scores
 from examples.export_for_ai import RECORD_LIST_PAGES_TO_TRY, _pick_record_for_problem, _summarize
 from luogu_evaluator import (
+    build_html_and_pdf,
     build_detail_fetch_overview,
     build_trusted_data_summary_md,
     fetch_behavior_analysis,
@@ -153,6 +156,9 @@ class TestEvaluatorPracticeFallback(unittest.TestCase):
         self.assertNotIn("暂无评定", markdown)
         self.assertNotIn("提交详情抓取统计", markdown)
         self.assertNotIn("题目级别经历表", markdown)
+        self.assertNotIn("图表中文字体", markdown)
+        self.assertNotIn("提交时间数据", markdown)
+        self.assertNotIn("下方本节为程序直出的真实统计", markdown)
 
     def test_render_star_rating_html_uses_capsule_style(self):
         html = render_star_rating_html("⭐⭐⭐☆☆")
@@ -162,6 +168,59 @@ class TestEvaluatorPracticeFallback(unittest.TestCase):
         self.assertIn("3/5", html)
         self.assertIn("color:#F5C542", html)
         self.assertIn("color:#94A3B8", html)
+
+    def test_build_html_uses_relative_chart_paths_for_web_reports(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            assets_dir = root / "assets"
+            assets_dir.mkdir(parents=True, exist_ok=True)
+            chart_file = assets_dir / "difficulty_histogram.png"
+            chart_file.write_bytes(b"fake-png")
+            html_path = root / "report.html"
+            pdf_path = root / "report.pdf"
+
+            build_html_and_pdf(
+                report_md="# 测试报告",
+                export_data={
+                    "student_info": {
+                        "name": "测试",
+                        "school": "学校",
+                        "grade": "年级",
+                        "eval_time": "2026-06-04 16:00",
+                    },
+                    "solved_count": 1,
+                    "failed_count": 0,
+                    "summary": {"difficulty_histogram": {"2": 1}},
+                },
+                html_path=str(html_path),
+                pdf_path=str(pdf_path),
+                chart_paths={"difficulty": str(chart_file)},
+                export_pdf=False,
+            )
+
+            html = html_path.read_text(encoding="utf-8")
+            self.assertIn('src="assets/difficulty_histogram.png"', html)
+            self.assertNotIn("file:///", html)
+
+    def test_generate_chart_images_applies_style_before_font_config(self):
+        from luogu_evaluator import generate_chart_images
+
+        calls = []
+        with patch("luogu_evaluator.plt.style.use", side_effect=lambda style: calls.append("style")), \
+             patch("luogu_evaluator.configure_matplotlib_font", side_effect=lambda: calls.append("font")), \
+             patch("luogu_evaluator.repair_behavior_analysis_from_items", side_effect=lambda data: data):
+            generate_chart_images(
+                {
+                    "summary": {"difficulty_histogram": {"2": 1}},
+                    "solved_count": 1,
+                    "failed_count": 0,
+                    "behavior_analysis": {},
+                },
+                tempfile.mkdtemp(),
+            )
+
+        self.assertGreaterEqual(len(calls), 2)
+        self.assertEqual(calls[:2], ["style", "font"])
 
     def test_pick_record_for_problem_keeps_summary_when_detail_decode_fails(self):
         class DummyRecord:

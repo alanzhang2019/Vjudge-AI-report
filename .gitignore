@@ -148,3 +148,10 @@ luogu_coach_report*.md
 luogu_coach_report*.html
 luogu_report_assets/
 *.report.pdf
+
+# web_app 持久化数据
+reports/
+tasks.db
+tasks.db-*
+.source_cache/
+.debug/

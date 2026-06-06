@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  luogu-coach:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: luogu-ai-report/webapp:latest
+    container_name: luogu-ai-report-luogu-coach
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env   # 从 .env 读取 OPENAI_API_KEY / ADMIN_PASSWORD 等
+    environment:
+      # 启动时若系统未装中文字体，自动下载
+      - LUOGU_REPORT_AUTO_FONT_DOWNLOAD=1
+      # 把 sqlite db 写到挂载的命名卷里
+      - TASK_DB_PATH=/app/data/tasks.db
+    volumes:
+      # 持久化报告（目录挂载）
+      - ./reports:/app/reports
+      # 任务库 - 命名卷挂到 /app/data 目录，db 文件写在 /app/data/tasks.db
+      - tasks-data:/app/data
+      # 洛谷题目缓存 - 命名卷
+      - source-cache:/app/.source_cache
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/', timeout=5).read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - luogu-network
+
+networks:
+  luogu-network:
+    driver: bridge
+
+volumes:
+  tasks-data:
+  source-cache:

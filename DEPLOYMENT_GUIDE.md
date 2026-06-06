@@ -16,6 +16,10 @@
 8. [安全清单](#8-安全清单)
 9. [维护计划](#9-维护计划)
 10. [附录](#10-附录)
+11. [域名 + HTTPS 生产部署](#11-域名--https-生产部署)
+12. [备份清单与急救命令](#12-备份清单与急救命令)
+13. [容器级急救命令](#13-容器级急救命令)
+14. [联系 / 反馈](#14-联系--反馈)
 
 ---
 
@@ -728,7 +732,372 @@ git push origin main
 .\deploy.ps1
 ```
 
-### 10.6 常用急救命令
+---
+
+## 11. 域名 + HTTPS 生产部署
+
+把 `oi.aijiangti.cn` 域名 + Let's Encrypt 证书接到 webapp 前端，**隐藏服务器 IP**。
+
+### 11.1 完整架构
+
+```
+                    ┌─────────────────────────────────────┐
+                    │   1Panel OpenResty (Docker 容器)    │
+                    │   监听 80/443                        │
+                    └────────────────┬────────────────────┘
+                                     │
+        ┌────────────────────────────┴─────────────────────┐
+        │                                                  │
+   Host 头 = oi.aijiangti.cn                       其他（IP 直访）
+        │                                                  │
+        ▼                                                  ▼
+   HTTPS 反代                                       (没人监听，已关 5000 公网)
+        │
+        ▼
+   127.0.0.1:5000  (luogu-ai-report webapp)
+```
+
+### 11.2 DNS 解析
+
+去域名注册商后台（阿里云/腾讯云/Cloudflare）：
+
+| 字段 | 值 |
+|---|---|
+| 主机记录 | `oi` |
+| 记录类型 | `A` |
+| 记录值 | 服务器公网 IP（如 `43.163.26.115`） |
+| TTL | 600 |
+
+验证：
+
+```bash
+dig oi.aijiangti.cn +short
+# 期望：43.163.26.115
+```
+
+### 11.3 安装 OpenResty
+
+1Panel → **应用商店** → 搜 **OpenResty** → 安装：
+
+| 字段 | 值 |
+|---|---|
+| 名称 | `openresty` |
+| HTTP 端口 | 80 |
+| HTTPS 端口 | 443 |
+| 网站目录 | `/opt/1panel/www` |
+
+**前提**：80 端口必须空闲。如被占用（如 nofx 占了 80），改其 `.env` 文件端口后重启。
+
+### 11.4 申请 Let's Encrypt 证书
+
+```bash
+# 1) 装 certbot
+apt-get install -y certbot
+
+# 2) 停 OpenResty 释放 80 端口
+OPENRESTY=$(docker ps --format "{{.Names}}" | grep -i openresty | head -1)
+docker stop "$OPENRESTY"
+
+# 3) 强切 ASCII locale（避免非 ASCII 报错）
+export LANG=C LC_ALL=C
+
+# 4) 申请证书
+certbot certonly --standalone \
+    -d oi.aijiangti.cn \
+    --email your@email.com \
+    --agree-tos \
+    --no-eff-email
+
+# 5) 启 OpenResty
+docker start "$OPENRESTY"
+```
+
+成功输出：
+
+```
+Certificate is saved at: /etc/letsencrypt/live/oi.aijiangti.cn/fullchain.pem
+Key is saved at:         /etc/letsencrypt/live/oi.aijiangti.cn/privkey.pem
+```
+
+### 11.5 1Panel 创建反代网站
+
+1Panel → **网站** → **创建网站**：
+
+| 字段 | 值 |
+|---|---|
+| 类型 | **反向代理** |
+| 主域名 | `oi.aijiangti.cn` |
+| 代理地址 | `127.0.0.1:5000` |
+| 备注 | luogu-ai-report |
+
+### 11.6 把证书放到 1Panel 期望的路径
+
+**不能用符号链接**（certbot 用的相对路径 `../../archive/...` 跨过 bind mount 边界会失效）。**用真实文件 + 续期 hook**：
+
+```bash
+# 1) 在 1Panel 管理的 SSL 目录放真实证书文件
+SSL_DIR=/opt/1panel/www/sites/oi.aijiangti.cn/ssl
+mkdir -p "$SSL_DIR"
+cp /etc/letsencrypt/archive/oi.aijiangti.cn/fullchain1.pem "$SSL_DIR/fullchain.pem"
+cp /etc/letsencrypt/archive/oi.aijiangti.cn/privkey1.pem   "$SSL_DIR/privkey.pem"
+
+# 2) 写 certbot 续期 hook（自动同步）
+cat > /etc/letsencrypt/renewal-hooks/deploy/sync-to-1panel.sh << 'HOOK'
+#!/bin/bash
+DOMAIN=oi.aijiangti.cn
+DEST=/opt/1panel/www/sites/$DOMAIN/ssl
+mkdir -p "$DEST"
+FULLCHAIN=$(ls -1 /etc/letsencrypt/archive/$DOMAIN/fullchain*.pem | sort -V | tail -1)
+PRIVKEY=$(ls -1 /etc/letsencrypt/archive/$DOMAIN/privkey*.pem | sort -V | tail -1)
+cp -f "$FULLCHAIN" "$DEST/fullchain.pem"
+cp -f "$PRIVKEY"   "$DEST/privkey.pem"
+OPENRESTY=$(docker ps --format "{{.Names}}" | grep -i openresty | head -1)
+[ -n "$OPENRESTY" ] && docker exec "$OPENRESTY" openresty -s reload
+echo "$(date) synced $DOMAIN certs and reloaded $OPENRESTY" >> /var/log/certbot-sync.log
+HOOK
+chmod +x /etc/letsencrypt/renewal-hooks/deploy/sync-to-1panel.sh
+```
+
+### 11.7 反代超时（防 504）
+
+1Panel → 网站 → `oi.aijiangti.cn` → **反向代理** → **配置**，在 `location /` 加：
+
+```nginx
+proxy_connect_timeout 600s;
+proxy_send_timeout    600s;
+proxy_read_timeout    600s;
+client_max_body_size  100M;
+```
+
+### 11.8 强制 HTTPS
+
+1Panel → 网站 → `oi.aijiangti.cn` → **设置** → 勾选 **HTTPS 强制跳转**
+
+或者在 1Panel 配置文件里加（80 server 块）：
+
+```nginx
+if ($scheme = http) {
+    return 301 https://$host$request_uri;
+}
+```
+
+### 11.9 验证
+
+```bash
+# 证书
+echo | openssl s_client -connect oi.aijiangti.cn:443 -servername oi.aijiangti.cn 2>/dev/null \
+    | openssl x509 -noout -subject -issuer
+# 期望：subject=CN = oi.aijiangti.cn
+#       issuer=O = Let's Encrypt, CN = R10 (或 R11, YR1)
+
+# HTTPS
+curl -I https://oi.aijiangti.cn
+# 期望：HTTP/2 200
+```
+
+浏览器 `Ctrl+Shift+R` 强刷 → 期望 🔒 绿锁。
+
+### 11.10 踩过的坑
+
+| 症状 | 原因 | 解决 |
+|---|---|---|
+| 1Panel 网站菜单提示"未检测到 OpenResty" | 没装 | 应用商店装 |
+| "端口 80 已被占用" | nofx 占了 80 | 改 nofx `.env` 里 `NOFX_BACKEND_PORT=8080` |
+| 浏览器"Not secure"但 Certificate valid | 1Panel 用自签证书 | 申请 Let's Encrypt + 装到正确路径 |
+| `cannot load certificate` 配 softlink | certbot 软链相对路径跨 mount 失败 | 用真实文件，不用软链 |
+| 两个 `ssl_certificate` 冲突 | 1Panel 自动 80+443 合并 + 手动 443 重复 | 删手动块，保留 1Panel 自动块 |
+| `openresty -s reload` 报错但 curl 仍正常 | reload 失败但 OpenResty 在用老配置 | 改对配置后 reload |
+| acme.sh "non-ASCII characters" | LANG=en_US.UTF-8 | `export LANG=C LC_ALL=C` |
+
+### 11.11 隐藏服务器 IP（可选加固）
+
+如果域名在 **Cloudflare** 解析：
+
+1. Cloudflare → DNS → `oi` → 代理状态改成 **🟠 Proxied**
+2. Cloudflare 自带 SSL + CDN + DDoS 防护
+3. 服务器真实 IP 不再公开
+4. Cloudflare 边缘节点用 Cloudflare Origin 自签证书和源站通信
+
+防火墙可只放行 Cloudflare IP 段（这是终极加固）。
+
+---
+
+## 12. 备份清单与急救命令
+
+### 12.1 必须备份的文件
+
+| 类别 | 路径 | 说明 |
+|---|---|---|
+| **配置** | `/home/ubuntu/luogu-ai-report/.env` | API Key、管理员密码 |
+| **配置** | `/opt/nofx/.env` | Coinglass API Key |
+| **SSL** | `/etc/letsencrypt/` | 整个目录（含 live/archive/renewal） |
+| **SSL** | `/opt/1panel/www/sites/oi.aijiangti.cn/ssl/` | 1Panel 实际用的证书 |
+| **1Panel 配置** | `/opt/1panel/www/conf.d/` | OpenResty 网站配置 |
+| **Hook** | `/etc/letsencrypt/renewal-hooks/deploy/` | 续期脚本 |
+| **数据库** | `luogu-ai-report_tasks-data` 命名卷 | 任务历史（容器外是路径 /var/lib/docker/volumes/...） |
+| **报告** | `luogu-ai-report_reports` 命名卷 | 生成的 PDF/HTML |
+| **nofx 数据** | `/opt/nofx/config.db` | nofx 配置库 |
+| **nofx 日志** | `/opt/nofx/decision_logs/` | 决策日志 |
+
+### 12.2 备份脚本
+
+```bash
+#!/bin/bash
+# /usr/local/bin/backup-luogu.sh
+BACKUP=/backup/$(date +%Y%m%d_%H%M%S)
+mkdir -p "$BACKUP"
+
+# .env
+cp /home/ubuntu/luogu-ai-report/.env "$BACKUP/luogu-env"
+
+# SSL
+tar -czf "$BACKUP/ssl.tar.gz" /etc/letsencrypt/
+
+# 1Panel 网站配置
+tar -czf "$BACKUP/openresty-config.tar.gz" /opt/1panel/www/
+
+# 1Panel 证书
+tar -czf "$BACKUP/1panel-ssl.tar.gz" /opt/1panel/www/sites/
+
+# 续期 hook
+cp -r /etc/letsencrypt/renewal-hooks "$BACKUP/renewal-hooks"
+
+# 数据库卷
+docker run --rm \
+    -v luogu-ai-report_tasks-data:/data \
+    -v "$BACKUP":/backup \
+    alpine tar -czf /backup/tasks-data.tar.gz -C /data .
+
+# 报告卷
+docker run --rm \
+    -v luogu-ai-report_reports:/data \
+    -v "$BACKUP":/backup \
+    alpine tar -czf /backup/reports.tar.gz -C /data .
+
+# nofx
+cp /opt/nofx/.env "$BACKUP/nofx-env"
+cp /opt/nofx/config.db "$BACKUP/nofx-config.db"
+
+# 清理 30 天前
+find /backup -maxdepth 1 -type d -mtime +30 -exec rm -rf {} \;
+
+echo "✅ 备份完成: $BACKUP"
+```
+
+加到 crontab：每天凌晨 3 点跑。
+
+```bash
+# /etc/cron.d/backup
+0 3 * * * root /usr/local/bin/backup-luogu.sh
+```
+
+### 12.3 急救命令速查
+
+```bash
+# ===== 容器状态 =====
+cd /home/ubuntu/luogu-ai-report
+./deploy.sh --status
+
+# ===== 实时日志 =====
+./deploy.sh --logs               # webapp
+docker logs 1Panel-openresty-uOBw --tail 50  # 反代
+
+# ===== 重启 =====
+./deploy.sh --restart            # 重启 webapp
+docker restart 1Panel-openresty-uOBw  # 重启反代
+
+# ===== 改 .env 后必须 down+up =====
+cd /home/ubuntu/luogu-ai-report
+docker compose down && docker compose up -d
+
+# ===== 手动重载 OpenResty =====
+docker exec $(docker ps --format "{{.Names}}" | grep -i openresty | head -1) openresty -s reload
+
+# ===== 手动续期证书 =====
+export LANG=C LC_ALL=C
+certbot renew --force-renewal
+
+# ===== 看证书状态 =====
+echo | openssl s_client -connect oi.aijiangti.cn:443 -servername oi.aijiangti.cn 2>/dev/null \
+    | openssl x509 -noout -subject -issuer -dates
+
+# ===== 改管理员密码 =====
+./deploy.sh --reset-password
+
+# ===== 看 80 端口谁占用 =====
+sudo ss -tlnp | grep ':80 '
+
+# ===== 看 5000 端口谁占用 =====
+sudo ss -tlnp | grep ':5000 '
+
+# ===== 进入 webapp 容器调试 =====
+docker exec -it luogu-ai-report-luogu-coach /bin/bash
+
+# ===== 紧急回滚 =====
+./deploy.sh --rollback
+
+# ===== 看磁盘 =====
+df -h
+du -sh /var/lib/docker/volumes/luogu-ai-report*
+
+# ===== 看报告数量 =====
+ls -la /home/ubuntu/luogu-ai-report/reports/ 2>/dev/null
+```
+
+### 12.4 证书快到期
+
+| 检查命令 | 输出 |
+|---|---|
+| `certbot certificates` | 列出所有证书及过期时间 |
+| `ls -la /var/log/letsencrypt/` | 看续期日志 |
+| `cat /var/log/certbot-sync.log` | 看 hook 续期日志 |
+
+如果 30 天内没自动续期成功：
+
+```bash
+# 手动跑续期
+export LANG=C LC_ALL=C
+certbot renew --force-renewal
+
+# 看 hook 是否执行
+ls -lt /opt/1panel/www/sites/oi.aijiangti.cn/ssl/
+
+# 看 hook 日志
+tail -20 /var/log/certbot-sync.log
+```
+
+### 12.5 网站挂了 5 分钟排查流程
+
+1. **看容器**：`./deploy.sh --status` → 是否 Up + healthy？
+2. **看日志**：`./deploy.sh --logs` → 有什么 error？
+3. **看端口**：`curl -I http://127.0.0.1:5000/` → 5000 通吗？
+4. **看反代**：`curl -I http://127.0.0.1/` → 80 通吗？
+5. **看反代容器**：`docker logs 1Panel-openresty-uOBw --tail 50`
+6. **看证书**：`echo | openssl s_client -connect oi.aijiangti.cn:443 ...`
+7. **看磁盘**：`df -h`（满 100% 会挂）
+8. **看内存**：`free -h`
+
+按这个顺序 8 步能定位 95% 的问题。
+
+---
+
+## 写在最后
+
+部署这套系统踩了很多坑（Docker 权限、数据库持久化、SQLite 锁、1Panel 反代、Let's Encrypt 各种雷、OpenResty 配置冲突），都记录在这份文档里了。
+
+**遇到新问题**先看：
+
+1. 故障排查（第 7 章）
+2. 域名 + HTTPS（第 11 章）
+3. 急救命令（第 12.3 节）
+
+**搞不定**先看 `./deploy.sh --status`，80% 的问题一眼能看出来。
+
+Happy deploying! 🚀
+
+---
+
+## 13. 容器级急救命令（补充）
 
 ```bash
 # 容器卡死，重启
@@ -754,7 +1123,7 @@ docker exec luogu-ai-report-luogu-coach ps aux
 docker network inspect luogu-ai-report_luogu-network
 ```
 
-### 10.7 联系 / 反馈
+## 14. 联系 / 反馈
 
 - 项目仓库：[github.com/alanzhang2019/luogu-AI-report](https://github.com/alanzhang2019/luogu-AI-report)
 - 洛谷：[luogu.com.cn](https://www.luogu.com.cn)
@@ -767,3 +1136,4 @@ docker network inspect luogu-ai-report_luogu-network
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | 1.0 | 2026-06-06 | 首次编写，整合从部署到运维的全套流程 |
+| 1.1 | 2026-06-07 | + 第 11 章域名 + HTTPS 部署（DNS、OpenResty、Let's Encrypt、certbot 自动续期）<br/>+ 第 12 章备份清单与急救命令（备份脚本、证书检查、5 分钟排查流程）<br/>+ 第 13 章容器级急救命令<br/>+ Cloudflare 隐藏 IP 加固方案 |

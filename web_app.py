@@ -1074,26 +1074,14 @@ def run_generation(task_id: str, form: dict):
             )
         _maybe_update_progress(force=True)
 
-        for idx, problem in enumerate(pending_passed_problems):
-            try:
-                record = _pick_record_for_problem(
-                    luogu=luogu,
-                    uid=uid,
-                    pid=problem.pid,
-                    max_records_to_try=5,
-                    require_source_code=True,
-                    detail_fetch_state=detail_fetch_state,
-                )
-            except Exception as e:
-                record = {"error": str(e)}
-            save_cached_source_record(uid, problem.pid, record if isinstance(record, dict) else None)
-            passed_items.append({"problem": problem.to_json(), "record": record})
-            processed += 1
-            if _is_source_code_present(record):
-                source_code_success += 1
-            _maybe_update_progress()
+        # 并发抓取源码：4 worker，httpx.Client 线程安全；detail_fetch_state 复制到线程内避免跨线程改
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        for idx, problem in enumerate(pending_failed_problems):
+        SOURCE_FETCH_CONCURRENCY = 4
+        _state_lock = threading.Lock()
+
+        def _fetch_one_record(problem):
+            state_snapshot = dict(detail_fetch_state)
             try:
                 record = _pick_record_for_problem(
                     luogu=luogu,
@@ -1101,16 +1089,36 @@ def run_generation(task_id: str, form: dict):
                     pid=problem.pid,
                     max_records_to_try=5,
                     require_source_code=True,
-                    detail_fetch_state=detail_fetch_state,
+                    detail_fetch_state=state_snapshot,
                 )
             except Exception as e:
                 record = {"error": str(e)}
-            save_cached_source_record(uid, problem.pid, record if isinstance(record, dict) else None)
-            failed_items.append({"problem": problem.to_json(), "record": record})
-            processed += 1
-            if _is_source_code_present(record):
-                source_code_success += 1
-            _maybe_update_progress()
+            # 跨线程合并 circuit breaker 状态
+            with _state_lock:
+                if state_snapshot.get("stop_detail_fetch") and not detail_fetch_state.get("stop_detail_fetch"):
+                    detail_fetch_state["stop_detail_fetch"] = True
+                    detail_fetch_state["last_detail_error"] = state_snapshot.get("last_detail_error")
+            return record
+
+        def _run_concurrently(problems, items_sink):
+            nonlocal processed, source_code_success
+            with ThreadPoolExecutor(max_workers=SOURCE_FETCH_CONCURRENCY) as ex:
+                futures = {ex.submit(_fetch_one_record, p): p for p in problems}
+                for fut in as_completed(futures):
+                    problem = futures[fut]
+                    try:
+                        record = fut.result()
+                    except Exception as e:
+                        record = {"error": str(e)}
+                    save_cached_source_record(uid, problem.pid, record if isinstance(record, dict) else None)
+                    items_sink.append({"problem": problem.to_json(), "record": record})
+                    processed += 1
+                    if _is_source_code_present(record):
+                        source_code_success += 1
+                    _maybe_update_progress()
+
+        _run_concurrently(pending_passed_problems, passed_items)
+        _run_concurrently(pending_failed_problems, failed_items)
 
         _maybe_update_progress(force=True)
         detail_fetch_stats = summarize_detail_fetch_stats(passed_items, failed_items, detail_fetch_state)

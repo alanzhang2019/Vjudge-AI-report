@@ -740,10 +740,11 @@ def build_trusted_data_summary_md(export_data: dict) -> str:
         # 各难度子档的分布）不符。改为按题目难度（1-7）聚合，与图例 5 档配色保持一致：
         #   入门=红 / 普及=橙+金 / 提高=绿 / 省选=浅蓝+紫 / NOI=深蓝
         # "空白"指 difficulty=0 或缺数据，仍用红色作警示（用户要求"恢复为红色"）
-        # tuple 顺序: (topic, ac, level, difficulty)
+        # item 是 dict（syllabus_matcher 写入），key 为 topic/ac_count/level/difficulty
         d1 = d2 = d3 = d4 = d5 = d6 = d7 = d_blank = 0
         for item in detail_list:
-            diff = int(item[3]) if len(item) > 3 and item[3] is not None else 0
+            # item 是 dict（syllabus_matcher 写入的），key 为 topic/ac_count/level/difficulty
+            diff = int(item.get("difficulty") or 0) if isinstance(item, dict) else 0
             if diff == 1:
                 d1 += 1
             elif diff == 2:

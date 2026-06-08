@@ -720,7 +720,7 @@ def build_trusted_data_summary_md(export_data: dict) -> str:
         [
             "",
             "### 知识点覆盖统计表（按算法标签）",
-            '<table><thead><tr><th>级别</th><th>已覆盖/总数</th><th>覆盖率</th><th>详细情况</th></tr></thead><tbody>',
+            '<table><thead><tr><th>级别</th><th>已覆盖/总数</th><th>覆盖率</th><th>难度分布</th></tr></thead><tbody>',
         ]
     )
 
@@ -736,14 +736,13 @@ def build_trusted_data_summary_md(export_data: dict) -> str:
         total_topics = int(stats.get("total", 0))
         covered = total_topics - int(stats.get("空白", 0))
         coverage = group.get("coverage", 0)
-        # 关键修复：用户反馈"详细情况"列展示的是精通/熟练/空白等"掌握度"标签，与该列本意（展示该级别下
-        # 各难度子档的分布）不符。改为按题目难度（1-7）聚合，与图例 5 档配色保持一致：
-        #   入门=红 / 普及=橙+金 / 提高=绿 / 省选=浅蓝+紫 / NOI=深蓝
-        # "空白"指 difficulty=0 或缺数据，仍用红色作警示（用户要求"恢复为红色"）
-        # item 是 dict（syllabus_matcher 写入），key 为 topic/ac_count/level/difficulty
+        # 该行"难度分布"列：本意是展示这一级别分组下，**所有**知识点 topic
+        # 按各自关联题目的难度（1-7）分到 5 档图例里：
+        #   入门 1 / 普及 2-3 / 提高 4 / 省选 5-6 / NOI 7
+        # "未知"指该 topic 关联的题目没拿到难度数据（API 缺字段或匹配不到）。
+        # 注意：这里"未知"≠"没做"。是否覆盖看前两列（已覆盖/总数、覆盖率）。
         d1 = d2 = d3 = d4 = d5 = d6 = d7 = d_blank = 0
         for item in detail_list:
-            # item 是 dict（syllabus_matcher 写入），key 为 topic/ac_count/level/difficulty
             diff = int(item.get("difficulty") or 0) if isinstance(item, dict) else 0
             if diff == 1:
                 d1 += 1
@@ -779,7 +778,7 @@ def build_trusted_data_summary_md(export_data: dict) -> str:
             + _chip("#52C41A", d4, "提高")
             + _chip("#1890FF", n_provincial, "省选")
             + _chip("#2F54EB", d7, "NOI")
-            + _chip("#FFFFFF", d_blank, "空白", fg="#9CA3AF", bd="#D1D5DB")
+            + _chip("#FFFFFF", d_blank, "未知", fg="#9CA3AF", bd="#D1D5DB")
         )
         lines.append(f"<tr><td><strong>{label.split('（')[0].replace('级','')}</strong></td><td>{covered}/{total_topics}</td><td>{coverage}%</td><td>{details}</td></tr>")
 
@@ -787,7 +786,11 @@ def build_trusted_data_summary_md(export_data: dict) -> str:
         [
             "</tbody></table>",
             "",
-            "- 口径说明：本表只根据题目的算法标签评估知识点覆盖，表示“接触过”，不等于“熟练掌握”。",
+            "- 口径说明：",
+            "  - 行 = 级别（入门/提高/省选/NOI），列 = 已覆盖/总数、覆盖率、**难度分布**。",
+            "  - **难度分布**展示该级别下所有知识点 topic 按各自关联题目难度（1-7）落到 5 档图例里：入门 / 普及 / 提高 / 省选 / NOI；**未知**指该 topic 关联的题没拿到难度数据。",
+            "  - “未知”≠“没做”，是否覆盖看前一列（已覆盖/总数、覆盖率）。",
+            "- 备注：本表只根据题目的算法标签评估知识点覆盖，表示“接触过”，不等于“熟练掌握”。",
         ]
     )
 
@@ -810,7 +813,7 @@ def build_trusted_data_summary_md(export_data: dict) -> str:
 #   大小 → 掌握度（精通 > 熟练 > 入门 > 初窥 > 空白）
 
 # 难度（1-7，0=无数据）→ 颜色档
-# 颜色与报告里"详细情况"列的 5 个色点保持一致（绿/金/橙/蓝/红）
+# 颜色与报告里"难度分布"列的 5 个色点保持一致（绿/金/橙/蓝/红）
 # 洛谷官方 7 档难度色（与报告"难度分布"表 + "知识点覆盖统计表" 5 个色点完全一致）
 # 颜色谱：入门(红) → 普及-(橙) → 普及/提高-(金) → 提高+/提高(绿) → 提高+/省选-(浅蓝) → 省选/NOI-(紫) → NOI/NOI+/CTSC(深蓝)
 # 5 档图例聚合：1→入门(红)、2-3→普及(橙+金统一成金)、4→提高(绿)、5-6→省选(浅蓝+紫统一成蓝)、7→NOI(深蓝)

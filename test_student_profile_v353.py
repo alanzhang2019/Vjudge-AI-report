@@ -219,15 +219,20 @@ class TestAddGespExamAwardYear(unittest.TestCase):
             city="上海", gender="M", is_minor=True, registered_via="smoke"
         )
         # 临时 DB 没有 competitions 种子 → 注入一个 GESP 赛事供 add_gesp_exam 关联
+        # 用 INSERT OR IGNORE 避免 setUpClass 重跑时 UNIQUE 冲突
         from task_store import _get_conn
         conn = _get_conn()
-        cur = conn.execute(
-            "INSERT INTO competitions (code, name, type, data_year, exam_date) "
+        conn.execute(
+            "INSERT OR IGNORE INTO competitions (code, name, type, data_year, exam_date) "
             "VALUES (?, ?, ?, ?, ?)",
             ("GESP-2024-L7-8-09", "GESP 7-8 级 2024-09", "gesp", 2024, "2024-09-21"),
         )
-        cls._gesp_exam_id = int(cur.lastrowid)
         conn.commit()
+        row = conn.execute(
+            "SELECT id FROM competitions WHERE code = ?",
+            ("GESP-2024-L7-8-09",),
+        ).fetchone()
+        cls._gesp_exam_id = int(row["id"])
         conn.close()
 
     @classmethod

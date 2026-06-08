@@ -5,13 +5,13 @@ import threading
 import time
 import hmac
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, date
 from urllib.parse import urlsplit, urlunsplit
 from openai import APIConnectionError, APITimeoutError, APIError, RateLimitError as OpenAIRateLimitError
 try:
-    from flask import Flask, render_template_string, request, redirect, url_for, send_from_directory, send_file, session
+    from flask import Flask, render_template_string, request, redirect, url_for, send_from_directory, send_file, session, flash
 except ImportError:
-    from flask import Flask, render_template_string, request, redirect, url_for, send_from_directory, send_file
+    from flask import Flask, render_template_string, request, redirect, url_for, send_from_directory, send_file, session, flash
     session = {}
 
 from env_loader import load_dotenv
@@ -27,6 +27,65 @@ DEFAULT_MODEL_NAME = os.environ.get("OPENAI_MODEL_NAME", "gpt-4o-mini")         
 DEFAULT_ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 DEFAULT_ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "change-me-now")
 # ======================================================
+
+
+# ========== v3.5 Month 1 周末修复：安全基线检查 ==========
+# 强制从 env 读取 admin 密码 + session secret；缺一即拒启动。
+# 开发模式可设 ALLOW_INSECURE_DEFAULT=1 跳过检查。
+INSECURE_DEFAULT_MARKERS = {
+    "",
+    "change-me-now",
+    "luogu-ai-report-admin-secret-change-me",
+    "secret",
+    "flask-secret",
+    "admin",
+    "password",
+}
+
+
+def _check_security_baseline() -> None:
+    """启动期硬性安全检查：未通过则 SystemExit(1)"""
+    if os.environ.get("ALLOW_INSECURE_DEFAULT") == "1":
+        print("[WARN] ALLOW_INSECURE_DEFAULT=1 已启用，跳过安全基线检查。生产环境务必禁用。")
+        return
+
+    issues: list[str] = []
+
+    # 1) admin 密码：必须从 env 显式设置，且不能是已知弱默认
+    admin_pwd = os.environ.get("ADMIN_PASSWORD", "")
+    if not admin_pwd or admin_pwd.strip() in INSECURE_DEFAULT_MARKERS:
+        issues.append(
+            "ADMIN_PASSWORD 未设置或为已知弱默认（如 'change-me-now' / 'admin' / 'password'）"
+        )
+
+    # 2) Flask session secret：必须从 env 显式设置
+    secret = (
+        os.environ.get("ADMIN_SESSION_SECRET")
+        or os.environ.get("FLASK_SECRET_KEY")
+        or ""
+    )
+    if not secret.strip() or secret.strip() in INSECURE_DEFAULT_MARKERS:
+        issues.append(
+            "ADMIN_SESSION_SECRET / FLASK_SECRET_KEY 未设置或为已知弱默认"
+        )
+
+    if issues:
+        print("=" * 64)
+        print("[FATAL] 安全基线检查失败（v3.5 Month 1 周末修复）")
+        for i, issue in enumerate(issues, 1):
+            print(f"  {i}. {issue}")
+        print()
+        print("修复方式（在 .env 或环境变量中设置）：")
+        print("  ADMIN_PASSWORD=<你的强密码>")
+        print("  ADMIN_SESSION_SECRET=<32+ 字符随机串>")
+        print()
+        print("临时跳过（仅本地开发）：")
+        print("  ALLOW_INSECURE_DEFAULT=1")
+        print("=" * 64)
+        raise SystemExit(1)
+
+
+_check_security_baseline()
 
 import pyLuogu
 from examples.export_for_ai import (
@@ -379,13 +438,14 @@ INDEX_HTML = """
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>洛谷 AI 测评报告生成器</title>
+    <title>信竞 AI 报告 · 选手成长平台 · v3.5.2</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        .app-body{background:#f3f4f6;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans","PingFang SC","Microsoft YaHei",sans-serif;}
-        .app-card{background:#fff;border-radius:16px;box-shadow:0 10px 25px rgba(0,0,0,.08);padding:32px;width:100%;max-width:560px;}
-        .app-title{font-size:24px;font-weight:800;color:#1e3a8a;margin:0 0 6px;}
-        .app-subtitle{color:#6b7280;margin:0 0 10px;font-size:14px;}
+        .app-body{background:linear-gradient(135deg,#f0fdf4 0%,#ecfeff 100%);min-height:100vh;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans","PingFang SC","Microsoft YaHei",sans-serif;}
+        .app-card{background:#fff;border-radius:16px;box-shadow:0 10px 25px rgba(0,0,0,.06);padding:32px;width:100%;}
+        .app-title{font-size:26px;font-weight:800;color:#064e3b;margin:0 0 4px;letter-spacing:-0.5px;}
+        .app-subtitle{color:#0f766e;margin:0 0 4px;font-size:14px;font-weight:600;}
+        .app-tag{color:#6b7280;margin:0 0 18px;font-size:12px;}
         .app-muted{color:#9ca3af;font-size:12px;margin:0 0 18px;}
         .app-box{border-radius:10px;padding:12px 12px;border:1px solid #e5e7eb;}
         .app-box-yellow{background:#fffbeb;border-color:#fde68a;color:#92400e;}
@@ -394,146 +454,300 @@ INDEX_HTML = """
         .app-box-red{background:#fef2f2;border-color:#fecaca;color:#991b1b;}
         .app-label{display:block;font-size:13px;font-weight:700;color:#374151;}
         .app-input{margin-top:6px;display:block;width:100%;border-radius:10px;border:1px solid #d1d5db;padding:10px 12px;box-shadow:0 1px 2px rgba(0,0,0,.04);}
-        .app-input:focus{outline:none;border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.2);}
-        .app-btn{display:inline-flex;align-items:center;justify-content:center;width:100%;border-radius:10px;padding:10px 14px;font-weight:800;transition:all .15s ease;}
-        .app-btn-primary{background:#2563eb;color:#fff;}
-        .app-btn-primary:hover{background:#1d4ed8;}
-        .app-btn-secondary{background:#fff;color:#1d4ed8;border:1px solid #93c5fd;}
-        .app-btn-secondary:hover{background:#eff6ff;}
+        .app-input:focus{outline:none;border-color:#10b981;box-shadow:0 0 0 3px rgba(16,185,129,.2);}
+        .app-btn{display:inline-flex;align-items:center;justify-content:center;width:100%;border-radius:10px;padding:10px 14px;font-weight:800;transition:all .15s ease;cursor:pointer;}
+        .app-btn-primary{background:linear-gradient(135deg,#059669 0%,#0d9488 100%);color:#fff;}
+        .app-btn-primary:hover{background:linear-gradient(135deg,#047857 0%,#0f766e 100%);transform:translateY(-1px);box-shadow:0 4px 12px rgba(5,150,105,.3);}
+        .app-btn-secondary{background:#fff;color:#047857;border:1px solid #6ee7b7;}
+        .app-btn-secondary:hover{background:#ecfdf5;}
+        .app-btn-amber{background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);color:#fff;}
+        .app-btn-amber:hover{background:linear-gradient(135deg,#d97706 0%,#b45309 100%);transform:translateY(-1px);box-shadow:0 4px 12px rgba(245,158,11,.3);}
         .app-btn:disabled{opacity:.5;cursor:not-allowed;}
         .app-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
         .app-space{margin-bottom:14px;}
         .app-small{font-size:12px;opacity:.9;}
+        .role-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:18px;transition:all .2s ease;display:block;text-decoration:none;color:inherit;}
+        .role-card:hover{border-color:#10b981;transform:translateY(-2px);box-shadow:0 8px 20px rgba(16,185,129,.15);}
+        .role-card-amber:hover{border-color:#f59e0b;box-shadow:0 8px 20px rgba(245,158,11,.15);}
+        .engine-pill{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:9999px;font-size:11px;font-weight:600;}
+        .role-emoji{font-size:32px;line-height:1;margin-bottom:4px;display:block;}
     </style>
 </head>
-<body class="app-body bg-gray-100 min-h-screen flex items-center justify-center p-4">
-    <div class="app-card bg-white rounded-xl shadow-lg p-8 w-full max-w-lg">
-        <h1 class="app-title text-2xl font-bold text-blue-900 mb-2">洛谷 AI 测评报告生成器</h1>
-        <p class="app-subtitle text-gray-500 mb-2">输入洛谷 Cookies 与 OpenAI 配置，在线生成测评报告</p>
-        <div class="app-muted text-xs text-gray-400 mb-6 flex items-center justify-between gap-2">
-            <div>
-                QQ交流群：<span id="qqGroup" class="text-blue-700 font-semibold select-all">610931699</span>
-                <span class="text-gray-400">（复制即可）</span>
-            </div>
-            <button id="copyQqBtn" type="button" class="px-3 py-1 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50">复制</button>
+<body class="app-body p-4">
+<div class="max-w-4xl mx-auto py-6 space-y-4">
+
+    <!-- 顶部品牌 -->
+    <div class="app-card text-center">
+        <div class="inline-block px-3 py-1 bg-emerald-100 text-emerald-700 text-xs rounded-full mb-2">v3.5.2 · 选手成长平台</div>
+        <h1 class="app-title">🏆 信竞 AI 报告 · 选手成长平台</h1>
+        <p class="app-subtitle">OI 生涯决策助手 + 答疑讲题成长引擎</p>
+        <p class="app-tag">从"一次性报告"到"持续陪伴"——段位、赛事、错题、冲刺，全在一处</p>
+        <div class="app-muted flex items-center justify-center gap-2">
+            <span>QQ交流群：<span id="qqGroup" class="text-emerald-700 font-semibold select-all">610931699</span></span>
+            <button id="copyQqBtn" type="button" class="px-2 py-0.5 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 text-xs">复制</button>
         </div>
-        {% if validation_result %}
-        <div class="app-box rounded-md p-3 mb-4 text-sm {% if validation_result.ok %}app-box-green bg-green-50 border border-green-200 text-green-800{% else %}app-box-red bg-red-50 border border-red-200 text-red-800{% endif %}">
-            <p class="font-semibold mb-1">{{ validation_result.title }}</p>
-            <p>{{ validation_result.message }}</p>
+    </div>
+
+    <!-- v3.5.2 主 CTA · 统一"AI 生成学习报告"入口 -->
+    <div class="app-card bg-gradient-to-r from-emerald-50 to-cyan-50 border-2 border-emerald-300">
+        <div class="text-center mb-3">
+            <div class="inline-block px-3 py-1 bg-emerald-100 text-emerald-700 text-xs rounded-full mb-2">🎯 v3.5.2 统一入口</div>
+            <h2 class="text-xl font-extrabold text-emerald-900 mb-1">🎓 AI 生成学习报告</h2>
+            <p class="text-xs text-gray-600">输入洛谷账号 + 报告信息 · 30 秒出报告 · 含注册·错题本·3 版本报告</p>
         </div>
-        {% endif %}
-        <div class="app-box app-box-yellow bg-yellow-50 border border-yellow-200 rounded-md p-3 mb-4 text-sm text-yellow-800">
-            <p class="font-semibold mb-1">如何获取洛谷 Cookies：</p>
-            <ol class="list-decimal list-inside space-y-1 text-xs text-yellow-700">
-                <li>打开 <code>https://www.luogu.com.cn</code> 并登录</li>
-                <li>按 <kbd class="px-1 bg-yellow-100 rounded">F12</kbd> → <kbd class="px-1 bg-yellow-100 rounded">Application(应用)</kbd> → <kbd class="px-1 bg-yellow-100 rounded">Storage → Cookies</kbd> → <code>https://www.luogu.com.cn</code></li>
-                <li>复制以下三个参数的 Name/Value 填入下方：</li>
-            </ol>
+        <a href="/generate-form" class="app-btn app-btn-primary text-base py-3">
+            🚀 立即生成我的学习报告
+        </a>
+        <p class="text-center text-xs text-gray-500 mt-2">报名信息（UID/姓名/学校/年级/城市）一次性填写，无需先注册</p>
+        <!-- 老用户快速入口（不生成新报告，直接看） -->
+        <a href="/select-mode" class="block text-center text-xs text-emerald-700 hover:underline mt-2">👀 我已注册 · 只想看历史报告 →</a>
+    </div>
+
+    <!-- 3 身份入口（已有账号/有身份 · 压缩为副入口） -->
+    <div class="app-card">
+        <h2 class="text-sm font-bold text-gray-700 mb-3">👋 已有账号？</h2>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+
+            <a href="/register" class="role-card text-center">
+                <span class="role-emoji">🎓</span>
+                <div class="font-bold text-gray-800 mb-1">我是选手</div>
+                <div class="text-xs text-gray-500 mb-2">4 字段极简注册<br>段位查询 · 错题本</div>
+                <span class="engine-pill bg-emerald-100 text-emerald-700">基本功能免费</span>
+            </a>
+
+            <a href="/parent" class="role-card text-center role-card-amber">
+                <span class="role-emoji">👨‍👩‍👧</span>
+                <div class="font-bold text-gray-800 mb-1">我是家长</div>
+                <div class="text-xs text-gray-500 mb-2">完整 OI 报告<br>周报 · 倒推 · 政策</div>
+                <span class="engine-pill bg-amber-100 text-amber-700">加 V 兑换码</span>
+            </a>
+
+            <a href="/coach" class="role-card text-center">
+                <span class="role-emoji">🎯</span>
+                <div class="font-bold text-gray-800 mb-1">我是教练</div>
+                <div class="text-xs text-gray-500 mb-2">批量学员管理<br>兑换码生成 · 看板</div>
+                <span class="engine-pill bg-gray-200 text-gray-700">联系客服购买</span>
+            </a>
         </div>
-        <form action="/generate" method="post" class="space-y-4">
-            <input type="hidden" name="resume_task_id" value="{{ form_values.resume_task_id }}">
-            <div>
-                <label class="app-label block text-sm font-medium text-gray-700">__client_id</label>
-                <input type="text" name="client_id" value="{{ form_values.client_id }}" required class="app-input mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2">
-            </div>
-            <div>
-                <label class="app-label block text-sm font-medium text-gray-700">_uid</label>
-                <input type="text" name="uid" value="{{ form_values.uid }}" required class="app-input mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2">
-            </div>
-            <div>
-                <label class="app-label block text-sm font-medium text-gray-700">C3VK</label>
-                <input type="text" name="c3vk" value="{{ form_values.c3vk }}" required class="app-input mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2">
-            </div>
-            <div class="app-box app-box-blue bg-blue-50 border border-blue-200 rounded-md p-3">
-                <div class="flex items-start justify-between gap-3">
-                    <div>
-                        <p class="font-semibold mb-1">先校验 Cookies（推荐）</p>
-                        <p class="text-xs text-blue-700">填写完上面三个参数后点一次，立刻检查 me / practice / record/list 是否可用。</p>
-                    </div>
-                </div>
-                <div class="mt-3">
-                    <button id="validateBtn" type="submit" formaction="/validate-cookies" class="app-btn app-btn-secondary w-full bg-white text-blue-700 font-semibold py-2 px-4 rounded-md border border-blue-300 hover:bg-blue-50 transition">校验 Cookies</button>
-                </div>
-                <p id="validateHint" class="app-small text-xs text-blue-700 mt-2">请先填写 __client_id、_uid、C3VK 后再校验。</p>
-            </div>
-            <div>
-                <label class="app-label block text-sm font-medium text-gray-700">OpenAI API Key（留空使用服务端默认）</label>
-                <input type="password" name="api_key" value="{{ form_values.api_key }}" class="app-input mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2">
-                <p class="text-xs text-gray-500 mt-1">{{ server_key_hint }}</p>
-            </div>
-            <div>
-                <label class="app-label block text-sm font-medium text-gray-700">API Base URL（留空使用服务端默认）</label>
-                <input type="text" name="base_url" value="{{ form_values.base_url }}" class="app-input mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2">
-            </div>
-            <div>
-                <label class="app-label block text-sm font-medium text-gray-700">模型名称（留空使用服务端默认）</label>
-                <input type="text" name="model_name" value="{{ form_values.model_name }}" class="app-input mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2">
-            </div>
-            <div class="grid grid-cols-2 gap-4">
-                <div>
-                    <label class="app-label block text-sm font-medium text-gray-700">姓名</label>
-                    <input type="text" name="student_name" value="{{ form_values.student_name }}" class="app-input mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2">
-                </div>
-                <div>
-                    <label class="app-label block text-sm font-medium text-gray-700">学校</label>
-                    <input type="text" name="school" value="{{ form_values.school }}" class="app-input mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2">
-                </div>
-            </div>
-            <div>
-                <label class="app-label block text-sm font-medium text-gray-700">年级</label>
-                <input type="text" name="grade" value="{{ form_values.grade }}" class="app-input mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2">
-            </div>
-            <input type="hidden" name="max_passed" value="{{ form_values.max_passed }}">
-            <input type="hidden" name="max_failed" value="{{ form_values.max_failed }}">
-            <button id="generateBtn" type="submit" class="app-btn app-btn-primary w-full bg-blue-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-blue-700 transition">生成报告</button>
+
+        <!-- 学员 UID 快速入口（保留 · 用于老用户/已注册用户） -->
+        <form id="me-entry" action="/me/0" method="get" class="mt-4 flex gap-2" onsubmit="event.preventDefault(); var u=document.getElementById('meUid').value.trim(); if(u && /^\d{6,10}$/.test(u)) window.location.href='/me/'+u; else alert('请输入 6-10 位洛谷 UID');">
+            <input id="meUid" type="text" inputmode="numeric" pattern="\\d{6,10}" placeholder="洛谷 UID 6-10 位（已注册用户直接进入个人中心）" class="app-input flex-1">
+            <button type="submit" class="app-btn app-btn-secondary px-4 whitespace-nowrap">进入</button>
         </form>
     </div>
-    <script>
-        (function () {
-            function v(id) { var el = document.querySelector('input[name="' + id + '"]'); return el ? (el.value || '').trim() : ''; }
-            var btn = document.getElementById('validateBtn');
-            var hint = document.getElementById('validateHint');
-            function refresh() {
-                var ok = !!v('client_id') && !!v('uid') && !!v('c3vk');
-                if (btn) btn.disabled = !ok;
-                if (hint) hint.textContent = ok ? '已填写三个参数，建议先点一次校验。' : '请先填写 __client_id、_uid、C3VK 后再校验。';
-            }
-            ['client_id','uid','c3vk'].forEach(function (name) {
-                var el = document.querySelector('input[name="' + name + '"]');
-                if (el) el.addEventListener('input', refresh);
-            });
-            refresh();
-        })();
-        (function () {
-            var btn = document.getElementById('copyQqBtn');
-            var textEl = document.getElementById('qqGroup');
-            if (!btn || !textEl) return;
-            btn.addEventListener('click', async function () {
-                var value = (textEl.textContent || '').trim();
-                try {
-                    if (navigator.clipboard && navigator.clipboard.writeText) {
-                        await navigator.clipboard.writeText(value);
-                    } else {
-                        var ta = document.createElement('textarea');
-                        ta.value = value;
-                        ta.style.position = 'fixed';
-                        ta.style.top = '-1000px';
-                        document.body.appendChild(ta);
-                        ta.focus();
-                        ta.select();
-                        document.execCommand('copy');
-                        document.body.removeChild(ta);
-                    }
-                    btn.textContent = '已复制';
-                    setTimeout(function () { btn.textContent = '复制'; }, 1200);
-                } catch (e) {
-                    btn.textContent = '复制失败';
-                    setTimeout(function () { btn.textContent = '复制'; }, 1200);
+
+    <!-- 3 大引擎（价值感知 · 替代价格表） -->
+    <div class="app-card">
+        <h2 class="text-sm font-bold text-gray-700 mb-3">⚡ 三大成长引擎</h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div class="app-box border-emerald-200 bg-emerald-50/50">
+                <div class="text-lg mb-1">① GESP 跳级 + 免初赛</div>
+                <p class="text-xs text-gray-600">90 分跳一级 · 7 级 80+ 免 CSP-J 初赛 · 8 级 80+ 免 CSP-S 初赛</p>
+            </div>
+            <div class="app-box border-blue-200 bg-blue-50/50">
+                <div class="text-lg mb-1">② 固定赛事日历</div>
+                <p class="text-xs text-gray-600">GESP 4 次 + CSP-J/S + NOIP + NOI · 倒推计划</p>
+            </div>
+            <div class="app-box border-purple-200 bg-purple-50/50">
+                <div class="text-lg mb-1">③ StudyMate AI 讲题</div>
+                <p class="text-xs text-gray-600">错题本一键跳转 AI 讲解 · 学员 Pro 专享</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 加 V 与客服（v3.5.2 唯一购买通道） -->
+    <div class="app-card">
+        <h2 class="text-sm font-bold text-gray-700 mb-3">💬 加 V 获取兑换码（家长/讲题）</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div class="app-box border-amber-200 bg-amber-50/40">
+                <div class="text-sm font-bold text-amber-800 mb-1">📱 加 V 通道（家长/讲题）</div>
+                <p class="text-xs text-amber-700 mb-2">加客服微信，回复「家长」或「讲题」领取兑换码</p>
+                <div class="flex items-center gap-2 bg-white border border-amber-200 rounded-lg px-3 py-2">
+                    <span class="text-xs text-gray-500">微信号：</span>
+                    <span class="font-mono font-bold text-amber-700 select-all" id="wechatVip">xinjing-ai-vip</span>
+                    <button id="copyVipBtn" type="button" class="ml-auto px-2 py-0.5 rounded-md border border-amber-300 text-amber-700 hover:bg-amber-50 text-xs">复制</button>
+                </div>
+                <p class="text-xs text-gray-400 mt-2">工作日 9:00-21:00 · 节假日 10:00-18:00</p>
+            </div>
+            <div class="app-box border-gray-200 bg-gray-50/40">
+                <div class="text-sm font-bold text-gray-800 mb-1">🏢 教练版咨询（机构/工作室）</div>
+                <p class="text-xs text-gray-700 mb-2">批量学员管理 · 兑换码生成 · 营收看板</p>
+                <div class="space-y-1 text-xs text-gray-700">
+                    <div>📞 电话：<span class="font-mono font-semibold">400-XXX-XXXX</span></div>
+                    <div>📧 邮箱：<span class="font-mono font-semibold">coach@xinjing-ai.com</span></div>
+                    <div>🆚 备注：教练版按学员数计费，<a href="/coach" class="text-emerald-600 hover:underline">查看详情</a></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- v1 一次性测评报告（折叠保留 · v3.5.2 兜底） -->
+    <div class="app-card bg-amber-50 border border-amber-200 p-3 mb-2">
+        <p class="text-xs text-amber-800">
+            ℹ️ <strong>新用户说明</strong>：v3.5.2 主入口已上移至顶部"查看我的学习报告"（需 4 字段注册）。
+            本节是 <strong>v1 旧版一次性报告</strong>，适合不想注册的临时用户直接输入洛谷 Cookies + OpenAI 配置生成。
+        </p>
+    </div>
+    <details id="v1-generate" class="app-card scroll-mt-4">
+        <summary class="cursor-pointer text-sm font-bold text-gray-600 hover:text-emerald-600">📊 给新用户：一次性 AI 测评报告生成（v1 旧版 · 输入洛谷 Cookies + OpenAI 即出报告，无需注册）</summary>
+        <div class="mt-4 pt-4 border-t border-gray-200">
+            {% if validation_result %}
+            <div class="app-box rounded-md p-3 mb-4 text-sm {% if validation_result.ok %}app-box-green bg-green-50 border border-green-200 text-green-800{% else %}app-box-red bg-red-50 border border-red-200 text-red-800{% endif %}">
+                <p class="font-semibold mb-1">{{ validation_result.title }}</p>
+                <p>{{ validation_result.message }}</p>
+            </div>
+            {% endif %}
+            <div class="app-box app-box-yellow bg-yellow-50 border border-yellow-200 rounded-md p-3 mb-4 text-sm text-yellow-800">
+                <p class="font-semibold mb-1">如何获取洛谷 Cookies：</p>
+                <ol class="list-decimal list-inside space-y-1 text-xs text-yellow-700">
+                    <li>打开 <code>https://www.luogu.com.cn</code> 并登录</li>
+                    <li>按 <kbd class="px-1 bg-yellow-100 rounded">F12</kbd> → <kbd class="px-1 bg-yellow-100 rounded">Application(应用)</kbd> → <kbd class="px-1 bg-yellow-100 rounded">Storage → Cookies</kbd> → <code>https://www.luogu.com.cn</code></li>
+                    <li>复制以下三个参数的 Name/Value 填入下方：</li>
+                </ol>
+            </div>
+            <form action="/generate" method="post" class="space-y-4">
+                <input type="hidden" name="resume_task_id" value="{{ form_values.resume_task_id }}">
+                <div>
+                    <label class="app-label block text-sm font-medium text-gray-700">__client_id</label>
+                    <input type="text" name="client_id" value="{{ form_values.client_id }}" required class="app-input mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-emerald-500 focus:ring-emerald-500 border p-2">
+                </div>
+                <div>
+                    <label class="app-label block text-sm font-medium text-gray-700">_uid</label>
+                    <input type="text" name="uid" value="{{ form_values.uid }}" required class="app-input mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-emerald-500 focus:ring-emerald-500 border p-2">
+                </div>
+                <div>
+                    <label class="app-label block text-sm font-medium text-gray-700">C3VK</label>
+                    <input type="text" name="c3vk" value="{{ form_values.c3vk }}" required class="app-input mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-emerald-500 focus:ring-emerald-500 border p-2">
+                </div>
+                <div class="app-box app-box-blue bg-blue-50 border border-blue-200 rounded-md p-3">
+                    <div class="flex items-start justify-between gap-3">
+                        <div>
+                            <p class="font-semibold mb-1">先校验 Cookies（推荐）</p>
+                            <p class="text-xs text-blue-700">填写完上面三个参数后点一次，立刻检查 me / practice / record/list 是否可用。</p>
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <button id="validateBtn" type="submit" formaction="/validate-cookies" class="app-btn app-btn-secondary w-full bg-white text-blue-700 font-semibold py-2 px-4 rounded-md border border-blue-300 hover:bg-blue-50 transition">校验 Cookies</button>
+                    </div>
+                    <p id="validateHint" class="app-small text-xs text-blue-700 mt-2">请先填写 __client_id、_uid、C3VK 后再校验。</p>
+                </div>
+                <div>
+                    <label class="app-label block text-sm font-medium text-gray-700">OpenAI API Key（留空使用服务端默认）</label>
+                    <input type="password" name="api_key" value="{{ form_values.api_key }}" class="app-input mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-emerald-500 focus:ring-emerald-500 border p-2">
+                    <p class="text-xs text-gray-500 mt-1">{{ server_key_hint }}</p>
+                </div>
+                <div>
+                    <label class="app-label block text-sm font-medium text-gray-700">API Base URL（留空使用服务端默认）</label>
+                    <input type="text" name="base_url" value="{{ form_values.base_url }}" class="app-input mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-emerald-500 focus:ring-emerald-500 border p-2">
+                </div>
+                <div>
+                    <label class="app-label block text-sm font-medium text-gray-700">模型名称（留空使用服务端默认）</label>
+                    <input type="text" name="model_name" value="{{ form_values.model_name }}" class="app-input mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-emerald-500 focus:ring-emerald-500 border p-2">
+                </div>
+                <div class="app-row">
+                    <div>
+                        <label class="app-label block text-sm font-medium text-gray-700">姓名</label>
+                        <input type="text" name="student_name" value="{{ form_values.student_name }}" class="app-input mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-emerald-500 focus:ring-emerald-500 border p-2">
+                    </div>
+                    <div>
+                        <label class="app-label block text-sm font-medium text-gray-700">学校</label>
+                        <input type="text" name="school" value="{{ form_values.school }}" class="app-input mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-emerald-500 focus:ring-emerald-500 border p-2">
+                    </div>
+                </div>
+                <div>
+                    <label class="app-label block text-sm font-medium text-gray-700">年级</label>
+                    <input type="text" name="grade" value="{{ form_values.grade }}" class="app-input mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-emerald-500 focus:ring-emerald-500 border p-2">
+                </div>
+                <input type="hidden" name="max_passed" value="{{ form_values.max_passed }}">
+                <input type="hidden" name="max_failed" value="{{ form_values.max_failed }}">
+                <button id="generateBtn" type="submit" class="app-btn app-btn-primary w-full font-semibold py-3 px-4 rounded-md">生成报告</button>
+            </form>
+        </div>
+    </details>
+
+    <!-- 底部 -->
+    <div class="text-center text-xs text-gray-400 py-4 space-x-3">
+        <span>教练入口 → <a href="/admin/login" class="text-gray-500 hover:text-emerald-600 hover:underline">/admin/login</a></span>
+        <span class="text-gray-300">·</span>
+        <span>信竞 AI 报告 · v3.5.2 · 信奥选手成长平台</span>
+    </div>
+
+</div>
+
+<script>
+    (function () {
+        function v(id) { var el = document.querySelector('input[name="' + id + '"]'); return el ? (el.value || '').trim() : ''; }
+        var btn = document.getElementById('validateBtn');
+        var hint = document.getElementById('validateHint');
+        function refresh() {
+            var ok = !!v('client_id') && !!v('uid') && !!v('c3vk');
+            if (btn) btn.disabled = !ok;
+            if (hint) hint.textContent = ok ? '已填写三个参数，建议先点一次校验。' : '请先填写 __client_id、_uid、C3VK 后再校验。';
+        }
+        ['client_id','uid','c3vk'].forEach(function (name) {
+            var el = document.querySelector('input[name="' + name + '"]');
+            if (el) el.addEventListener('input', refresh);
+        });
+        refresh();
+    })();
+    (function () {
+        var btn = document.getElementById('copyQqBtn');
+        var textEl = document.getElementById('qqGroup');
+        if (!btn || !textEl) return;
+        btn.addEventListener('click', async function () {
+            var value = (textEl.textContent || '').trim();
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(value);
+                } else {
+                    var ta = document.createElement('textarea');
+                    ta.value = value;
+                    ta.style.position = 'fixed';
+                    ta.style.top = '-1000px';
+                    document.body.appendChild(ta);
+                    ta.focus();
+                    ta.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(ta);
                 }
-            });
-        })();
-    </script>
+                btn.textContent = '已复制';
+                setTimeout(function () { btn.textContent = '复制'; }, 1200);
+            } catch (e) {
+                btn.textContent = '复制失败';
+                setTimeout(function () { btn.textContent = '复制'; }, 1200);
+            }
+        });
+    })();
+    (function () {
+        var btn = document.getElementById('copyVipBtn');
+        var textEl = document.getElementById('wechatVip');
+        if (!btn || !textEl) return;
+        btn.addEventListener('click', async function () {
+            var value = (textEl.textContent || '').trim();
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(value);
+                } else {
+                    var ta = document.createElement('textarea');
+                    ta.value = value;
+                    ta.style.position = 'fixed';
+                    ta.style.top = '-1000px';
+                    document.body.appendChild(ta);
+                    ta.focus();
+                    ta.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(ta);
+                }
+                btn.textContent = '已复制';
+                setTimeout(function () { btn.textContent = '复制'; }, 1200);
+            } catch (e) {
+                btn.textContent = '复制失败';
+                setTimeout(function () { btn.textContent = '复制'; }, 1200);
+            }
+        });
+    })();
+</script>
 </body>
 </html>
 """
@@ -640,6 +854,14 @@ def build_form_values(form: dict | None = None) -> dict[str, str]:
         "max_failed": str(src.get("max_failed", "1000")),
         "resume_task_id": str(src.get("resume_task_id", "")),
     }
+
+
+def _get_server_key_hint() -> str:
+    """v3.5.2 辅助函数：返回 OpenAI Key 服务端状态提示"""
+    _, key_source = resolve_openai_api_key({})
+    if key_source.startswith("env:"):
+        return f"已检测到服务端 {key_source.split(':', 1)[1]}，可留空使用服务端默认。"
+    return "未检测到服务端 OpenAI Key（可在服务端设置 OPENAI_API_KEY / OPENAI_ADMIN_KEY）。"
 
 
 def render_index(form: dict | None = None, validation_result: dict | None = None):
@@ -1281,9 +1503,15 @@ STATUS_HTML = """
             <a href="{{ html }}" target="_blank" class="block w-full bg-blue-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-blue-700 transition">查看 HTML 报告</a>
             <a href="{{ pdf }}" target="_blank" class="block w-full bg-gray-700 text-white font-semibold py-2 px-4 rounded-md hover:bg-gray-800 transition">下载 PDF 报告</a>
             <a href="{{ md }}" target="_blank" class="block w-full bg-gray-200 text-gray-800 font-semibold py-2 px-4 rounded-md hover:bg-gray-300 transition">查看 Markdown 原文</a>
+            {% if me_url %}
+            <a href="{{ me_url }}" class="block w-full bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-bold py-2.5 px-4 rounded-md hover:from-emerald-600 hover:to-cyan-600 transition">🎓 查看我的报告中心（3 版本）</a>
+            {% endif %}
         </div>
         {% elif status == 'error' %}
         <a href="{{ retry_url }}" class="block w-full bg-blue-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-blue-700 transition mt-4">返回重试</a>
+        {% if me_url %}
+        <a href="{{ me_url }}" class="block w-full bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-bold py-2.5 px-4 rounded-md hover:from-emerald-600 hover:to-cyan-600 transition mt-2">🎓 查看我的报告中心（3 版本）</a>
+        {% endif %}
         {% else %}
         <p class="text-sm text-gray-400">页面每 3 秒自动刷新...</p>
         {% endif %}
@@ -1299,6 +1527,9 @@ def status_page(task_id):
         reconcile_stale_generation_tasks()
     task = get_task(task_id) or {"status": "unknown", "message": "任务不存在"}
     pdf_url = str(task.get("pdf", "") or "")
+    # v3.5.2 · 统一入口生成的报告支持跳回 /me/<uid>（3 版本报告）
+    luogu_uid = str(request.args.get("luogu_uid", "") or "")
+    me_url = f"/me/{luogu_uid}" if luogu_uid and luogu_uid.isdigit() else ""
     return render_template_string(
         STATUS_HTML,
         status=task.get("status", "unknown"),
@@ -1312,6 +1543,7 @@ def status_page(task_id):
         pdf=_download_report_url(pdf_url),
         md=task.get("md", ""),
         retry_url=url_for("retry_task", task_id=task_id),
+        me_url=me_url,
     )
 
 
@@ -1544,6 +1776,7 @@ ADMIN_HTML = """
             <h1 class="text-3xl font-bold text-blue-900">后台管理</h1>
             <div class="flex items-center gap-4">
                 <span class="text-sm text-gray-500">管理员：{{ admin_user }}</span>
+                <a href="/admin/students" class="text-blue-600 hover:underline">学员档案</a>
                 <a href="/" class="text-blue-600 hover:underline">返回首页</a>
                 <a href="/admin/logout" class="text-red-600 hover:underline">退出登录</a>
             </div>
@@ -1771,6 +2004,3097 @@ def admin_page():
         admin_user=str(session.get("admin_user", "") or "admin"),
         running_tasks=get_active_generation_task_count(),
     )
+
+
+# ============================================================
+#  v3.5 Phase 1 · 学员档案 admin 路由
+#  - /admin/students                       列表
+#  - /admin/students/new                   新建表单
+#  - /admin/students/<id>                  详情（含 GESP 段位图）
+#  - /admin/students/<id>/delete           删除（POST）
+#  - /admin/students/<id>/gesp/new         录入 GESP 成绩
+# ============================================================
+import sqlite3 as _sqlite3
+import admin_students as _admin_students
+import admin_guardians as _admin_guardians
+import admin_goals as _admin_goals
+import weekly_reports as _weekly_reports
+
+
+def _gesp_competition_options() -> list[dict]:
+    """拉取所有 GESP 赛事，按日期倒序，供录入 GESP 成绩时选择"""
+    conn = _admin_students._get_conn()
+    try:
+        rows = conn.execute(
+            """
+            SELECT id, code, name, exam_date
+            FROM competitions
+            WHERE type = 'gesp'
+            ORDER BY exam_date DESC
+            """
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+@app.route("/admin/students")
+def admin_students_list():
+    auth_redirect = require_admin_auth()
+    if auth_redirect is not None:
+        return auth_redirect
+    students = _admin_students.list_students(limit=200)
+    total = _admin_students.count_students()
+    return render_template_string(
+        ADMIN_STUDENTS_LIST_HTML,
+        students=students,
+        total=total,
+        notice=str(request.args.get("notice", "") or ""),
+        notice_type=str(request.args.get("notice_type", "") or "success"),
+    )
+
+
+@app.route("/admin/students/new", methods=["GET", "POST"])
+def admin_students_new():
+    auth_redirect = require_admin_auth()
+    if auth_redirect is not None:
+        return auth_redirect
+    if request.method == "POST":
+        try:
+            sid = _admin_students.create_student(
+                luogu_uid=str(request.form.get("luogu_uid", "")).strip(),
+                real_name=str(request.form.get("real_name", "") or "").strip() or None,
+                school=str(request.form.get("school", "") or "").strip() or None,
+                grade=str(request.form.get("grade", "") or "").strip() or None,
+                is_minor=request.form.get("is_minor") == "1",
+                note=str(request.form.get("note", "") or "").strip() or None,
+            )
+            return redirect(
+                url_for("admin_students_detail", student_id=sid, notice="学员已创建", notice_type="success")
+            )
+        except (ValueError, _sqlite3.IntegrityError) as exc:
+            return render_template_string(
+                ADMIN_STUDENTS_NEW_HTML,
+                error=str(exc),
+                form=request.form,
+            )
+    return render_template_string(ADMIN_STUDENTS_NEW_HTML, error="", form={})
+
+
+@app.route("/admin/students/<int:student_id>")
+def admin_students_detail(student_id: int):
+    auth_redirect = require_admin_auth()
+    if auth_redirect is not None:
+        return auth_redirect
+    progress = _admin_students.get_student_gesp_progress(student_id)
+    if not progress:
+        return redirect(
+            url_for("admin_students_list", notice=f"学员 {student_id} 不存在", notice_type="error")
+        )
+    gesp_events = _gesp_competition_options()
+    return render_template_string(
+        ADMIN_STUDENTS_DETAIL_HTML,
+        progress=progress,
+        student=progress["student"],
+        gesp_events=gesp_events,
+        notice=str(request.args.get("notice", "") or ""),
+        notice_type=str(request.args.get("notice_type", "") or "success"),
+    )
+
+
+@app.route("/admin/students/<int:student_id>/delete", methods=["POST"])
+def admin_students_delete(student_id: int):
+    auth_redirect = require_admin_auth()
+    if auth_redirect is not None:
+        return auth_redirect
+    ok = _admin_students.delete_student(student_id)
+    if ok:
+        return redirect(
+            url_for("admin_students_list", notice="学员已删除", notice_type="success")
+        )
+    return redirect(
+        url_for("admin_students_list", notice="学员不存在", notice_type="error")
+    )
+
+
+# ============================================================
+# v3.5.2 · 3 版本报告路由
+# ============================================================
+
+
+def _collect_report_data(student: dict) -> dict:
+    """共享报告数据生成器（v3.5.2 · 同一份洛谷数据 + AI 分析 → 3 套 UI）"""
+    sid = int(student.get("id") or 0)
+    progress = _admin_students.get_student_gesp_progress(sid) or {}
+    # 错题本（demo 用 stub · 真实从 luogu_evaluator 抽）
+    mistake_count = 0
+    try:
+        from mistake_book import list_mistakes
+        mistakes = list_mistakes(sid) or []
+        mistake_count = len(mistakes)
+    except Exception:
+        mistakes = []
+    # 政策匹配
+    try:
+        from task_store import match_school_for_student
+        policy_match = match_school_for_student(dict(student))
+    except Exception:
+        policy_match = {"stage": "unknown", "matches": []}
+    # 年龄 & 免初赛
+    from docs.gesp_estimator import is_csp_age_eligible, compute_exemptions
+    from datetime import date as _date
+    gesp_level = int(student.get("gesp_highest_passed") or 0)
+    gesp_score = int(student.get("gesp_latest_score") or 0)
+    exemptions = compute_exemptions(gesp_level, gesp_score) if gesp_level else []
+    return {
+        "student": dict(student),
+        "progress": progress,
+        "mistakes": mistakes,
+        "mistake_count": mistake_count,
+        "policy_match": policy_match,
+        "exemptions": exemptions,
+        "gesp_level": gesp_level,
+        "gesp_score": gesp_score,
+        "next_level": int(student.get("gesp_next_eligible_level") or 1),
+        "report_year": 2026,
+    }
+
+
+@app.route("/report/student/<luogu_uid>")
+def report_student(luogu_uid: str):
+    """v3.5.2 学员版报告（游戏化 · 段位 + 错题本 + AI 讲题）"""
+    student = _admin_students.get_student_by_uid(luogu_uid)
+    if not student:
+        return render_template_string(REGISTER_INVALID_HTML, message=f"UID {luogu_uid} 未注册"), 404
+    data = _collect_report_data(student)
+    # 检查家长订阅（AI 讲题）
+    has_parent_sub = False
+    try:
+        from task_store import _get_conn
+        conn = _get_conn()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM activation_codes ac "
+                "JOIN students s ON s.id = ac.student_id "
+                "WHERE ac.sku = 'parent_sub' AND s.luogu_uid = ? "
+                "AND ac.redeemed_at IS NOT NULL "
+                "AND (ac.expires_at IS NULL OR ac.expires_at > datetime('now'))",
+                (str(luogu_uid).strip(),),
+            ).fetchone()
+        finally:
+            conn.close()
+        has_parent_sub = bool(row and dict(row).get("n", 0) > 0)
+    except Exception:
+        has_parent_sub = False
+    return render_template_string(STUDENT_REPORT_HTML, **data, has_parent_sub=has_parent_sub, luogu_uid=luogu_uid)
+
+
+@app.route("/report/parent/<token>")
+def report_parent(token: str):
+    """v3.5.2 家长版报告（决策树 + 政策匹配 + 完整）"""
+    g = _admin_guardians.get_guardian_by_token(token)
+    if not g:
+        return render_template_string(REGISTER_INVALID_HTML, message="家长 token 无效或已过期"), 404
+    student = _admin_students.get_student(int(g["student_id"]))
+    if not student:
+        return render_template_string(REGISTER_INVALID_HTML, message="学员已注销"), 404
+    data = _collect_report_data(student)
+    return render_template_string(PARENT_REPORT_HTML, **data, token=token, guardian=g)
+
+
+@app.route("/report/coach")
+def report_coach():
+    """v3.5.2 教练版报告（班级概览 · 复用 admin 数据）"""
+    auth_redirect = require_admin_auth()
+    if auth_redirect is not None:
+        return auth_redirect
+    # 班级概览
+    students = _admin_students.list_students() or []
+    n_students = len(students)
+    n_gesp_passed = sum(1 for s in students if int(s.get("gesp_highest_passed") or 0) > 0)
+    n_exempt_cspj = sum(1 for s in students if s.get("gesp_can_exempt_csp_j"))
+    n_exempt_csps = sum(1 for s in students if s.get("gesp_can_exempt_csp_s"))
+    # 营收
+    from phase3_dashboard import get_revenue_stats
+    rev = get_revenue_stats() or {}
+    return render_template_string(
+        COACH_REPORT_HTML,
+        n_students=n_students,
+        n_gesp_passed=n_gesp_passed,
+        n_exempt_cspj=n_exempt_cspj,
+        n_exempt_csps=n_exempt_csps,
+        revenue=rev,
+        students=students[:20],  # Top 20
+    )
+
+
+# 学员版报告模板（游戏化）
+STUDENT_REPORT_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>🎓 学员版报告 · {{ student.real_name or luogu_uid }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body{background:linear-gradient(135deg,#fef3c7 0%,#ecfdf5 50%,#dbeafe 100%);min-height:100vh;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;}
+        .card-shadow{box-shadow:0 10px 25px rgba(0,0,0,.06);}
+        .progress-fill{transition:width 1s ease;}
+        .medal{font-size:36px;display:inline-block;filter:drop-shadow(0 2px 4px rgba(0,0,0,.1));}
+    </style>
+</head>
+<body class="p-4">
+<div class="max-w-3xl mx-auto py-6 space-y-4">
+
+    <!-- 头部：欢迎 + 段位大徽章 -->
+    <div class="bg-white rounded-2xl card-shadow p-6 text-center">
+        <div class="text-sm text-gray-500">🎓 学员版报告</div>
+        <h1 class="text-2xl font-extrabold text-gray-800 mt-1">Hi，{{ student.real_name or '选手' }}！</h1>
+        <p class="text-xs text-gray-400 mt-1">{{ student.city or '未填城市' }} · {{ student.grade_label or student.grade or '—' }} · UID {{ luogu_uid }}</p>
+        <div class="mt-4 flex items-center justify-center gap-4">
+            <div>
+                <div class="medal">{% if gesp_level >= 7 %}🏆{% elif gesp_level >= 4 %}🏅{% elif gesp_level >= 1 %}⭐{% else %}🌱{% endif %}</div>
+                <div class="text-xs text-gray-500 mt-1">当前段位 GESP {{ gesp_level or '0' }} 级</div>
+            </div>
+            <div class="text-left flex-1 max-w-xs">
+                <div class="text-sm font-bold text-emerald-700">{% if gesp_level >= 8 %}已达 8 级 80+ 免 CSP-S 初赛！{% elif gesp_level >= 7 %}7 级 80+ 即可免 CSP-J 初赛{% else %}距离免初赛还差 {{ 7 - gesp_level if gesp_level < 7 else 1 }} 个级别{% endif %}</div>
+                <div class="mt-2 w-full bg-gray-200 rounded-full h-2">
+                    <div class="bg-emerald-500 h-2 rounded-full progress-fill" style="width: {{ (gesp_level/8*100)|int if gesp_level else 0 }}%"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 错题本卡片（游戏化） -->
+    <div class="bg-white rounded-2xl card-shadow p-5">
+        <div class="flex items-center justify-between mb-3">
+            <h2 class="text-base font-bold text-gray-800">📚 我的错题本</h2>
+            <span class="text-xs text-gray-400">{{ mistake_count }} 道错题</span>
+        </div>
+        {% if mistakes %}
+        <div class="space-y-2">
+            {% for m in mistakes[:5] %}
+            <div class="flex items-center justify-between border border-gray-200 rounded-lg p-2 hover:bg-gray-50">
+                <div class="text-sm">
+                    <span class="font-mono text-xs text-gray-400">{{ m.problem_id or m.pid or '—' }}</span>
+                    <span class="ml-2">{{ m.title or m.problem_title or '未命名题目' }}</span>
+                </div>
+                <span class="text-xs px-2 py-0.5 bg-amber-100 text-amber-700 rounded">{{ m.tag or m.algorithm_tag or '未分类' }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-center py-4 text-sm text-gray-400">🌱 暂无错题 · <a href="/me/{{ luogu_uid }}" class="text-emerald-600 hover:underline">查看错题本</a></div>
+        {% endif %}
+        <!-- AI 讲题按钮（家长订阅门控） -->
+        <div class="mt-3 pt-3 border-t border-gray-100">
+            {% if has_parent_sub %}
+            <a href="/studymate/dashboard" class="block w-full text-center py-2.5 rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500 text-white font-bold text-sm hover:from-blue-600 hover:to-cyan-600">🤖 一键 AI 讲题（StudyMate）</a>
+            {% else %}
+            <button disabled class="w-full py-2.5 rounded-lg bg-gray-100 text-gray-400 font-bold text-sm cursor-not-allowed">🤖 AI 讲题 🔒（需家长订阅）</button>
+            <p class="text-center text-xs text-amber-600 mt-1">💡 让家长加 V 兑换码 <code class="bg-amber-50 px-1 rounded">PS-XXXXXXXX</code> 解锁</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- 下一步行动（游戏化建议） -->
+    <div class="bg-white rounded-2xl card-shadow p-5">
+        <h2 class="text-base font-bold text-gray-800 mb-3">🎯 下一步行动</h2>
+        <div class="space-y-2">
+            {% if gesp_level == 0 %}
+            <div class="flex items-start gap-3 p-3 bg-emerald-50 rounded-lg">
+                <span class="text-2xl">🚀</span>
+                <div class="flex-1">
+                    <div class="font-bold text-sm text-emerald-800">建议先报 GESP 1 级</div>
+                    <div class="text-xs text-emerald-600 mt-0.5">从 1 级开始是硬规则 · 通过后 90+ 可跳级</div>
+                </div>
+                <a href="/me/{{ luogu_uid }}" class="text-xs text-emerald-700 hover:underline whitespace-nowrap">查看详情 →</a>
+            </div>
+            {% elif gesp_level < 7 %}
+            <div class="flex items-start gap-3 p-3 bg-blue-50 rounded-lg">
+                <span class="text-2xl">⏭️</span>
+                <div class="flex-1">
+                    <div class="font-bold text-sm text-blue-800">下次可报 GESP {{ next_level }} 级</div>
+                    <div class="text-xs text-blue-600 mt-0.5">上次 {{ gesp_level }} 级 {{ gesp_score }} 分 · 90+ 可跳级</div>
+                </div>
+            </div>
+            {% else %}
+            <div class="flex items-start gap-3 p-3 bg-purple-50 rounded-lg">
+                <span class="text-2xl">🏆</span>
+                <div class="flex-1">
+                    <div class="font-bold text-sm text-purple-800">已解锁免初赛特权</div>
+                    <div class="text-xs text-purple-600 mt-0.5">{% if 'csp_s' in exemptions %}CSP-S 免初赛{% else %}CSP-J 免初赛{% endif %}</div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Tab 切换：学员版 / 家长版 -->
+    <div class="bg-white rounded-2xl card-shadow p-3 flex gap-2">
+        <a href="/report/student/{{ luogu_uid }}" class="flex-1 text-center py-2 rounded-lg bg-emerald-500 text-white font-bold text-sm">🎓 学员版（当前）</a>
+        <a href="/parent" class="flex-1 text-center py-2 rounded-lg bg-gray-100 text-gray-700 font-bold text-sm hover:bg-gray-200">👨‍👩‍👧 家长版</a>
+    </div>
+
+    <p class="text-center text-xs text-gray-400">v3.5.2 · 学员版报告 · 同一份数据 3 套渲染</p>
+</div>
+</body>
+</html>
+"""
+
+
+# 家长版报告模板（决策树 + 政策匹配）
+PARENT_REPORT_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>👨‍👩‍👧 家长版报告 · {{ student.real_name or '' }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body{background:linear-gradient(135deg,#fffbeb 0%,#fef3c7 50%,#fde68a 100%);min-height:100vh;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;}
+        .card-shadow{box-shadow:0 10px 25px rgba(0,0,0,.06);}
+    </style>
+</head>
+<body class="p-4">
+<div class="max-w-3xl mx-auto py-6 space-y-4">
+
+    <!-- 头部：完整档案 -->
+    <div class="bg-white rounded-2xl card-shadow p-6">
+        <div class="text-sm text-gray-500">👨‍👩‍👧 家长版报告（完整）</div>
+        <h1 class="text-2xl font-extrabold text-gray-800 mt-1">您家孩子 · {{ student.real_name or '—' }}</h1>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 text-center">
+            <div class="bg-emerald-50 rounded-lg p-2">
+                <div class="text-xs text-gray-500">城市</div>
+                <div class="font-bold text-sm text-emerald-800">{{ student.city or '—' }}</div>
+            </div>
+            <div class="bg-blue-50 rounded-lg p-2">
+                <div class="text-xs text-gray-500">年级</div>
+                <div class="font-bold text-sm text-blue-800">{{ student.grade_label or student.grade or '—' }}</div>
+            </div>
+            <div class="bg-amber-50 rounded-lg p-2">
+                <div class="text-xs text-gray-500">段位</div>
+                <div class="font-bold text-sm text-amber-800">GESP {{ gesp_level or '0' }} 级</div>
+            </div>
+            <div class="bg-purple-50 rounded-lg p-2">
+                <div class="text-xs text-gray-500">错题</div>
+                <div class="font-bold text-sm text-purple-800">{{ mistake_count }} 道</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 决策树：3 选项给家长 -->
+    <div class="bg-white rounded-2xl card-shadow p-5">
+        <h2 class="text-base font-bold text-gray-800 mb-3">🌳 升学路径决策</h2>
+        <div class="space-y-2">
+            <div class="border {% if 'csp_s' in exemptions %}border-emerald-500 bg-emerald-50{% elif 'csp_j' in exemptions %}border-blue-500 bg-blue-50{% else %}border-gray-200{% endif %} rounded-lg p-3">
+                <div class="font-bold text-sm">方案 A · 走竞赛保送 / 强基</div>
+                <div class="text-xs text-gray-600 mt-1">GESP {{ gesp_level }} 级 + {{ gesp_score }} 分 · 免初赛：{{ exemptions|join('+') or '暂无' }}</div>
+            </div>
+            <div class="border border-gray-200 rounded-lg p-3">
+                <div class="font-bold text-sm">方案 B · 走高考裸分</div>
+                <div class="text-xs text-gray-600 mt-1">以高考为主线 · OI 作为兴趣辅助</div>
+            </div>
+            <div class="border border-gray-200 rounded-lg p-3">
+                <div class="font-bold text-sm">方案 C · 双线并行</div>
+                <div class="text-xs text-gray-600 mt-1">高考 + 竞赛 · 适合文化课 590+ 选手</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 政策匹配（已在 /parent/<token> 完整展示，这里给摘要链接） -->
+    <div class="bg-white rounded-2xl card-shadow p-5 border-l-4 border-emerald-500">
+        <h2 class="text-base font-bold text-gray-800">🏫 升学路径匹配</h2>
+        <p class="text-xs text-gray-500 mt-1">
+            当前学段：<strong>{{ policy_match.stage_label or '—' }}</strong>
+            · 匹配类型：<strong>{{ policy_match.match_type_label or '无' }}</strong>
+            · 匹配到 <strong>{{ policy_match.matches|length }}</strong> 所样板学校
+        </p>
+        <a href="/parent/{{ token }}" class="inline-block mt-2 text-sm text-emerald-600 hover:underline">查看完整升学匹配 →</a>
+    </div>
+
+    <!-- 周报快速入口 -->
+    <div class="bg-white rounded-2xl card-shadow p-5">
+        <div class="flex items-center justify-between">
+            <div>
+                <h2 class="text-base font-bold text-gray-800">📅 周报与赛事日历</h2>
+                <p class="text-xs text-gray-500 mt-1">每周生成 · GESP / CSP / NOIP 倒计时</p>
+            </div>
+            <a href="/parent/{{ token }}" class="app-btn app-btn-secondary px-4 py-2 text-sm">进入家长中心</a>
+        </div>
+    </div>
+
+    <!-- Tab 切换 -->
+    <div class="bg-white rounded-2xl card-shadow p-3 flex gap-2">
+        <a href="/parent" class="flex-1 text-center py-2 rounded-lg bg-gray-100 text-gray-700 font-bold text-sm hover:bg-gray-200">🎓 学员版</a>
+        <a href="/report/parent/{{ token }}" class="flex-1 text-center py-2 rounded-lg bg-amber-500 text-white font-bold text-sm">👨‍👩‍👧 家长版（当前）</a>
+    </div>
+
+    <p class="text-center text-xs text-gray-400">v3.5.2 · 家长版报告 · 同一份数据 3 套渲染</p>
+</div>
+</body>
+</html>
+"""
+
+
+# 教练版报告模板（复用 admin 数据 + 看板）
+COACH_REPORT_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>🎯 教练版报告 · 信竞 AI 报告 v3.5.2</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body{background:linear-gradient(135deg,#f1f5f9 0%,#e0e7ff 100%);min-height:100vh;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;}
+        .card-shadow{box-shadow:0 10px 25px rgba(0,0,0,.06);}
+    </style>
+</head>
+<body class="p-4">
+<div class="max-w-5xl mx-auto py-6 space-y-4">
+
+    <!-- 头部 -->
+    <div class="bg-white rounded-2xl card-shadow p-6">
+        <div class="flex items-center justify-between">
+            <div>
+                <div class="text-sm text-gray-500">🎯 教练版报告（班级概览）</div>
+                <h1 class="text-2xl font-extrabold text-gray-800 mt-1">教练中心 · 班级看板</h1>
+            </div>
+            <span class="text-xs px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full">v3.5.2</span>
+        </div>
+    </div>
+
+    <!-- 5 大指标看板 -->
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div class="bg-white rounded-2xl card-shadow p-4 text-center">
+            <div class="text-2xl font-extrabold text-emerald-600">{{ n_students }}</div>
+            <div class="text-xs text-gray-500 mt-1">班级学员数</div>
+        </div>
+        <div class="bg-white rounded-2xl card-shadow p-4 text-center">
+            <div class="text-2xl font-extrabold text-blue-600">{{ n_gesp_passed }}</div>
+            <div class="text-xs text-gray-500 mt-1">通过 GESP 学员</div>
+        </div>
+        <div class="bg-white rounded-2xl card-shadow p-4 text-center">
+            <div class="text-2xl font-extrabold text-amber-600">{{ n_exempt_cspj }}</div>
+            <div class="text-xs text-gray-500 mt-1">免 CSP-J 学员</div>
+        </div>
+        <div class="bg-white rounded-2xl card-shadow p-4 text-center">
+            <div class="text-2xl font-extrabold text-purple-600">{{ n_exempt_csps }}</div>
+            <div class="text-xs text-gray-500 mt-1">免 CSP-S 学员</div>
+        </div>
+        <div class="bg-white rounded-2xl card-shadow p-4 text-center">
+            <div class="text-2xl font-extrabold text-rose-600">¥{{ revenue.get('total_revenue_cny', 0) if revenue else 0 }}</div>
+            <div class="text-xs text-gray-500 mt-1">本期营收</div>
+        </div>
+    </div>
+
+    <!-- Top 20 学员 -->
+    <div class="bg-white rounded-2xl card-shadow p-5">
+        <h2 class="text-base font-bold text-gray-800 mb-3">📋 Top 20 学员</h2>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead class="text-xs text-gray-500 border-b">
+                    <tr>
+                        <th class="text-left py-1">#</th>
+                        <th class="text-left py-1">姓名</th>
+                        <th class="text-left py-1">城市</th>
+                        <th class="text-left py-1">年级</th>
+                        <th class="text-right py-1">GESP</th>
+                        <th class="text-right py-1">CSP-J 免</th>
+                        <th class="text-right py-1">CSP-S 免</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for s in students %}
+                    <tr class="border-b border-gray-100 hover:bg-gray-50">
+                        <td class="py-1.5 text-gray-400">{{ loop.index }}</td>
+                        <td class="py-1.5 font-bold text-gray-800">{{ s.real_name or s.luogu_uid }}</td>
+                        <td class="py-1.5 text-gray-600">{{ s.city or '—' }}</td>
+                        <td class="py-1.5 text-gray-600">{{ s.grade or '—' }}</td>
+                        <td class="py-1.5 text-right font-mono">{{ s.gesp_highest_passed or 0 }}</td>
+                        <td class="py-1.5 text-right">{% if s.gesp_can_exempt_csp_j %}✅{% else %}—{% endif %}</td>
+                        <td class="py-1.5 text-right">{% if s.gesp_can_exempt_csp_s %}✅{% else %}—{% endif %}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 操作入口 -->
+    <div class="bg-white rounded-2xl card-shadow p-5">
+        <h2 class="text-base font-bold text-gray-800 mb-3">🔧 操作入口</h2>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <a href="/admin/students" class="block text-center py-2 rounded-lg bg-emerald-50 text-emerald-700 text-sm font-bold hover:bg-emerald-100">学员管理</a>
+            <a href="/admin/revenue" class="block text-center py-2 rounded-lg bg-amber-50 text-amber-700 text-sm font-bold hover:bg-amber-100">营收看板</a>
+            <a href="/redeem" class="block text-center py-2 rounded-lg bg-blue-50 text-blue-700 text-sm font-bold hover:bg-blue-100">兑换码生成</a>
+            <a href="/admin/students/new" class="block text-center py-2 rounded-lg bg-purple-50 text-purple-700 text-sm font-bold hover:bg-purple-100">新增学员</a>
+        </div>
+    </div>
+
+    <p class="text-center text-xs text-gray-400">v3.5.2 · 教练版报告 · 复用 admin 数据</p>
+</div>
+</body>
+</html>
+"""
+
+
+@app.route("/admin/students/<int:student_id>/gesp/new", methods=["GET", "POST"])
+def admin_students_gesp_new(student_id: int):
+    auth_redirect = require_admin_auth()
+    if auth_redirect is not None:
+        return auth_redirect
+    student = _admin_students.get_student(student_id)
+    if not student:
+        return redirect(
+            url_for("admin_students_list", notice="学员不存在", notice_type="error")
+        )
+    gesp_events = _gesp_competition_options()
+
+    if request.method == "POST":
+        try:
+            exam_id = int(request.form.get("exam_id", "0") or "0")
+            level = int(request.form.get("registered_level", "0") or "0")
+            score = int(request.form.get("actual_score", "-1") or "-1")
+            _admin_students.add_gesp_exam(
+                student_id=student_id,
+                exam_id=exam_id,
+                registered_level=level,
+                actual_score=score,
+                certificate_no=str(request.form.get("certificate_no", "") or "").strip() or None,
+                notes=str(request.form.get("notes", "") or "").strip() or None,
+                recorded_by="admin",
+            )
+            return redirect(
+                url_for(
+                    "admin_students_detail",
+                    student_id=student_id,
+                    notice=f"已录入 GESP {level} 级 {score} 分",
+                    notice_type="success",
+                )
+            )
+        except (ValueError, _sqlite3.IntegrityError) as exc:
+            return render_template_string(
+                ADMIN_STUDENTS_GESP_NEW_HTML,
+                student=student,
+                gesp_events=gesp_events,
+                error=str(exc),
+                form=request.form,
+            )
+    return render_template_string(
+        ADMIN_STUDENTS_GESP_NEW_HTML,
+        student=student,
+        gesp_events=gesp_events,
+        error="",
+        form={},
+    )
+
+
+# ---- 学员档案 admin 模板 ----
+
+ADMIN_STUDENTS_LIST_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>学员档案 - 后台管理</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen p-6">
+    <div class="max-w-6xl mx-auto">
+        <div class="flex items-center justify-between mb-6">
+            <h1 class="text-3xl font-bold text-blue-900">学员档案</h1>
+            <div class="flex items-center gap-4">
+                <a href="/admin/students/new" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">+ 新建学员</a>
+                <a href="/admin" class="text-blue-600 hover:underline">返回后台</a>
+            </div>
+        </div>
+        {% if notice %}
+        <div class="mb-4 rounded-lg border px-4 py-3 text-sm {% if notice_type == 'error' %}bg-red-50 border-red-200 text-red-700{% else %}bg-green-50 border-green-200 text-green-700{% endif %}">
+            {{ notice }}
+        </div>
+        {% endif %}
+        <div class="bg-white rounded-xl shadow overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                <h2 class="text-lg font-semibold text-gray-800">学员列表（合计 {{ total }}）</h2>
+            </div>
+            {% if students %}
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-sm text-left">
+                    <thead class="bg-gray-50 text-gray-600 font-medium">
+                        <tr>
+                            <th class="px-6 py-3">ID</th>
+                            <th class="px-6 py-3">Luogu UID</th>
+                            <th class="px-6 py-3">姓名/代号</th>
+                            <th class="px-6 py-3">学校</th>
+                            <th class="px-6 py-3">GESP 最高</th>
+                            <th class="px-6 py-3">免初赛</th>
+                            <th class="px-6 py-3">下次可报</th>
+                            <th class="px-6 py-3">考试次数</th>
+                            <th class="px-6 py-3">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for s in students %}
+                        <tr class="border-t border-gray-100 hover:bg-gray-50">
+                            <td class="px-6 py-3 text-gray-500">#{{ s.id }}</td>
+                            <td class="px-6 py-3 font-mono text-xs">{{ s.luogu_uid }}</td>
+                            <td class="px-6 py-3">{{ s.real_name or ('UID-' + s.luogu_uid) }}{% if s.is_minor %} <span class="text-xs text-orange-500">(未成年)</span>{% endif %}</td>
+                            <td class="px-6 py-3 text-gray-600">{{ s.school or '—' }}</td>
+                            <td class="px-6 py-3 font-semibold text-blue-700">{% if s.gesp_highest_passed %}GESP {{ s.gesp_highest_passed }} 级{% else %}—{% endif %}</td>
+                            <td class="px-6 py-3">
+                                {% if s.gesp_can_exempt_csp_s %}<span class="px-2 py-1 text-xs bg-purple-100 text-purple-700 rounded">J+S 免</span>
+                                {% elif s.gesp_can_exempt_csp_j %}<span class="px-2 py-1 text-xs bg-green-100 text-green-700 rounded">J 免</span>
+                                {% else %}<span class="text-gray-400">—</span>{% endif %}
+                            </td>
+                            <td class="px-6 py-3 text-gray-700">{% if s.gesp_next_eligible_level %}GESP {{ s.gesp_next_eligible_level }} 级{% else %}GESP 1 级{% endif %}</td>
+                            <td class="px-6 py-3 text-gray-500">{{ s.gesp_exam_count }}</td>
+                            <td class="px-6 py-3">
+                                <a href="/admin/students/{{ s.id }}" class="text-blue-600 hover:underline mr-3">详情</a>
+                                <form method="POST" action="/admin/students/{{ s.id }}/delete" class="inline" onsubmit="return confirm('确认删除学员 #{{ s.id }}？将级联删除所有 GESP 记录。');">
+                                    <button type="submit" class="text-red-600 hover:underline">删除</button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="px-6 py-12 text-center text-gray-500">
+                <p class="mb-3">还没有学员。</p>
+                <a href="/admin/students/new" class="text-blue-600 hover:underline">立即创建第一个学员</a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+
+ADMIN_STUDENTS_NEW_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>新建学员 - 后台管理</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen p-6">
+    <div class="max-w-2xl mx-auto">
+        <div class="flex items-center justify-between mb-6">
+            <h1 class="text-3xl font-bold text-blue-900">新建学员</h1>
+            <a href="/admin/students" class="text-blue-600 hover:underline">返回列表</a>
+        </div>
+        {% if error %}
+        <div class="mb-4 rounded-lg border bg-red-50 border-red-200 text-red-700 px-4 py-3 text-sm">
+            {{ error }}
+        </div>
+        {% endif %}
+        <form method="POST" class="bg-white rounded-xl shadow p-6 space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Luogu UID <span class="text-red-500">*</span></label>
+                <input type="text" name="luogu_uid" required pattern="[0-9]+"
+                       value="{{ form.luogu_uid or '' }}"
+                       class="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                       placeholder="洛谷用户 ID（数字）">
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">真实姓名</label>
+                    <input type="text" name="real_name"
+                           value="{{ form.real_name or '' }}"
+                           class="w-full border rounded-lg px-3 py-2"
+                           placeholder="未成年学员需家长授权后才填">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">学校</label>
+                    <input type="text" name="school"
+                           value="{{ form.school or '' }}"
+                           class="w-full border rounded-lg px-3 py-2">
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">入学年份（年级）</label>
+                    <input type="text" name="grade"
+                           value="{{ form.grade or '' }}"
+                           placeholder="如：2024"
+                           class="w-full border rounded-lg px-3 py-2">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">是否未成年（&lt;14 岁）</label>
+                    <select name="is_minor" class="w-full border rounded-lg px-3 py-2">
+                        <option value="0" {% if form.is_minor != '1' %}selected{% endif %}>否</option>
+                        <option value="1" {% if form.is_minor == '1' %}selected{% endif %}>是</option>
+                    </select>
+                    <p class="mt-1 text-xs text-gray-500">选「是」则姓名/学校强制留空至家长授权</p>
+                </div>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">备注</label>
+                <textarea name="note" rows="3" class="w-full border rounded-lg px-3 py-2">{{ form.note or '' }}</textarea>
+            </div>
+            <div class="flex gap-3 pt-2">
+                <button type="submit" class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700">创建学员</button>
+                <a href="/admin/students" class="px-6 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50">取消</a>
+            </div>
+        </form>
+    </div>
+</body>
+</html>
+"""
+
+
+ADMIN_STUDENTS_DETAIL_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>学员详情 - 后台管理</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen p-6">
+    <div class="max-w-5xl mx-auto">
+        <div class="flex items-center justify-between mb-6">
+            <h1 class="text-3xl font-bold text-blue-900">学员 #{{ student.id }} {{ student.real_name or ('UID-' + student.luogu_uid) }}</h1>
+            <div class="flex items-center gap-4">
+                <a href="/admin/students/{{ student.id }}/gesp/new" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">+ 录入 GESP 成绩</a>
+                <a href="/admin/students" class="text-blue-600 hover:underline">返回列表</a>
+            </div>
+        </div>
+        {% if notice %}
+        <div class="mb-4 rounded-lg border px-4 py-3 text-sm {% if notice_type == 'error' %}bg-red-50 border-red-200 text-red-700{% else %}bg-green-50 border-green-200 text-green-700{% endif %}">
+            {{ notice }}
+        </div>
+        {% endif %}
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- 基本信息 -->
+            <div class="bg-white rounded-xl shadow p-6">
+                <h2 class="text-lg font-semibold text-gray-800 mb-4">基本信息</h2>
+                <dl class="space-y-2 text-sm">
+                    <div class="flex"><dt class="w-24 text-gray-500">Luogu UID</dt><dd class="font-mono">{{ student.luogu_uid }}</dd></div>
+                    <div class="flex"><dt class="w-24 text-gray-500">姓名</dt><dd>{{ student.real_name or '— 未填（未授权或已脱敏）—' }}</dd></div>
+                    <div class="flex"><dt class="w-24 text-gray-500">学校</dt><dd>{{ student.school or '—' }}</dd></div>
+                    <div class="flex"><dt class="w-24 text-gray-500">年级</dt><dd>{{ student.grade or '—' }}</dd></div>
+                    <div class="flex"><dt class="w-24 text-gray-500">未成年</dt><dd>{% if student.is_minor %}是{% else %}否{% endif %}</dd></div>
+                    <div class="flex"><dt class="w-24 text-gray-500">家长授权</dt><dd>{{ student.guardian_consent_at or '未授权' }}</dd></div>
+                    <div class="flex"><dt class="w-24 text-gray-500">备注</dt><dd>{{ student.note or '—' }}</dd></div>
+                </dl>
+            </div>
+            <!-- GESP 状态 -->
+            <div class="bg-white rounded-xl shadow p-6">
+                <h2 class="text-lg font-semibold text-gray-800 mb-4">GESP 状态</h2>
+                <div class="text-center font-mono text-lg tracking-wide mb-4 text-gray-700">
+                    {{ progress.progress_bar }}
+                </div>
+                <dl class="space-y-2 text-sm">
+                    <div class="flex"><dt class="w-32 text-gray-500">最高已过</dt><dd class="font-semibold text-blue-700">{% if progress.passed_levels %}GESP {{ progress.passed_levels[-1] }} 级{% else %}无{% endif %}</dd></div>
+                    <div class="flex"><dt class="w-32 text-gray-500">下次可报</dt><dd class="font-semibold text-green-700">GESP {{ progress.next_eligible_level }} 级</dd></div>
+                    <div class="flex"><dt class="w-32 text-gray-500">免初赛状态</dt><dd>
+                        {% if progress.can_exempt_csp_s %}<span class="px-2 py-1 text-xs bg-purple-100 text-purple-700 rounded">CSP-J + CSP-S 双免</span>
+                        {% elif progress.can_exempt_csp_j %}<span class="px-2 py-1 text-xs bg-green-100 text-green-700 rounded">CSP-J 免</span>
+                        {% else %}<span class="text-gray-400">—</span>{% endif %}
+                    </dd></div>
+                    <div class="flex"><dt class="w-32 text-gray-500">免初赛有效期</dt><dd>{{ progress.exemption_expiry or '—' }}</dd></div>
+                </dl>
+            </div>
+            <!-- 快捷操作 -->
+            <div class="bg-white rounded-xl shadow p-6">
+                <h2 class="text-lg font-semibold text-gray-800 mb-4">快捷操作</h2>
+                <ul class="space-y-2 text-sm">
+                    <li><a href="/admin/students/{{ student.id }}/gesp/new" class="text-blue-600 hover:underline">+ 录入新一次 GESP 成绩</a></li>
+                    <li><a href="/admin/students" class="text-blue-600 hover:underline">← 返回学员列表</a></li>
+                    <li>
+                        <form method="POST" action="/admin/students/{{ student.id }}/delete" onsubmit="return confirm('确认删除学员 #{{ student.id }}？将级联删除所有 GESP 记录。');">
+                            <button type="submit" class="text-red-600 hover:underline">⚠ 删除学员</button>
+                        </form>
+                    </li>
+                </ul>
+            </div>
+        </div>
+        <!-- GESP 考试历史 -->
+        <div class="mt-6 bg-white rounded-xl shadow overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h2 class="text-lg font-semibold text-gray-800">GESP 考试历史（{{ progress.exams|length }} 次）</h2>
+            </div>
+            {% if progress.exams %}
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-sm text-left">
+                    <thead class="bg-gray-50 text-gray-600 font-medium">
+                        <tr>
+                            <th class="px-6 py-3">考试日期</th>
+                            <th class="px-6 py-3">赛事</th>
+                            <th class="px-6 py-3">报 N 级</th>
+                            <th class="px-6 py-3">分数</th>
+                            <th class="px-6 py-3">通过</th>
+                            <th class="px-6 py-3">跳级</th>
+                            <th class="px-6 py-3">免初赛</th>
+                            <th class="px-6 py-3">证书号</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for e in progress.exams %}
+                        <tr class="border-t border-gray-100">
+                            <td class="px-6 py-3 text-gray-600">{{ e.exam_date or '—' }}</td>
+                            <td class="px-6 py-3">{{ e.exam_name or e.exam_code or '—' }}</td>
+                            <td class="px-6 py-3 font-semibold">{{ e.registered_level }}</td>
+                            <td class="px-6 py-3 text-lg font-bold {% if e.actual_score >= 80 %}text-purple-700{% elif e.actual_score >= 60 %}text-green-700{% else %}text-red-600{% endif %}">{{ e.actual_score }}</td>
+                            <td class="px-6 py-3">{% if e.passed %}✅{% else %}❌{% endif %}</td>
+                            <td class="px-6 py-3">{% if e.can_skip_next %}⚡ 可跳{% else %}—{% endif %}</td>
+                            <td class="px-6 py-3">
+                                {% if e.exempts_csp_s %}<span class="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">J+S</span>
+                                {% elif e.exempts_csp_j %}<span class="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded">J</span>
+                                {% else %}<span class="text-gray-400">—</span>{% endif %}
+                            </td>
+                            <td class="px-6 py-3 font-mono text-xs text-gray-500">{{ e.certificate_no or '—' }}</td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="px-6 py-12 text-center text-gray-500">
+                <p>暂无 GESP 真考记录。</p>
+                <a href="/admin/students/{{ student.id }}/gesp/new" class="text-blue-600 hover:underline">录入第一次 GESP 成绩</a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+
+ADMIN_STUDENTS_GESP_NEW_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>录入 GESP 成绩 - 后台管理</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen p-6">
+    <div class="max-w-2xl mx-auto">
+        <div class="flex items-center justify-between mb-6">
+            <h1 class="text-3xl font-bold text-blue-900">录入 GESP 成绩</h1>
+            <a href="/admin/students/{{ student.id }}" class="text-blue-600 hover:underline">返回学员详情</a>
+        </div>
+        <p class="text-sm text-gray-500 mb-4">学员：<span class="font-mono">{{ student.real_name or ('UID-' + student.luogu_uid) }}</span></p>
+        {% if error %}
+        <div class="mb-4 rounded-lg border bg-red-50 border-red-200 text-red-700 px-4 py-3 text-sm">
+            {{ error }}
+        </div>
+        {% endif %}
+        <form method="POST" class="bg-white rounded-xl shadow p-6 space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">GESP 考试场次 <span class="text-red-500">*</span></label>
+                <select name="exam_id" required class="w-full border rounded-lg px-3 py-2">
+                    <option value="">-- 选择考试 --</option>
+                    {% for e in gesp_events %}
+                    <option value="{{ e.id }}" {% if form.exam_id|string == e.id|string %}selected{% endif %}>
+                        {{ e.exam_date }}  {{ e.name }}  ({{ e.code }})
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">报 N 级 <span class="text-red-500">*</span></label>
+                    <select name="registered_level" required class="w-full border rounded-lg px-3 py-2">
+                        {% for n in range(1, 9) %}
+                        <option value="{{ n }}" {% if form.registered_level|string == n|string %}selected{% endif %}>GESP {{ n }} 级</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">实际分数 <span class="text-red-500">*</span></label>
+                    <input type="number" name="actual_score" required min="0" max="100"
+                           value="{{ form.actual_score or '' }}"
+                           class="w-full border rounded-lg px-3 py-2"
+                           placeholder="0-100">
+                    <p class="mt-1 text-xs text-gray-500">
+                        ≥90 触发跳级 / ≥80 触发免初赛（CSP-J 7/8 级，CSP-S 8 级）
+                    </p>
+                </div>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">证书编号</label>
+                <input type="text" name="certificate_no" value="{{ form.certificate_no or '' }}"
+                       class="w-full border rounded-lg px-3 py-2"
+                       placeholder="GESP-YYYY-NN-XXXXX（可选）">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">教练备注</label>
+                <textarea name="notes" rows="2" class="w-full border rounded-lg px-3 py-2">{{ form.notes or '' }}</textarea>
+            </div>
+            <div class="flex gap-3 pt-2">
+                <button type="submit" class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700">保存成绩</button>
+                <a href="/admin/students/{{ student.id }}" class="px-6 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50">取消</a>
+            </div>
+        </form>
+    </div>
+</body>
+</html>
+"""
+
+
+# ============================================================
+# v3.5.2 · 兑换码激活（/redeem）+ 教练版咨询（/coach）
+# ============================================================
+
+
+# ============================================================
+# v3.5.2 · 统一报告生成入口（v1 模式 + 注册信息融合）
+# ============================================================
+
+
+@app.route("/generate-form", methods=["GET"])
+def generate_form():
+    """v3.5.2 统一报告生成表单（融合 v1 报告 + v3.5.2 注册字段）
+
+    一次性填写：洛谷 Cookies + 报告信息（UID/姓名/学校/年级/城市）+
+    选手信息（性别/出生日期/手机）+ OpenAI 配置 + PIPL 同意
+    """
+    return render_template_string(GENERATE_FORM_HTML, form={}, server_key_hint=_get_server_key_hint())
+
+
+@app.route("/generate-form", methods=["POST"])
+def generate_form_submit():
+    """POST：先注册（如未注册） → 同步创建 students + 报告 → 跳 /me/<uid>"""
+    import re as _re
+    form = request.form.to_dict()
+
+    # 必填校验
+    required = ["client_id", "uid", "c3vk", "real_name", "city", "grade"]
+    missing = [k for k in required if not (form.get(k) or "").strip()]
+    if missing:
+        return render_template_string(
+            GENERATE_FORM_HTML,
+            form=form,
+            server_key_hint=_get_server_key_hint(),
+            error=f"请填写必填项：{', '.join(missing)}",
+        ), 400
+
+    # UID 格式
+    luogu_uid = (form.get("uid") or "").strip()
+    if not _re.match(r"^\d{6,10}$", luogu_uid):
+        return render_template_string(
+            GENERATE_FORM_HTML,
+            form=form,
+            server_key_hint=_get_server_key_hint(),
+            error="UID 必须是 6-10 位数字",
+        ), 400
+
+    # PIPL 同意
+    if not form.get("agree"):
+        return render_template_string(
+            GENERATE_FORM_HTML,
+            form=form,
+            server_key_hint=_get_server_key_hint(),
+            error="请先同意《个人信息处理规则》（PIPL）",
+        ), 400
+
+    # 1) 注册或更新学生档案
+    try:
+        existing = _admin_students.get_student_by_uid(luogu_uid)
+        if existing:
+            sid = int(existing["id"])
+            # 直接 SQL 更新（students 表字段：real_name/city/grade/gender/school/birth_date）
+            from task_store import _get_conn
+            conn = _get_conn()
+            try:
+                conn.execute(
+                    """
+                    UPDATE students SET
+                        real_name = ?, city = ?, grade = ?, gender = ?, school = ?, birth_date = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        (form.get("real_name") or "").strip() or None,
+                        (form.get("city") or "").strip() or None,
+                        (form.get("grade") or "").strip() or None,
+                        (form.get("gender") or "").strip() or None,
+                        (form.get("school") or "").strip() or None,
+                        (form.get("birth_date") or "").strip() or None,
+                        sid,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        else:
+            new_sid = _admin_students.create_student(
+                luogu_uid=luogu_uid,
+                real_name=(form.get("real_name") or "").strip(),
+                city=(form.get("city") or "").strip(),
+                grade=(form.get("grade") or "").strip(),
+                gender=(form.get("gender") or "").strip() or None,
+                school=(form.get("school") or "").strip() or None,
+                birth_date=(form.get("birth_date") or "").strip() or None,
+                registered_via="generate_form",
+            )
+            sid = int(new_sid)
+            # 若有手机号，存到 guardians 表（v3.5.2 支持）
+            phone = (form.get("phone") or "").strip()
+            if phone and re.match(r"^1[3-9]\d{9}$", phone):
+                try:
+                    from admin_guardians import upsert_guardian_by_phone
+                    upsert_guardian_by_phone(sid, phone, display_name=form.get("real_name") or "学员")
+                except Exception:
+                    pass  # 失败不阻塞主流程
+    except Exception as e:
+        return render_template_string(
+            GENERATE_FORM_HTML,
+            form=form,
+            server_key_hint=_get_server_key_hint(),
+            error=f"注册失败：{e}",
+        ), 500
+
+    # 2) 触发 v1 报告生成（复用现有 run_generation → 跳 /status/<task_id> 看进度）
+    try:
+        import json as _json
+        task_id = str(uuid.uuid4())
+        # 把 v3.5.2 表单字段映射到 v1 form_data 字段
+        v1_form = {
+            "client_id": form.get("client_id", ""),
+            "uid": luogu_uid,
+            "c3vk": form.get("c3vk", ""),
+            "api_key": form.get("api_key", ""),
+            "base_url": form.get("base_url", ""),
+            "model_name": form.get("model_name", ""),
+            "student_name": (form.get("real_name") or "").strip(),
+            "school": (form.get("school") or "").strip(),
+            "grade": (form.get("grade") or "").strip(),
+        }
+        with TASKS_LOCK:
+            insert_task(task_id, status="queued", message="排队中...")
+            update_task(
+                task_id,
+                student_name=v1_form["student_name"] or "未知选手",
+                school=v1_form["school"] or "未知学校",
+                grade=v1_form["grade"] or "未知年级",
+                retry_form_json=_json.dumps(build_retry_form_snapshot(v1_form), ensure_ascii=False),
+            )
+        thread = threading.Thread(target=run_generation, args=(task_id, v1_form), daemon=True)
+        register_active_generation_task(task_id, thread)
+        thread.start()
+        # 跳到 /status/<task_id>，完成后可手动跳到 /me/<uid>
+        return redirect(url_for("status_page", task_id=task_id) + f"?luogu_uid={luogu_uid}")
+    except Exception as e:
+        # 即使报告生成失败，也跳到 me（注册已完成）
+        return redirect(url_for("student_me", luogu_uid=luogu_uid))
+
+
+# 任务 cookies 暂存（v1 报告生成需要的 cookies）
+_TASK_COOKIES: dict[str, dict] = {}
+
+
+# 统一报告生成表单模板（v3.5.2 · 融合 v1 + 注册字段）
+GENERATE_FORM_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>🎓 AI 生成学习报告 · 信竞 AI 报告 v3.5.2</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body{background:linear-gradient(135deg,#ecfdf5 0%,#f0f9ff 100%);min-height:100vh;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;}
+        .card-shadow{box-shadow:0 10px 25px rgba(0,0,0,.06);}
+        .field-section{border-left:4px solid #059669;padding-left:12px;margin-bottom:16px;}
+        .field-section h3{font-size:14px;font-weight:800;color:#047857;margin-bottom:8px;}
+        .app-input,.app-select{width:100%;border:1px solid #d1d5db;border-radius:8px;padding:8px 10px;font-size:14px;transition:all .15s ease;}
+        .app-input:focus,.app-select:focus{outline:none;border-color:#10b981;box-shadow:0 0 0 3px rgba(16,185,129,.15);}
+        .app-label{font-size:12px;font-weight:600;color:#374151;}
+        .app-btn{width:100%;font-weight:800;border-radius:10px;padding:12px 16px;transition:all .15s ease;cursor:pointer;font-size:15px;}
+        .app-btn-primary{background:linear-gradient(135deg,#059669 0%,#0d9488 100%);color:#fff;border:none;}
+        .app-btn-primary:hover{transform:translateY(-1px);box-shadow:0 8px 20px rgba(5,150,105,.3);}
+    </style>
+</head>
+<body class="p-4">
+<div class="max-w-2xl mx-auto py-6 space-y-4">
+
+    <div class="text-center mb-4">
+        <span class="inline-block px-3 py-1 bg-emerald-100 text-emerald-700 text-xs rounded-full">🎯 v3.5.2 统一入口</span>
+        <h1 class="text-2xl font-extrabold text-gray-800 mt-2">🎓 AI 生成学习报告</h1>
+        <p class="text-sm text-gray-500 mt-1">一次性填写 · 30 秒出报告 · 3 版本报告 + 错题本 + 段位</p>
+    </div>
+
+    {% if error %}
+    <div class="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">{{ error }}</div>
+    {% endif %}
+
+    <form action="/generate-form" method="post" class="bg-white rounded-2xl card-shadow p-6 space-y-5">
+
+        <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
+            ℹ️ <strong>如何获取洛谷 Cookies</strong>：登录 <code>luogu.com.cn</code> → F12 → Application → Cookies → 复制 <code>__client_id</code> / <code>_uid</code> / <code>C3VK</code>
+        </div>
+
+        <!-- 1. 洛谷账号 -->
+        <div class="field-section">
+            <h3>📡 1. 洛谷账号（必填 · 用于抓取做题数据）</h3>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                    <label class="app-label">__client_id</label>
+                    <input type="text" name="client_id" required value="{{ form.get('client_id','') }}" class="app-input mt-1" placeholder="32 位">
+                </div>
+                <div>
+                    <label class="app-label">_uid</label>
+                    <input type="text" name="uid" required pattern="\\d{6,10}" value="{{ form.get('uid','') }}" class="app-input mt-1" placeholder="6-10 位">
+                </div>
+                <div>
+                    <label class="app-label">C3VK</label>
+                    <input type="text" name="c3vk" required value="{{ form.get('c3vk','') }}" class="app-input mt-1" placeholder="token">
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. 报告核心信息（融合注册字段） -->
+        <div class="field-section">
+            <h3>👤 2. 报告信息（必填 · 报告核心数据 + 注册字段）</h3>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                    <label class="app-label">真实姓名 <span class="text-red-500">*</span></label>
+                    <input type="text" name="real_name" required maxlength="20" value="{{ form.get('real_name','') }}" class="app-input mt-1" placeholder="用于报告抬头">
+                </div>
+                <div>
+                    <label class="app-label">学校 <span class="text-red-500">*</span></label>
+                    <input type="text" name="school" value="{{ form.get('school','') }}" class="app-input mt-1" placeholder="如：人大附中早培班">
+                </div>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                <div>
+                    <label class="app-label">所在城市 <span class="text-red-500">*</span></label>
+                    <input type="text" name="city" required value="{{ form.get('city','') }}" class="app-input mt-1" placeholder="如：杭州（用于本地科技特长生匹配）">
+                </div>
+                <div>
+                    <label class="app-label">年级 <span class="text-red-500">*</span></label>
+                    <select name="grade" required class="app-select mt-1">
+                        <option value="">请选择年级</option>
+                        <optgroup label="小学">
+                            <option value="PRIMARY_1" {% if form.get('grade') == 'PRIMARY_1' %}selected{% endif %}>一年级</option>
+                            <option value="PRIMARY_2" {% if form.get('grade') == 'PRIMARY_2' %}selected{% endif %}>二年级</option>
+                            <option value="PRIMARY_3" {% if form.get('grade') == 'PRIMARY_3' %}selected{% endif %}>三年级</option>
+                            <option value="PRIMARY_4" {% if form.get('grade') == 'PRIMARY_4' %}selected{% endif %}>四年级</option>
+                            <option value="PRIMARY_5" {% if form.get('grade') == 'PRIMARY_5' %}selected{% endif %}>五年级</option>
+                            <option value="PRIMARY_6" {% if form.get('grade') == 'PRIMARY_6' %}selected{% endif %}>六年级</option>
+                        </optgroup>
+                        <optgroup label="初中">
+                            <option value="JUNIOR_1" {% if form.get('grade') == 'JUNIOR_1' %}selected{% endif %}>初一</option>
+                            <option value="JUNIOR_2" {% if form.get('grade') == 'JUNIOR_2' %}selected{% endif %}>初二</option>
+                            <option value="JUNIOR_3" {% if form.get('grade') == 'JUNIOR_3' %}selected{% endif %}>初三</option>
+                        </optgroup>
+                        <optgroup label="高中">
+                            <option value="SENIOR_1" {% if form.get('grade') == 'SENIOR_1' %}selected{% endif %}>高一</option>
+                            <option value="SENIOR_2" {% if form.get('grade') == 'SENIOR_2' %}selected{% endif %}>高二</option>
+                            <option value="SENIOR_3" {% if form.get('grade') == 'SENIOR_3' %}selected{% endif %}>高三</option>
+                        </optgroup>
+                        <optgroup label="大学">
+                            <option value="UNI_1" {% if form.get('grade') == 'UNI_1' %}selected{% endif %}>大一</option>
+                            <option value="UNI_2" {% if form.get('grade') == 'UNI_2' %}selected{% endif %}>大二</option>
+                            <option value="UNI_3" {% if form.get('grade') == 'UNI_3' %}selected{% endif %}>大三</option>
+                            <option value="UNI_4" {% if form.get('grade') == 'UNI_4' %}selected{% endif %}>大四</option>
+                        </optgroup>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. 选手信息（可选 · 用于 GESP 免初赛判断） -->
+        <details class="field-section">
+            <summary class="cursor-pointer text-sm font-bold text-gray-600 hover:text-emerald-600">🎂 3. 选手信息（可选 · 用于 GESP 免初赛判断，不填也能生成报告）</summary>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
+                <div>
+                    <label class="app-label">性别</label>
+                    <select name="gender" class="app-select mt-1">
+                        <option value="">未填</option>
+                        <option value="M" {% if form.get('gender') == 'M' %}selected{% endif %}>男</option>
+                        <option value="F" {% if form.get('gender') == 'F' %}selected{% endif %}>女</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="app-label">出生日期</label>
+                    <input type="date" name="birth_date" value="{{ form.get('birth_date','') }}" class="app-input mt-1">
+                </div>
+                <div>
+                    <label class="app-label">手机号（家长/学员）</label>
+                    <input type="tel" name="phone" pattern="1[3-9][0-9]{9}" value="{{ form.get('phone','') }}" class="app-input mt-1" placeholder="11 位（可选）">
+                </div>
+            </div>
+            <p class="text-xs text-gray-500 mt-2">ℹ️ 出生日期用于精确计算 CSP 报名年龄（9 月 1 日前满 12 岁）</p>
+        </details>
+
+        <!-- 4. OpenAI 配置（可选） -->
+        <details class="field-section">
+            <summary class="cursor-pointer text-sm font-bold text-gray-600 hover:text-emerald-600">🤖 4. OpenAI 配置（可选 · 留空使用服务端默认）</summary>
+            <div class="space-y-2 mt-3">
+                <div>
+                    <label class="app-label">API Key</label>
+                    <input type="password" name="api_key" value="{{ form.get('api_key','') }}" class="app-input mt-1" placeholder="sk-...">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="app-label">Base URL</label>
+                        <input type="text" name="base_url" value="{{ form.get('base_url','') }}" class="app-input mt-1" placeholder="https://api.openai.com/v1">
+                    </div>
+                    <div>
+                        <label class="app-label">模型</label>
+                        <input type="text" name="model_name" value="{{ form.get('model_name','') }}" class="app-input mt-1" placeholder="gpt-4o-mini">
+                    </div>
+                </div>
+                <p class="text-xs text-gray-500">{{ server_key_hint }}</p>
+            </div>
+        </details>
+
+        <!-- 5. PIPL 同意 -->
+        <div class="border-t border-gray-200 pt-4">
+            <label class="flex items-start gap-2 cursor-pointer">
+                <input type="checkbox" name="agree" value="on" required class="mt-1" {% if form.get('agree') %}checked{% endif %}>
+                <span class="text-xs text-gray-700">
+                    我已阅读并同意《<a href="#" class="text-emerald-600 hover:underline">个人信息处理规则</a>》（PIPL）· 洛谷 Cookies 仅用于一次性抓取做题数据 · 报告生成后可随时删除
+                </span>
+            </label>
+        </div>
+
+        <button type="submit" class="app-btn app-btn-primary">🚀 立即生成我的学习报告</button>
+
+        <p class="text-center text-xs text-gray-400">生成后可在 /me/<uid> 查看 3 版本报告（学员·家长·教练）</p>
+    </form>
+
+    <div class="text-center">
+        <a href="/" class="text-xs text-gray-400 hover:text-emerald-600">← 返回首页</a>
+    </div>
+</div>
+</body>
+</html>
+"""
+
+
+@app.route("/select-mode", methods=["GET", "POST"])
+def select_mode():
+    """v3.5.2 老用户快速入口（已注册选手输 UID 直接看报告，不生成新报告）"""
+    import re as _re
+    if request.method == "GET":
+        return render_template_string(SELECT_MODE_HTML, error=None, form={})
+    # POST 接收 luogu_uid → 校验 → 引导身份
+    luogu_uid = (request.form.get("luogu_uid") or "").strip()
+    if not _re.match(r"^\d{6,10}$", luogu_uid):
+        return render_template_string(
+            SELECT_MODE_HTML,
+            error="请输入 6-10 位洛谷 UID",
+            form={"luogu_uid": luogu_uid},
+        ), 400
+    # 查询是否已注册
+    stu = _admin_students.get_student_by_uid(luogu_uid)
+    if stu:
+        # 已注册 → 进入 /me/<uid>（内部自动引导选身份）
+        return redirect(url_for("student_me", luogu_uid=luogu_uid))
+    # 未注册 → /register（4 字段·预填 UID）
+    return redirect(url_for("register_student") + f"?luogu_uid={luogu_uid}")
+
+
+SELECT_MODE_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>选择报告版本 · 信竞 AI 报告 v3.5.2</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body{background:linear-gradient(135deg,#ecfdf5 0%,#f0f9ff 100%);min-height:100vh;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;}
+        .card-shadow{box-shadow:0 10px 25px rgba(0,0,0,.06);}
+        .big-btn{display:flex;align-items:center;justify-content:center;width:100%;border-radius:12px;padding:14px;font-weight:800;transition:all .15s ease;cursor:pointer;}
+        .big-btn-primary{background:linear-gradient(135deg,#059669 0%,#0d9488 100%);color:#fff;}
+        .big-btn-primary:hover{transform:translateY(-1px);box-shadow:0 8px 20px rgba(5,150,105,.3);}
+        .big-btn-secondary{background:#fff;color:#047857;border:2px solid #6ee7b7;}
+        .big-btn-secondary:hover{background:#ecfdf5;}
+    </style>
+</head>
+<body class="p-4">
+<div class="max-w-2xl mx-auto py-6 space-y-4">
+
+    <div class="bg-white rounded-2xl card-shadow p-6">
+        <div class="text-center mb-4">
+            <span class="inline-block px-3 py-1 bg-emerald-100 text-emerald-700 text-xs rounded-full">v3.5.2</span>
+            <h1 class="text-2xl font-extrabold text-gray-800 mt-2">🎓 AI 生成学习报告</h1>
+            <p class="text-sm text-gray-500 mt-1">基于洛谷做题数据 + 30 秒 AI 分析</p>
+        </div>
+
+        <form method="post" class="space-y-3">
+            <div>
+                <label class="block text-sm font-bold text-gray-700 mb-1">洛谷 UID <span class="text-red-500">*</span></label>
+                <input name="luogu_uid" inputmode="numeric" pattern="\\d{6,10}" required placeholder="请输入 6-10 位数字 UID" class="w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200" value="{{ form.get('luogu_uid','') }}">
+                <p class="text-xs text-gray-400 mt-1">首次使用？先输入 UID，系统会引导你完成 4 字段注册（地域/年龄是报告核心数据）</p>
+            </div>
+
+            {% if error %}
+            <div class="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-2">{{ error }}</div>
+            {% endif %}
+
+            <button type="submit" class="big-btn big-btn-primary">🚀 立即生成我的学习报告</button>
+        </form>
+    </div>
+
+    <div class="bg-white rounded-2xl card-shadow p-5 text-center">
+        <p class="text-xs text-gray-500">没有洛谷账号？</p>
+        <a href="/register" class="text-emerald-600 hover:underline text-sm">前往 4 字段极简注册 →</a>
+    </div>
+
+    <p class="text-center text-xs text-gray-400">信竞 AI 报告 · v3.5.2</p>
+</div>
+</body>
+</html>
+"""
+
+
+@app.route("/redeem", methods=["GET", "POST"])
+def redeem_code():
+    """v3.5.2 全局兑换码激活入口
+
+    支持 SKU（数据库实际值）：
+      · parent_sub         → 家长订阅（完整报告 + 解锁选手 AI 讲题）
+      · popularize_camp    → 普及组冲刺营（4 周 → CSP-J 免初赛）
+      · improve_camp       → 提高组冲刺营（8 周 → CSP-S 免初赛）
+
+    流程：
+      1. 用户输入兑换码 + 自己的洛谷 UID
+      2. 系统校验码有效 + 未被使用
+      3. 激活相应权限（写入 redeemed_at + student_id）
+    """
+    prefill_code = (request.args.get("code") or "").strip()
+    error = None
+    success = None
+    student_uid = ""
+
+    if request.method == "POST":
+        code = (request.form.get("code") or "").strip().upper()
+        student_uid = (request.form.get("student_uid") or "").strip()
+
+        if not code or not code.replace("-", "").replace("_", "").isalnum():
+            error = "兑换码格式错误（应为 字母-XXXX-XXXX 形式）"
+        elif not student_uid or not student_uid.isdigit() or not (6 <= len(student_uid) <= 10):
+            error = "请填写 6-10 位洛谷 UID"
+        else:
+            try:
+                from task_store import _get_conn
+                # 1. 查 code
+                conn = _get_conn()
+                try:
+                    row = conn.execute(
+                        "SELECT * FROM activation_codes WHERE code = ?",
+                        (code,),
+                    ).fetchone()
+                finally:
+                    conn.close()
+                if not row:
+                    error = f"兑换码 {code} 不存在或已失效"
+                else:
+                    row_dict = dict(row)
+                    if row_dict.get("redeemed_at"):
+                        error = f"兑换码 {code} 已被使用（{row_dict.get('redeemed_at')}）"
+                    else:
+                        # 2. 查 student.id
+                        from admin_students import get_student_by_uid
+                        stu = get_student_by_uid(student_uid)
+                        if not stu:
+                            error = f"洛谷 UID {student_uid} 未注册，请先在首页「我是选手」注册"
+                        else:
+                            # 3. 激活：更新 redeemed_at + student_id
+                            conn = _get_conn()
+                            try:
+                                conn.execute(
+                                    "UPDATE activation_codes "
+                                    "SET redeemed_at = datetime('now'), "
+                                    "    student_id = ?, "
+                                    "    expires_at = datetime('now', '+' || duration_days || ' days') "
+                                    "WHERE code = ?",
+                                    (stu["id"], code),
+                                )
+                                conn.commit()
+                            finally:
+                                conn.close()
+                            success = {
+                                "code": code,
+                                "sku": row_dict.get("sku", "parent_sub"),
+                                "student_uid": student_uid,
+                            }
+            except Exception as e:
+                error = f"兑换失败：{e}"
+
+    return render_template_string(
+        REDEEM_HTML,
+        prefill_code=prefill_code,
+        error=error,
+        success=success,
+        student_uid=student_uid,
+    )
+
+
+@app.route("/coach")
+def coach_landing():
+    """v3.5.2 教练版咨询入口（B2B · 联系客服购买）"""
+    return render_template_string(COACH_LANDING_HTML)
+
+
+REDEEM_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>兑换码激活 · 信竞 AI 报告</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body{font-family:-appleSystem,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;background:linear-gradient(135deg,#fef3c7 0%,#fed7aa 100%);min-height:100vh;}
+        .sku-card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px;text-align:center;}
+        .sku-card.pro{border-color:#f59e0b;background:linear-gradient(135deg,#fffbeb,#fef3c7);}
+        .sku-card.parent{border-color:#3b82f6;background:linear-gradient(135deg,#eff6ff,#dbeafe);}
+        .sku-card.camp-j{border-color:#a855f7;background:linear-gradient(135deg,#faf5ff,#f3e8ff);}
+        .sku-card.camp-s{border-color:#ef4444;background:linear-gradient(135deg,#fef2f2,#fee2e2);}
+    </style>
+</head>
+<body class="flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-lg p-8 w-full max-w-2xl">
+        <div class="text-center mb-5">
+            <div class="inline-block px-3 py-1 bg-amber-100 text-amber-700 text-xs rounded-full mb-2">v3.5.2 · 兑换码激活</div>
+            <h1 class="text-2xl font-bold text-gray-800 mb-1">🎁 兑换码激活</h1>
+            <p class="text-sm text-gray-500">输入您的兑换码 + 洛谷 UID，立即解锁对应功能</p>
+        </div>
+
+        {% if error %}
+        <div class="mb-4 px-3 py-2 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">⚠️ {{ error }}</div>
+        {% endif %}
+
+        {% if success %}
+        <div class="mb-5 px-4 py-3 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg">
+            <div class="font-bold text-base mb-1">✅ 激活成功！</div>
+            <p class="text-sm">兑换码 <code class="font-mono">{{ success.code }}</code> 已绑定到 UID <code class="font-mono">{{ success.student_uid }}</code></p>
+            <p class="text-sm mt-1">SKU：<strong>{{ success.sku }}</strong></p>
+            <div class="mt-3 flex gap-2">
+                <a href="/me/{{ success.student_uid }}" class="px-3 py-1.5 bg-emerald-600 text-white text-sm rounded-md hover:bg-emerald-700">→ 进入个人中心</a>
+                <a href="/" class="px-3 py-1.5 border border-gray-300 text-gray-700 text-sm rounded-md hover:bg-gray-50">返回首页</a>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if not success %}
+        <form method="POST" class="space-y-3 mb-5">
+            <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">兑换码</label>
+                    <input type="text" name="code" required minlength="8" maxlength="64"
+                           value="{{ prefill_code or '' }}"
+                           placeholder="如：PARENT-SUB-XXXX 或 PS-XXXXXXXX"
+                           class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-amber-500 focus:border-amber-500">
+                </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">洛谷 UID（6-10 位）</label>
+                <input type="text" name="student_uid" required pattern="\\d{6,10}" inputmode="numeric"
+                       value="{{ student_uid or '' }}"
+                       placeholder="绑定到哪位选手的账号"
+                       class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-amber-500 focus:border-amber-500">
+                <p class="text-xs text-gray-400 mt-1">激活后功能将绑定到该 UID</p>
+            </div>
+            <button type="submit" class="w-full bg-gradient-to-r from-amber-500 to-amber-600 text-white font-bold py-2.5 rounded-lg hover:from-amber-600 hover:to-amber-700 transition">
+                🎁 激活兑换码
+            </button>
+        </form>
+        {% endif %}
+
+        <div class="border-t border-gray-200 pt-4">
+            <p class="text-xs text-gray-500 mb-2">支持以下 SKU 类型：</p>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+                <div class="sku-card parent">
+                    <div class="font-bold text-blue-700">家长订阅</div>
+                    <div class="text-gray-500 mt-1">PS-XXXXXXXX</div>
+                    <div class="text-blue-600 text-xs mt-2">
+                        完整报告 + 周报 + 倒推<br>
+                        <strong>+ 解锁选手 AI 讲题</strong>
+                    </div>
+                </div>
+                <div class="sku-card camp-j">
+                    <div class="font-bold text-purple-700">普及冲刺</div>
+                    <div class="text-gray-500 mt-1">PJC-XXXXXXXX</div>
+                    <div class="text-purple-600 text-xs mt-2">
+                        4 周 · GESP 7 级 80+<br>
+                        → 9 月 CSP-J 免初赛
+                    </div>
+                </div>
+                <div class="sku-card camp-s">
+                    <div class="font-bold text-red-700">提高冲刺</div>
+                    <div class="text-gray-500 mt-1">IC-XXXXXXXX</div>
+                    <div class="text-red-600 text-xs mt-2">
+                        8 周 · GESP 8 级 80+<br>
+                        → 9 月 CSP-S 免初赛
+                    </div>
+                </div>
+            </div>
+            <p class="text-xs text-gray-400 mt-3 text-center">
+                💡 AI 讲题已含在「家长订阅」内 · <a href="/" class="text-amber-600 hover:underline">加 V 获取</a>（家长）· <a href="/coach" class="text-emerald-600 hover:underline">联系客服</a>（教练）
+            </p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+
+COACH_LANDING_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>教练版咨询 · 信竞 AI 报告 · v3.5.2</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body{font-family:-appleSystem,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;background:linear-gradient(135deg,#e0e7ff 0%,#cffafe 100%);min-height:100vh;}
+    </style>
+</head>
+<body class="flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-lg p-8 w-full max-w-2xl">
+        <div class="text-center mb-6">
+            <div class="inline-block px-3 py-1 bg-indigo-100 text-indigo-700 text-xs rounded-full mb-2">v3.5.2 · 教练版 B2B</div>
+            <h1 class="text-3xl font-bold text-gray-800 mb-2">🎯 教练版咨询</h1>
+            <p class="text-sm text-gray-600">批量学员管理 · 兑换码生成 · 营收看板 · 1v1 客户经理</p>
+        </div>
+
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6 text-center text-xs">
+            <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                <div class="text-2xl mb-1">👥</div>
+                <div class="font-bold text-emerald-700">批量学员管理</div>
+                <div class="text-gray-500 mt-1">无上限 · 一键录入</div>
+            </div>
+            <div class="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <div class="text-2xl mb-1">🎁</div>
+                <div class="font-bold text-amber-700">兑换码生成</div>
+                <div class="text-gray-500 mt-1">学员 Pro / 家长订阅</div>
+            </div>
+            <div class="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <div class="text-2xl mb-1">📊</div>
+                <div class="font-bold text-blue-700">营收看板</div>
+                <div class="text-gray-500 mt-1">日 / 周 / 月数据</div>
+            </div>
+            <div class="bg-purple-50 border border-purple-200 rounded-lg p-3">
+                <div class="text-2xl mb-1">📅</div>
+                <div class="font-bold text-purple-700">倒推计划</div>
+                <div class="text-gray-500 mt-1">CSP/NOIP 自动规划</div>
+            </div>
+            <div class="bg-pink-50 border border-pink-200 rounded-lg p-3">
+                <div class="text-2xl mb-1">📨</div>
+                <div class="font-bold text-pink-700">周报推送</div>
+                <div class="text-gray-500 mt-1">家长周报自动生成</div>
+            </div>
+            <div class="bg-indigo-50 border border-indigo-200 rounded-lg p-3">
+                <div class="text-2xl mb-1">🤝</div>
+                <div class="font-bold text-indigo-700">1v1 客户经理</div>
+                <div class="text-gray-500 mt-1">专属服务群</div>
+            </div>
+        </div>
+
+        <div class="bg-gradient-to-r from-indigo-50 to-cyan-50 border border-indigo-200 rounded-lg p-4 mb-5">
+            <div class="font-bold text-indigo-800 mb-2">💼 计费模式（B2B · 谈单制）</div>
+            <div class="text-sm text-gray-700 space-y-1">
+                <div>· <strong>基础版</strong>：管理 ≤20 学员 / 月 · 适合个人教练</div>
+                <div>· <strong>机构版</strong>：管理 ≤100 学员 / 月 · 适合中小机构</div>
+                <div>· <strong>旗舰版</strong>：管理 ≤500 学员 / 月 · 适合大型机构</div>
+            </div>
+            <p class="text-xs text-gray-500 mt-2">💡 具体价格联系客服 · 1v1 谈单 · 不挂网价</p>
+        </div>
+
+        <div class="space-y-3 mb-5">
+            <div class="bg-white border border-gray-300 rounded-lg p-4 flex items-center gap-3">
+                <div class="text-2xl">📞</div>
+                <div class="flex-1">
+                    <div class="text-xs text-gray-500">客户经理电话</div>
+                    <div class="font-mono font-bold text-gray-800">400-XXX-XXXX 转 1</div>
+                </div>
+            </div>
+            <div class="bg-white border border-gray-300 rounded-lg p-4 flex items-center gap-3">
+                <div class="text-2xl">📧</div>
+                <div class="flex-1">
+                    <div class="text-xs text-gray-500">商务邮箱</div>
+                    <div class="font-mono font-bold text-gray-800">coach@xinjing-ai.com</div>
+                </div>
+            </div>
+            <div class="bg-white border border-gray-300 rounded-lg p-4 flex items-center gap-3">
+                <div class="text-2xl">🆚</div>
+                <div class="flex-1">
+                    <div class="text-xs text-gray-500">商务微信</div>
+                    <div class="font-mono font-bold text-gray-800">xinjing-ai-business</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="text-center text-xs text-gray-500 pt-4 border-t border-gray-200 space-x-3">
+            <span>已有教练账号？<a href="/admin/login" class="text-indigo-600 hover:underline">/admin/login</a></span>
+            <span class="text-gray-300">·</span>
+            <a href="/" class="text-gray-500 hover:text-emerald-600 hover:underline">返回首页</a>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+
+# ============================================================
+# v3.5 Phase 2 · 家长端 + 学员目标 + 周报 + 跳级决策树
+# ============================================================
+# 路由：
+#  - /admin/students/<id>/guardians                家长列表 + 新建
+#  - /admin/students/<id>/guardians/<gid>/delete   删除家长（POST）
+#  - /admin/students/<id>/guardians/<gid>/rotate   重置 token（POST）
+#  - /admin/students/<id>/goal                     学员目标路径（GET/POST）
+#  - /admin/students/<id>/reports                  周报列表
+#  - /admin/students/<id>/reports/generate         立即生成周报（POST）
+#  - /parent/<token>                                家长无登录面板首页
+#  - /parent/<token>/report/<rid>                  查看单份周报（HTML）+ 打开数 +1
+# ============================================================
+
+
+@app.route("/admin/students/<int:student_id>/guardians", methods=["GET", "POST"])
+def admin_students_guardians(student_id: int):
+    auth_redirect = require_admin_auth()
+    if auth_redirect is not None:
+        return auth_redirect
+    student = _admin_students.get_student(student_id)
+    if not student:
+        return redirect(
+            url_for("admin_students_list", notice=f"学员 {student_id} 不存在", notice_type="error")
+        )
+    if request.method == "POST":
+        try:
+            ip = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",")[0].strip()
+            g = _admin_guardians.create_guardian(
+                student_id=student_id,
+                phone=str(request.form.get("phone", "") or "").strip() or None,
+                email=str(request.form.get("email", "") or "").strip() or None,
+                display_name=str(request.form.get("display_name", "") or "").strip() or None,
+                notify_channel=str(request.form.get("notify_channel", "email") or "email").strip(),
+                consent_ip=ip,
+            )
+            return redirect(
+                url_for(
+                    "admin_students_guardians",
+                    student_id=student_id,
+                    notice=f"已添加家长（id={g['id']}），token 有效期至 {g['notify_token_expires_at']}",
+                    notice_type="success",
+                )
+            )
+        except ValueError as exc:
+            guardians = _admin_guardians.list_guardians_by_student(student_id)
+            return render_template_string(
+                ADMIN_STUDENTS_GUARDIANS_HTML,
+                student=student,
+                guardians=guardians,
+                error=str(exc),
+                notice="",
+                notice_type="error",
+            )
+    guardians = _admin_guardians.list_guardians_by_student(student_id)
+    return render_template_string(
+        ADMIN_STUDENTS_GUARDIANS_HTML,
+        student=student,
+        guardians=guardians,
+        error="",
+        notice=str(request.args.get("notice", "") or ""),
+        notice_type=str(request.args.get("notice_type", "") or "success"),
+    )
+
+
+@app.route("/admin/students/<int:student_id>/guardians/<int:guardian_id>/delete", methods=["POST"])
+def admin_students_guardians_delete(student_id: int, guardian_id: int):
+    auth_redirect = require_admin_auth()
+    if auth_redirect is not None:
+        return auth_redirect
+    _admin_guardians.delete_guardian(guardian_id)
+    return redirect(
+        url_for("admin_students_guardians", student_id=student_id, notice="家长已删除", notice_type="success")
+    )
+
+
+@app.route("/admin/students/<int:student_id>/guardians/<int:guardian_id>/rotate", methods=["POST"])
+def admin_students_guardians_rotate(student_id: int, guardian_id: int):
+    auth_redirect = require_admin_auth()
+    if auth_redirect is not None:
+        return auth_redirect
+    new_token = _admin_guardians.rotate_token(guardian_id)
+    return redirect(
+        url_for(
+            "admin_students_guardians",
+            student_id=student_id,
+            notice=f"新 token 已生成（前 12 位 {new_token[:12]}...），旧 token 立即失效",
+            notice_type="success",
+        )
+    )
+
+
+@app.route("/admin/students/<int:student_id>/goal", methods=["GET", "POST"])
+def admin_students_goal(student_id: int):
+    auth_redirect = require_admin_auth()
+    if auth_redirect is not None:
+        return auth_redirect
+    student = _admin_students.get_student(student_id)
+    if not student:
+        return redirect(
+            url_for("admin_students_list", notice=f"学员 {student_id} 不存在", notice_type="error")
+        )
+    if request.method == "POST":
+        _admin_goals.upsert_student_goal(
+            student_id=student_id,
+            primary_path=str(request.form.get("primary_path", "未决定") or "未决定"),
+            target_university=str(request.form.get("target_university", "") or "").strip() or None,
+            target_province=str(request.form.get("target_province", "") or "").strip() or None,
+            notes=str(request.form.get("notes", "") or "").strip() or None,
+        )
+        return redirect(
+            url_for("admin_students_goal", student_id=student_id, notice="学员目标已保存", notice_type="success")
+        )
+    goal = _admin_goals.get_student_goal(student_id) or {}
+    rec = _admin_goals.recommend_skip_path(student_id)
+    return render_template_string(
+        ADMIN_STUDENTS_GOAL_HTML,
+        student=student,
+        goal=goal,
+        rec=rec,
+        primary_paths=sorted(_admin_goals.ALLOWED_PRIMARY_PATHS),
+        sample_universities=_admin_goals.SAMPLE_UNIVERSITIES,
+        notice=str(request.args.get("notice", "") or ""),
+        notice_type=str(request.args.get("notice_type", "") or "success"),
+    )
+
+
+@app.route("/admin/students/<int:student_id>/reports", methods=["GET"])
+def admin_students_reports(student_id: int):
+    auth_redirect = require_admin_auth()
+    if auth_redirect is not None:
+        return auth_redirect
+    student = _admin_students.get_student(student_id)
+    if not student:
+        return redirect(
+            url_for("admin_students_list", notice=f"学员 {student_id} 不存在", notice_type="error")
+        )
+    reports = _weekly_reports.list_weekly_reports(student_id, limit=20)
+    return render_template_string(
+        ADMIN_STUDENTS_REPORTS_HTML,
+        student=student,
+        reports=reports,
+        notice=str(request.args.get("notice", "") or ""),
+        notice_type=str(request.args.get("notice_type", "") or "success"),
+    )
+
+
+@app.route("/admin/students/<int:student_id>/reports/generate", methods=["POST"])
+def admin_students_reports_generate(student_id: int):
+    auth_redirect = require_admin_auth()
+    if auth_redirect is not None:
+        return auth_redirect
+    data = _weekly_reports.build_report_data(student_id)
+    if "error" in data:
+        return redirect(
+            url_for("admin_students_reports", student_id=student_id, notice=data["error"], notice_type="error")
+        )
+    html = _weekly_reports.render_report_html(data)
+    ws = _weekly_reports.get_week_start()
+    result = _weekly_reports.save_report(student_id, ws, html)
+    return redirect(
+        url_for(
+            "admin_students_reports",
+            student_id=student_id,
+            notice=f"已生成 {ws.isoformat()} 周报（id={result['id']}）",
+            notice_type="success",
+        )
+    )
+
+
+# ============================================================
+# v3.5.2 学员 4 字段极简注册（学而思图 1 模式） + /me 自助入口
+# ============================================================
+# 路由：
+#  - GET  /register                       极简注册表单（城市/姓名/年级/性别 + 洛谷 UID + 微信/手机）
+#  - POST /register                       提交注册 → 重定向 /me/<luogu_uid>
+#  - GET  /me/<luogu_uid>                 学员 Pro 自助面板（段位 + 错题本 + 订阅 CTA）
+# ============================================================
+
+
+# v3.5.2: 中国主要城市白名单（学而思图 1 风格 · 防止乱填）
+# 结构：[(省份/直辖市/特别行政区 label, [城市, ...]), ...]
+# 覆盖 4 直辖市 + 23 省 + 5 自治区 + 2 特别行政区 = 34 个省级行政区 · ~290 个地级市
+CITIES_REGISTRATION = [
+    # ---- 4 直辖市 ----
+    ("直辖市", ["北京", "上海", "天津", "重庆"]),
+    # ---- 2 特别行政区 ----
+    ("港澳台", ["香港", "澳门", "台北", "高雄", "台中", "台南"]),
+    # ---- 5 自治区 ----
+    ("新疆", ["乌鲁木齐", "克拉玛依", "吐鲁番", "哈密", "阿克苏", "喀什", "和田", "伊宁", "塔城", "阿勒泰", "石河子", "阿拉尔", "图木舒克", "五家渠", "北屯", "铁门关", "双河", "可克达拉"]),
+    ("西藏", ["拉萨", "日喀则", "昌都", "林芝", "山南", "那曲", "阿里", "江孜"]),
+    ("内蒙古", ["呼和浩特", "包头", "乌海", "赤峰", "通辽", "鄂尔多斯", "呼伦贝尔", "巴彦淖尔", "乌兰察布", "兴安盟", "锡林郭勒", "阿拉善"]),
+    ("广西", ["南宁", "柳州", "桂林", "梧州", "北海", "防城港", "钦州", "贵港", "玉林", "百色", "贺州", "河池", "来宾", "崇左"]),
+    ("宁夏", ["银川", "石嘴山", "吴忠", "固原", "中卫"]),
+    # ---- 23 省（按 2025 行政区划代码）----
+    ("河北", ["石家庄", "唐山", "秦皇岛", "邯郸", "邢台", "保定", "张家口", "承德", "沧州", "廊坊", "衡水", "辛集", "藁城", "晋州", "新乐", "鹿泉", "遵化", "迁安", "武安", "南宫", "沙河", "涿州", "定州", "安国", "高碑店", "泊头", "任丘", "黄骅", "河间", "霸州", "三河", "冀州", "深州"]),
+    ("山西", ["太原", "大同", "阳泉", "长治", "晋城", "朔州", "晋中", "运城", "忻州", "临汾", "吕梁", "古交", "介休", "永济", "河津", "原平", "侯马", "霍州", "孝义", "汾阳"]),
+    ("辽宁", ["沈阳", "大连", "鞍山", "抚顺", "本溪", "丹东", "锦州", "营口", "阜新", "辽阳", "盘锦", "铁岭", "朝阳", "葫芦岛", "瓦房店", "普兰店", "庄河", "海城", "东港", "凤城", "凌海", "北镇", "大石桥", "盖州", "灯塔", "调兵山", "开原", "北票", "凌源"]),
+    ("吉林", ["长春", "吉林", "四平", "辽源", "通化", "白山", "松原", "白城", "延边", "延吉", "图们", "敦化", "珲春", "龙井", "和龙", "公主岭", "梅河口", "集安", "桦甸", "舒兰", "磐石", "洮南", "大安", "临江"]),
+    ("黑龙江", ["哈尔滨", "齐齐哈尔", "鸡西", "鹤岗", "双鸭山", "大庆", "伊春", "佳木斯", "七台河", "牡丹江", "黑河", "绥化", "大兴安岭", "绥芬河", "海林", "宁安", "穆棱", "东宁", "五大连池", "北安", "铁力", "同江", "富锦", "虎林", "密山", "萝北", "绥滨", "肇东", "安达", "肇源", "海伦", "望奎"]),
+    ("江苏", ["南京", "无锡", "徐州", "常州", "苏州", "南通", "连云港", "淮安", "盐城", "扬州", "镇江", "泰州", "宿迁", "江阴", "宜兴", "邳州", "新沂", "金坛", "溧阳", "常熟", "张家港", "昆山", "太仓", "启东", "如皋", "海门", "东台", "仪征", "高邮", "扬中", "句容", "兴化", "靖江", "泰兴", "沭阳", "泗阳", "泗洪"]),
+    ("浙江", ["杭州", "宁波", "温州", "嘉兴", "湖州", "绍兴", "金华", "衢州", "舟山", "台州", "丽水", "建德", "余姚", "慈溪", "瑞安", "乐清", "海宁", "平湖", "桐乡", "诸暨", "嵊州", "兰溪", "义乌", "东阳", "永康", "江山", "温岭", "临海", "玉环", "龙泉"]),
+    ("安徽", ["合肥", "芜湖", "蚌埠", "淮南", "马鞍山", "淮北", "铜陵", "安庆", "黄山", "滁州", "阜阳", "宿州", "六安", "亳州", "池州", "宣城", "界首", "天长", "明光", "桐城", "宁国", "广德"]),
+    ("福建", ["福州", "厦门", "莆田", "三明", "泉州", "漳州", "南平", "龙岩", "宁德", "福清", "长乐", "永安", "石狮", "晋江", "南安", "龙海", "邵武", "武夷山", "建瓯", "漳平", "福鼎", "福安"]),
+    ("江西", ["南昌", "景德镇", "萍乡", "九江", "新余", "鹰潭", "赣州", "吉安", "宜春", "抚州", "上饶", "瑞昌", "乐平", "瑞金", "井冈山", "高安", "樟树", "丰城", "德兴", "庐山"]),
+    ("山东", ["济南", "青岛", "淄博", "枣庄", "东营", "烟台", "潍坊", "济宁", "泰安", "威海", "日照", "临沂", "德州", "聊城", "滨州", "菏泽", "章丘", "胶州", "即墨", "平度", "莱西", "滕州", "龙口", "莱阳", "莱州", "蓬莱", "招远", "栖霞", "海阳", "青州", "诸城", "寿光", "安丘", "高密", "昌邑", "曲阜", "邹城", "新泰", "肥城", "乳山", "文登", "荣成", "乐陵", "禹城", "临清", "高唐", "邹平"]),
+    ("河南", ["郑州", "开封", "洛阳", "平顶山", "安阳", "鹤壁", "新乡", "焦作", "濮阳", "许昌", "漯河", "三门峡", "南阳", "商丘", "信阳", "周口", "驻马店", "济源", "巩义", "兰考", "汝州", "邓州", "永城", "禹州", "长葛", "许昌县", "尉氏", "新郑", "登封", "新密", "荥阳", "中牟", "偃师", "孟州", "沁阳", "卫辉", "辉县", "林州", "滑县", "汤阴", "内黄", "清丰", "南乐", "范县", "台前", "濮阳县", "长垣", "封丘", "原阳", "延津", "获嘉", "修武", "武陟", "温县", "博爱", "沁阳", "孟州"]),
+    ("湖北", ["武汉", "黄石", "十堰", "宜昌", "襄阳", "鄂州", "荆门", "孝感", "荆州", "黄冈", "咸宁", "随州", "恩施", "仙桃", "潜江", "天门", "神农架", "大冶", "丹江口", "宜城", "老河口", "枣阳", "宜都", "枝江", "当阳", "荆州", "洪湖", "松滋", "钟祥", "京山", "应城", "云梦", "汉川", "石首", "监利", "公安", "江陵", "麻城", "武穴", "红安", "罗田", "浠水", "蕲春", "黄梅", "英山", "团风", "崇阳", "通城", "通山", "赤壁", "嘉鱼", "广水", "随县", "恩施", "利川"]),
+    ("湖南", ["长沙", "株洲", "湘潭", "衡阳", "邵阳", "岳阳", "常德", "张家界", "益阳", "郴州", "永州", "怀化", "娄底", "湘西", "浏阳", "醴陵", "韶山", "湘乡", "耒阳", "常宁", "武冈", "邵东", "临湘", "汨罗", "岳阳", "津市", "澧县", "安乡", "汉寿", "桃源", "石门", "慈利", "桑植", "沅江", "资兴", "永兴", "宜章", "桂阳", "嘉禾", "临武", "汝城", "桂东", "安仁", "资兴", "冷水滩", "祁阳", "东安", "双牌", "道县", "江永", "宁远", "蓝山", "新田", "江华", "怀化", "洪江", "沅陵", "溆浦", "会同", "新晃", "芷江", "靖州", "通道", "娄底", "冷水江", "涟源", "双峰", "新化", "吉首", "泸溪", "凤凰", "花垣", "保靖", "古丈", "永顺", "龙山"]),
+    ("广东", ["广州", "深圳", "珠海", "汕头", "韶关", "佛山", "江门", "湛江", "茂名", "肇庆", "惠州", "梅州", "汕尾", "河源", "阳江", "清远", "东莞", "中山", "潮州", "揭阳", "云浮", "从化", "增城", "英德", "连州", "乐昌", "南雄", "高要", "四会", "罗定", "普宁", "陆丰", "阳春", "恩平", "台山", "开平", "鹤山", "高明", "三水", "顺德", "南海", "番禺", "花都", "白云", "黄埔", "天河", "海珠", "越秀", "荔湾", "福田", "罗湖", "南山", "盐田", "宝安", "龙岗", "龙华", "坪山", "光明", "大鹏新区"]),
+    ("海南", ["海口", "三亚", "三沙", "儋州", "五指山", "琼海", "文昌", "万宁", "东方", "定安", "屯昌", "澄迈", "临高", "白沙", "昌江", "乐东", "陵水", "保亭", "琼中"]),
+    ("四川", ["成都", "自贡", "攀枝花", "泸州", "德阳", "绵阳", "广元", "遂宁", "内江", "乐山", "南充", "眉山", "宜宾", "广安", "达州", "雅安", "巴中", "资阳", "阿坝", "甘孜", "凉山", "都江堰", "彭州", "邛崃", "崇州", "广汉", "什邡", "绵竹", "江油", "阆中", "华蓥", "峨眉山", "万源", "简阳", "西昌", "康定", "马尔康"]),
+    ("贵州", ["贵阳", "六盘水", "遵义", "安顺", "铜仁", "毕节", "黔西南", "黔东南", "黔南", "兴义", "凯里", "都匀", "福泉", "清镇", "赤水", "仁怀", "兴仁", "盘州", "兴义", "安龙", "册亨", "望谟", "贞丰", "晴隆", "普安", "关岭", "紫云", "镇宁", "平坝", "普定", "西秀", "平坝", "关岭", "紫云", "镇宁"]),
+    ("云南", ["昆明", "曲靖", "玉溪", "保山", "昭通", "丽江", "普洱", "临沧", "楚雄", "红河", "文山", "西双版纳", "大理", "德宏", "怒江", "迪庆", "安宁", "腾冲", "宣威", "水富", "瑞丽", "芒市", "泸水", "香格里拉", "大理", "个旧", "开远", "蒙自", "弥勒", "文山", "景洪", "普洱", "思茅", "临沧", "景东", "江城", "孟连", "澜沧", "西盟", "勐海", "勐腊", "勐海"]),
+    ("陕西", ["西安", "铜川", "宝鸡", "咸阳", "渭南", "延安", "汉中", "榆林", "安康", "商洛", "韩城", "华阴", "兴平", "彬州", "神木", "府谷", "靖边", "定边", "绥德", "米脂", "佳县", "吴堡", "清涧", "子洲", "横山", "榆阳", "汉台", "南郑", "城固", "洋县", "西乡", "勉县", "宁强", "略阳", "镇巴", "留坝", "佛坪", "安康", "汉阴", "石泉", "宁陕", "紫阳", "岚皋", "平利", "镇坪", "旬阳", "白河", "商州", "洛南", "丹凤", "商南", "山阳", "镇安", "柞水", "西安", "高陵", "蓝田", "鄠邑", "周至", "阎良", "临潼", "长安", "碑林", "莲湖", "灞桥", "未央", "雁塔", "新城区", "阎良区"]),
+    ("甘肃", ["兰州", "嘉峪关", "金昌", "白银", "天水", "武威", "张掖", "平凉", "酒泉", "庆阳", "定西", "陇南", "临夏", "甘南", "玉门", "敦煌", "华亭", "合作", "西峰", "崆峒", "秦州", "麦积", "甘州", "肃州", "凉州", "武都", "成县", "文县", "宕昌", "康县", "西和", "礼县", "徽县", "两当", "华池", "合水", "正宁", "宁县", "镇原", "环县", "庆城", "临夏市", "临夏县", "康乐", "永靖", "广河", "和政", "东乡族自治县", "积石山", "合作", "临潭", "卓尼", "舟曲", "迭部", "玛曲", "碌曲", "夏河", "兰州新区"]),
+    ("青海", ["西宁", "海东", "海北", "海南", "黄南", "果洛", "玉树", "海西", "格尔木", "德令哈", "茫崖", "大柴旦", "冷湖"]),
+    ("其他", ["外籍", "其他"]),
+]
+
+# v3.5.2: 完整学制（小学一年级 → 大四）
+# 用户要求"从一年级到大四"，覆盖 K12 + 大学，方便不同学段学员
+GRADES_REGISTRATION = [
+    # 小学
+    ("PRIMARY_1", "小学一年级"),
+    ("PRIMARY_2", "小学二年级"),
+    ("PRIMARY_3", "小学三年级"),
+    ("PRIMARY_4", "小学四年级"),
+    ("PRIMARY_5", "小学五年级"),
+    ("PRIMARY_6", "小学六年级"),
+    # 初中
+    ("JUNIOR_1", "初一（初中一年级）"),
+    ("JUNIOR_2", "初二（初中二年级）"),
+    ("JUNIOR_3", "初三（初中三年级）"),
+    # 高中
+    ("SENIOR_1", "高一（高中一年级）"),
+    ("SENIOR_2", "高二（高中二年级）"),
+    ("SENIOR_3", "高三（高中三年级）"),
+    # 大学
+    ("UNIV_1", "大一（大学一年级）"),
+    ("UNIV_2", "大二（大学二年级）"),
+    ("UNIV_3", "大三（大学三年级）"),
+    ("UNIV_4", "大四（大学四年级）"),
+    # 其他
+    ("GRADUATED", "已毕业"),
+]
+
+
+def _validate_birth_date(bd_str: str) -> tuple[bool, str, bool]:
+    """返回 (ok, normalized_or_reason, is_minor)"""
+    if not bd_str:
+        return (True, "", False)
+    try:
+        bd = datetime.strptime(bd_str, "%Y-%m-%d").date()
+    except ValueError:
+        return (False, "出生日期格式错误（应为 YYYY-MM-DD）", False)
+    today = date.today()
+    age = (today - bd).days / 365.25
+    is_minor = age < 14
+    return (True, bd.isoformat(), is_minor)
+
+
+def _flatten_cities() -> set[str]:
+    """把 [(group_label, [cities]), ...] 拍平为 set 用于 O(1) 校验"""
+    s: set[str] = set()
+    for _group, cities in CITIES_REGISTRATION:
+        s.update(cities)
+    return s
+
+
+_CITIES_FLAT = _flatten_cities()
+
+
+def _city_to_province(city: str | None) -> str | None:
+    """反向查：城市 → 省份（用于 /me 显示）"""
+    if not city:
+        return None
+    for group, cities in CITIES_REGISTRATION:
+        if city in cities:
+            return group
+    return None
+
+
+def _grade_to_label(grade: str | None) -> str | None:
+    """grade value → 中文 label"""
+    if not grade:
+        return None
+    for v, label in GRADES_REGISTRATION:
+        if v == grade:
+            return label
+    return grade   # 未知值原样返回
+
+
+@app.route("/register", methods=["GET", "POST"])
+def register_student():
+    """v3.5.2 学员 4 字段极简注册（学而思图 1 模式）
+
+    流程：
+      1. 必填 4 项：城市 / 姓名 / 年级 / 性别
+      2. 可选 3 项：洛谷 UID（必填，借力主站实名）/ 微信扫码 / 手机号
+      3. 提交后：去重（luogu_uid 已存在则提示）→ 写入 students
+      4. 重定向：/me/<luogu_uid>
+    """
+    if request.method == "GET":
+        return render_template_string(
+            REGISTER_HTML,
+            cities=CITIES_REGISTRATION,
+            grades=GRADES_REGISTRATION,
+            error=None,
+            form={},
+        )
+
+    # ---- POST 处理 ----
+    form = {
+        "city": (request.form.get("city") or "").strip(),
+        "real_name": (request.form.get("real_name") or "").strip(),
+        "grade": (request.form.get("grade") or "").strip(),
+        "gender": (request.form.get("gender") or "").strip(),
+        "luogu_uid": (request.form.get("luogu_uid") or "").strip(),
+        "wechat_openid": (request.form.get("wechat_openid") or "").strip(),
+        "phone": (request.form.get("phone") or "").strip(),
+        "birth_date": (request.form.get("birth_date") or "").strip(),
+        "agree": request.form.get("agree") == "on",
+    }
+
+    # ---- 校验 ----
+    if not form["city"] or form["city"] not in _CITIES_FLAT:
+        return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error="请选择城市", form=form)
+    if not form["real_name"]:
+        return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error="姓名必填", form=form)
+    if not form["grade"]:
+        return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error="年级必填", form=form)
+    if form["gender"] not in ("M", "F"):
+        return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error="请选择性别", form=form)
+    if not form["luogu_uid"] or not form["luogu_uid"].isdigit() or not (6 <= len(form["luogu_uid"]) <= 10):
+        return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error="洛谷 UID 必填（6-10 位数字）", form=form)
+    if not form["agree"]:
+        return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error="请勾选《用户协议》和《PIPL 知情同意书》", form=form)
+
+    # 出生日期（可选）
+    bd_ok, bd_norm, is_minor = _validate_birth_date(form["birth_date"])
+    if not bd_ok:
+        return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error=bd_norm, form=form)
+    form["birth_date"] = bd_norm
+
+    # 微信 / 手机 二选一 或 都不填（学而思图 1 模式允许）
+    if form["wechat_openid"] and form["phone"]:
+        return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error="微信扫码 + 手机号请二选一（避免重复绑定）", form=form)
+
+    # 14 岁以下 + 无手机号兜底 → 拒绝
+    if is_minor and not form["phone"]:
+        return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error="14 岁以下学员必须填写家长手机号（v3.5.2 PIPL §5.2 强制）", form=form)
+
+    # ---- 去重 ----
+    existing = _admin_students.get_student_by_uid(form["luogu_uid"])
+    if existing:
+        return render_template_string(
+            REGISTER_HTML,
+            cities=CITIES_REGISTRATION,
+            grades=GRADES_REGISTRATION,
+            error=f"洛谷 UID {form['luogu_uid']} 已注册（学员 id={existing['id']}），如需修改请联系教练",
+            form=form,
+        )
+
+    # ---- 写入 ----
+    note = f"v3.5.2 自助注册 IP={request.remote_addr or '—'}"
+    if form["wechat_openid"]:
+        note += f" · wechat={form['wechat_openid'][:8]}***"
+    if form["phone"]:
+        note += f" · phone={form['phone'][:3]}***{form['phone'][-2:] if len(form['phone']) >= 5 else ''}"
+    if is_minor:
+        note += " · MINOR=1"
+
+    try:
+        sid = _admin_students.create_student(
+            luogu_uid=form["luogu_uid"],
+            real_name=form["real_name"],
+            grade=form["grade"],
+            city=form["city"],
+            gender=form["gender"],
+            birth_date=form["birth_date"] or None,
+            is_minor=is_minor,
+            registered_via="self_web" if not form["wechat_openid"] else "wechat",
+            note=note,
+        )
+    except Exception as e:  # noqa: BLE001
+        return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error=f"注册失败：{e}", form=form)
+
+    flash(f"✅ 学员 {form['real_name']} 注册成功（id={sid}）")
+    return redirect(url_for("student_me", luogu_uid=form["luogu_uid"]))
+
+
+@app.route("/me/<luogu_uid>")
+def student_me(luogu_uid: str):
+    """v3.5.2 学员 Pro 自助面板（无密码，仅凭 luogu_uid 进入）
+
+    简化模式：v3.5.2 暂用 luogu_uid 直链（家长端 token 同款模式）。
+    未来 v3.5.3 接微信扫码/手机 OTP 后改为带签名 token。
+    """
+    student = _admin_students.get_student_by_uid(luogu_uid)
+    if not student:
+        return render_template_string(REGISTER_INVALID_HTML, message=f"洛谷 UID {luogu_uid} 未注册"), 404
+    progress = _admin_students.get_student_gesp_progress(int(student["id"])) or {}
+    # v3.5.2: 解析 city 所在省份 + grade 中文 label
+    student_dict = dict(student)
+    student_dict["province"] = _city_to_province(student_dict.get("city"))
+    student_dict["grade_label"] = _grade_to_label(student_dict.get("grade"))
+    # v3.5.2: 检查家长订阅状态（决定 AI 讲题是否可用）
+    # activation_codes 表字段：code, sku, student_id, redeemed_at, expires_at
+    # sku 实际值：parent_sub / popularize_camp / improve_camp
+    has_parent_sub = False
+    try:
+        from task_store import _get_conn
+        conn = _get_conn()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM activation_codes ac "
+                "JOIN students s ON s.id = ac.student_id "
+                "WHERE ac.sku = 'parent_sub' AND s.luogu_uid = ? "
+                "AND ac.redeemed_at IS NOT NULL "
+                "AND (ac.expires_at IS NULL OR ac.expires_at > datetime('now'))",
+                (str(luogu_uid).strip(),),
+            ).fetchone()
+        finally:
+            conn.close()
+        has_parent_sub = bool(row and dict(row).get("n", 0) > 0)
+    except Exception:
+        has_parent_sub = False
+    return render_template_string(
+        STUDENT_ME_HTML,
+        student=student_dict,
+        progress=progress or {},
+        has_parent_sub=has_parent_sub,
+        token=luogu_uid,
+    )
+
+
+# ---- v3.5.2 模板 ----
+
+REGISTER_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>学员注册 · v3.5.2</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: -appleSystem, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }
+        .reg-shadow { box-shadow: 0 8px 32px rgba(0,0,0,0.08); }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-green-50 via-white to-emerald-50">
+    <div class="w-full max-w-md bg-white rounded-2xl reg-shadow p-7">
+        <div class="text-center mb-5">
+            <div class="inline-block px-3 py-1 bg-green-100 text-green-700 text-xs rounded-full mb-2">v3.5.2</div>
+            <h1 class="text-xl font-bold text-gray-800 mb-1">学员注册</h1>
+            <p class="text-xs text-gray-500">学而思图 1 模式 · 4 字段极简</p>
+        </div>
+
+        {% if error %}
+        <div class="mb-4 px-3 py-2 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">⚠️ {{ error }}</div>
+        {% endif %}
+
+        <form method="POST" class="space-y-3">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1"><span class="text-red-500">*</span> 城市</label>
+                <select name="city" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500">
+                    <option value="">请选择城市</option>
+                    {% for group, items in cities %}
+                    <optgroup label="📍 {{ group }}">
+                        {% for c in items %}
+                        <option value="{{ c }}" {% if form.city == c %}selected{% endif %}>{{ c }}</option>
+                        {% endfor %}
+                    </optgroup>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1"><span class="text-red-500">*</span> 姓名</label>
+                <input type="text" name="real_name" required maxlength="20"
+                       value="{{ form.real_name or '' }}"
+                       placeholder="请输入姓名"
+                       class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500">
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1"><span class="text-red-500">*</span> 年级</label>
+                <select name="grade" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500">
+                    <option value="">请选择年级</option>
+                    {% for g_val, g_label in grades %}
+                    <option value="{{ g_val }}" {% if form.grade == g_val %}selected{% endif %}>{{ g_label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1"><span class="text-red-500">*</span> 性别</label>
+                <div class="grid grid-cols-2 gap-2">
+                    <label class="flex items-center justify-center gap-2 border rounded-lg px-3 py-2 cursor-pointer hover:bg-green-50 {% if form.gender == 'M' %}bg-green-50 border-green-500{% endif %}">
+                        <input type="radio" name="gender" value="M" {% if form.gender == 'M' %}checked{% endif %} class="text-green-600">
+                        <span>♂ 男生</span>
+                    </label>
+                    <label class="flex items-center justify-center gap-2 border rounded-lg px-3 py-2 cursor-pointer hover:bg-pink-50 {% if form.gender == 'F' %}bg-pink-50 border-pink-500{% endif %}">
+                        <input type="radio" name="gender" value="F" {% if form.gender == 'F' %}checked{% endif %} class="text-pink-600">
+                        <span>♀ 女生</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="border-t border-gray-200 pt-3 mt-3">
+                <p class="text-xs text-gray-500 mb-2">🔐 实名信息（任选其一，借力主站认证）</p>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1"><span class="text-red-500">*</span> 洛谷 UID</label>
+                    <input type="text" name="luogu_uid" required pattern="[0-9]{6,10}"
+                           value="{{ form.luogu_uid or '' }}"
+                           placeholder="6-10 位数字"
+                           class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500">
+                    <p class="text-xs text-gray-400 mt-1">v3.5.2 借力洛谷主站实名 · 学员档案主键</p>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2 mt-2">
+                    <div>
+                        <label class="block text-xs text-gray-600 mb-1">微信扫码（可选）</label>
+                        <button type="button" onclick="document.getElementById('wechat_openid').value='demo_wx_openid_' + Math.random().toString(36).slice(2,10); this.textContent='✓ 已扫码';" class="w-full bg-green-500 text-white text-xs px-2 py-2 rounded-lg hover:bg-green-600">
+                            🟢 微信扫码
+                        </button>
+                        <input type="hidden" name="wechat_openid" id="wechat_openid" value="">
+                        <p class="text-xs text-gray-400 mt-1">v3.5.2 demo 桩</p>
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-600 mb-1">手机号（14 岁以下必填）</label>
+                        <input type="tel" name="phone" pattern="1[3-9][0-9]{9}"
+                               value="{{ form.phone or '' }}"
+                               placeholder="11 位手机号"
+                               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500">
+                    </div>
+                </div>
+
+                <div class="mt-2">
+                    <label class="block text-xs text-gray-600 mb-1">出生日期（可选 · 用于 CSP 年龄判定）</label>
+                    <input type="date" name="birth_date"
+                           value="{{ form.birth_date or '' }}"
+                           class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500">
+                </div>
+            </div>
+
+            <div class="flex items-start gap-2 pt-2">
+                <input type="checkbox" name="agree" id="agree" required
+                       {% if form.agree %}checked{% endif %}
+                       class="mt-1">
+                <label for="agree" class="text-xs text-gray-600">
+                    已阅读并同意 <a href="#" class="text-green-600 underline">《用户协议》</a>
+                    和 <a href="#" class="text-green-600 underline">《未成年人个人信息保护知情同意书》</a>
+                    （PIPL §5.2 · 14 岁以下需监护人陪同）
+                </label>
+            </div>
+
+            <button type="submit" class="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white font-bold py-3 rounded-lg hover:from-green-700 hover:to-emerald-700 transition">
+                完成
+            </button>
+        </form>
+
+        <div class="text-center mt-4">
+            <a href="/me/999105" class="text-xs text-gray-400 hover:text-gray-600">→ 体验已注册学员 /me/999105</a>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+
+STUDENT_ME_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>学员 Pro · {{ student.real_name or ('UID-' + student.luogu_uid) }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="bg-gradient-to-r from-green-700 to-emerald-700 text-white">
+        <div class="max-w-3xl mx-auto p-6">
+            <h1 class="text-2xl font-bold mb-1">🎓 学员 Pro · v3.5.2</h1>
+            <p class="text-sm opacity-90">欢迎，<strong>{{ student.real_name or ('UID-' + student.luogu_uid) }}</strong></p>
+            <p class="text-xs opacity-75 mt-1">
+                UID {{ student.luogu_uid }}
+                · {{ student.province or '' }} {{ student.city or '城市未填' }}
+                · {% if student.gender == 'M' %}男生{% elif student.gender == 'F' %}女生{% else %}性别未填{% endif %}
+                · 年级 {{ student.grade_label or student.grade or '—' }}
+                · 注册渠道 {{ student.registered_via or 'admin' }}
+            </p>
+        </div>
+    </div>
+
+    <div class="max-w-3xl mx-auto p-4 -mt-4">
+        {% if progress and progress.progress_bar %}
+        <div class="bg-white rounded-2xl shadow p-5 mb-4">
+            <h2 class="text-lg font-bold text-gray-800 mb-3">🏆 我的 GESP 段位</h2>
+            <div class="font-mono bg-gray-50 p-3 rounded text-sm overflow-x-auto">{{ progress.progress_bar }}</div>
+            <p class="text-sm text-gray-600 mt-3">
+                最近真考: {% if progress.student.gesp_latest_score is not none %}{{ progress.student.gesp_latest_score }} 分{% else %}暂无 · 等待教练录入 GESP 真考成绩{% endif %}
+                · 下次可报: GESP {{ progress.next_eligible_level or 1 }} 级
+            </p>
+            {% if progress.can_exempt_csp_s %}
+            <div class="mt-3 px-3 py-2 bg-purple-100 text-purple-800 rounded text-sm">🎁 已解锁 CSP-J + CSP-S 双免初赛</div>
+            {% elif progress.can_exempt_csp_j %}
+            <div class="mt-3 px-3 py-2 bg-green-100 text-green-800 rounded text-sm">🎁 已解锁 CSP-J 免初赛</div>
+            {% else %}
+            <div class="mt-3 px-3 py-2 bg-gray-100 text-gray-600 rounded text-sm">尚未解锁免初赛</div>
+            {% endif %}
+        </div>
+        {% else %}
+        <div class="bg-white rounded-2xl shadow p-5 mb-4 text-center">
+            <p class="text-gray-500">📋 还没有 GESP 段位数据</p>
+            <p class="text-xs text-gray-400 mt-1">请联系您的教练录入首次 GESP 真考成绩</p>
+        </div>
+        {% endif %}
+
+        <div class="{% if has_parent_sub %}bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200{% else %}bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200{% endif %} rounded-2xl shadow p-5 mb-4">
+            <h2 class="text-lg font-bold text-gray-800 mb-2">
+                {% if has_parent_sub %}
+                💎 家长订阅已激活 · AI 讲题可用
+                {% else %}
+                💬 AI 讲题 · 需家长订阅
+                {% endif %}
+            </h2>
+            <ul class="text-sm text-gray-700 space-y-1 mb-3">
+                <li>{% if has_parent_sub %}✅{% else %}☑️{% endif %} 段位图（自动展示历次 GESP 真考）</li>
+                <li>{% if has_parent_sub %}✅{% else %}☑️{% endif %} 错题本（每周班级共性错题 + 自己的）</li>
+                <li>
+                    {% if has_parent_sub %}
+                    ✅ <strong class="text-blue-700">StudyMate AI 讲题（已解锁）</strong>
+                    {% else %}
+                    🔒 StudyMate AI 讲题 → <strong class="text-amber-700">需家长加 V 兑换码</strong>
+                    {% endif %}
+                </li>
+                <li>{% if has_parent_sub %}✅{% else %}☑️{% endif %} 倒推路径（强基 5 校 / CSP-J/S 倒计时）</li>
+            </ul>
+            {% if has_parent_sub %}
+            <p class="text-xs text-blue-700">🎁 家长已订阅 · AI 讲题无限制 · v3.5.2</p>
+            {% else %}
+            <div class="bg-white border border-amber-200 rounded-lg p-3 mt-2">
+                <p class="text-xs text-gray-700 mb-2">💡 家长加 V 兑换 <code class="font-mono">PARENT-SUB-XXXX</code> 后，<strong>AI 讲题自动解锁</strong>。这是"家长为孩子买"的家庭订阅模式。</p>
+                <a href="/redeem" class="inline-block text-xs px-3 py-1.5 bg-amber-500 text-white rounded hover:bg-amber-600">🎁 兑换家长订阅码</a>
+                <a href="/" class="inline-block text-xs px-3 py-1.5 border border-gray-300 text-gray-700 rounded hover:bg-gray-50 ml-1">加 V 获取 →</a>
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="text-center text-xs text-gray-400 mt-6 mb-4">
+            v3.5.2 学员 Pro 自助入口 · 基于洛谷 UID 直链（无密码模式）<br>
+            真实部署时将改为微信扫码 / 短信 OTP（v3.5.3）
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+
+REGISTER_INVALID_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>学员未注册</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 min-h-screen flex items-center justify-center p-6">
+    <div class="bg-white rounded-2xl shadow p-8 max-w-md w-full text-center">
+        <h1 class="text-2xl font-bold text-amber-700 mb-3">⚠️ {{ message }}</h1>
+        <p class="text-gray-600 mb-4">请先完成注册</p>
+        <a href="/register" class="inline-block bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700">去注册</a>
+    </div>
+</body>
+</html>
+"""
+
+
+# ============================================================
+# v3.5 Phase 2 · 家长端 + 学员目标 + 周报 + 跳级决策树
+# ============================================================
+
+
+@app.route("/parent", methods=["GET", "POST"])
+def parent_panel_entry():
+    """家长端入口页：v3.5.2（输入 token 跳转）"""
+    error = None
+    token = ""
+    if request.method == "POST":
+        token = (request.form.get("token") or "").strip()
+        if not token or not token.replace("-", "").replace("_", "").isalnum() or len(token) < 8:
+            error = "家长 token 无效（应为 8 位以上字母数字）"
+        else:
+            g = _admin_guardians.get_guardian_by_token(token)
+            if not g:
+                error = "家长 token 未找到，请向教练索取正确链接"
+            else:
+                return redirect(url_for("parent_panel_index", token=token))
+    return render_template_string(
+        PARENT_TOKEN_ENTRY_HTML,
+        error=error,
+        token=token,
+    )
+
+
+@app.route("/parent/<token>")
+def parent_panel_index(token: str):
+    """家长无登录面板首页：v3.5.1 学而思图 2 样式
+    赛事仪表盘 + 倒推路径 + 段位 + 4 SKU 付费 CTA + CSP 年龄卡"""
+    g = _admin_guardians.get_guardian_by_token(token)
+    if not g:
+        return render_template_string(PARENT_TOKEN_INVALID_HTML, message="家长链接无效或已过期"), 410
+    student = _admin_students.get_student(int(g["student_id"]))
+    if not student:
+        return render_template_string(PARENT_TOKEN_INVALID_HTML, message="学员档案不存在"), 404
+    progress = _admin_students.get_student_gesp_progress(int(g["student_id"])) or {}
+    goal = _admin_goals.get_student_goal(int(g["student_id"])) or {}
+    rec = _admin_goals.recommend_skip_path(int(g["student_id"]))
+    reports = _weekly_reports.list_weekly_reports(int(g["student_id"]), limit=10)
+    # v3.5.1: 出生日期按 grade 推断（CSP 12 岁门槛所需）
+    # demo 学员 grade 缺省 2024 → 推断 2014-05-01（CSP 2026 刚好满足）
+    from docs.gesp_estimator import is_csp_age_eligible
+    inferred_birth = "2014-05-01"  # v3.5.1 demo 兜底；正式需 admin 录入
+    age_j2026 = is_csp_age_eligible(inferred_birth, 2026)
+    age_j2027 = is_csp_age_eligible(inferred_birth, 2027)
+    # 政策水印
+    try:
+        from camp_curriculum import get_policy_events_last_updated
+        policy_last_updated = get_policy_events_last_updated() or "—"
+    except Exception:
+        policy_last_updated = "—"
+    # v3.5.2: 政策匹配学校库（家长版核心模块）
+    from task_store import match_school_for_student
+    student_dict = dict(student)
+    # grade 字段原始值（PRIMARY_3/JUNIOR_2 等）已在 student 中
+    policy_match = match_school_for_student(student_dict)
+    return render_template_string(
+        PARENT_PANEL_HTML,
+        guardian=g,
+        student=student,
+        progress=progress or {},
+        goal=goal,
+        rec=rec,
+        reports=reports,
+        token=token,
+        age_j2026=age_j2026,
+        age_j2027=age_j2027,
+        policy_last_updated=policy_last_updated,
+        policy_match=policy_match,
+    )
+
+
+@app.route("/parent/<token>/report/<int:report_id>")
+def parent_panel_report(token: str, report_id: int):
+    """家长查看单份周报（HTML）+ 打开数 +1"""
+    g = _admin_guardians.get_guardian_by_token(token)
+    if not g:
+        return render_template_string(PARENT_TOKEN_INVALID_HTML, message="家长链接无效或已过期"), 410
+    # 校验周报所属学员与 token 匹配（防止横向越权）
+    from task_store import _get_conn
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            "SELECT * FROM weekly_reports WHERE id = ? AND student_id = ?",
+            (int(report_id), int(g["student_id"])),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return render_template_string(PARENT_TOKEN_INVALID_HTML, message="周报不存在"), 404
+    _admin_guardians.increment_weekly_report_open(int(report_id))
+    # 直接输出 HTML 文件
+    html_path = ROOT / dict(row)["html_path"]
+    if not html_path.exists():
+        return render_template_string(PARENT_TOKEN_INVALID_HTML, message="周报文件已丢失"), 410
+    return send_file(str(html_path), mimetype="text/html")
+
+
+# ---- Phase 2 模板 ----
+
+ADMIN_STUDENTS_GUARDIANS_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>家长列表 - {{ student.real_name or ('UID-' + student.luogu_uid) }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen p-6">
+    <div class="max-w-4xl mx-auto">
+        <div class="flex items-center justify-between mb-6">
+            <h1 class="text-3xl font-bold text-blue-900">👨‍👩‍👧 家长列表</h1>
+            <div class="flex items-center gap-4">
+                <a href="/admin/students/{{ student.id }}" class="text-blue-600 hover:underline">← 返回学员</a>
+                <a href="/admin/students" class="text-gray-600 hover:underline">学员列表</a>
+            </div>
+        </div>
+        <div class="bg-white rounded-xl shadow p-6 mb-4">
+            <p class="text-gray-600">学员：<strong>{{ student.real_name or ('UID-' + student.luogu_uid) }}</strong>
+            · UID <code class="text-xs">{{ student.luogu_uid }}</code> · 学校 {{ student.school or '—' }}</p>
+        </div>
+        {% if notice %}
+        <div class="mb-4 rounded-lg border px-4 py-3 text-sm {% if notice_type == 'error' %}bg-red-50 border-red-200 text-red-700{% else %}bg-green-50 border-green-200 text-green-700{% endif %}">
+            <pre class="whitespace-pre-wrap font-sans">{{ notice }}</pre>
+        </div>
+        {% endif %}
+        {% if error %}
+        <div class="mb-4 rounded-lg border bg-red-50 border-red-200 text-red-700 px-4 py-3 text-sm">{{ error }}</div>
+        {% endif %}
+
+        <div class="bg-white rounded-xl shadow p-6 mb-6">
+            <h2 class="text-lg font-semibold text-gray-800 mb-4">➕ 添加家长</h2>
+            <form method="POST" class="space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">显示名称（爸/妈/监护人）</label>
+                        <input type="text" name="display_name" class="w-full border rounded-lg px-3 py-2" placeholder="如：张妈妈">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">通知渠道</label>
+                        <select name="notify_channel" class="w-full border rounded-lg px-3 py-2">
+                            <option value="email">邮件（email）</option>
+                            <option value="sms">短信（sms）</option>
+                            <option value="wechat">微信（wechat）</option>
+                            <option value="none">不通知</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">手机</label>
+                        <input type="text" name="phone" class="w-full border rounded-lg px-3 py-2" placeholder="11 位手机号（可选）">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">邮箱</label>
+                        <input type="email" name="email" class="w-full border rounded-lg px-3 py-2" placeholder="parent@example.com（可选）">
+                    </div>
+                </div>
+                <p class="text-xs text-gray-500">⚠️ 添加即视为已获 PIPL §5.2 同意（IP {{ request.remote_addr or '—' }}），token 30 天后过期。</p>
+                <button type="submit" class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700">添加并生成 token</button>
+            </form>
+        </div>
+
+        <div class="bg-white rounded-xl shadow overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h2 class="text-lg font-semibold text-gray-800">已绑定家长（{{ guardians|length }}）</h2>
+            </div>
+            {% if guardians %}
+            <table class="min-w-full text-sm text-left">
+                <thead class="bg-gray-50 text-gray-600 font-medium">
+                    <tr>
+                        <th class="px-6 py-3">ID</th>
+                        <th class="px-6 py-3">显示名</th>
+                        <th class="px-6 py-3">手机 / 邮箱</th>
+                        <th class="px-6 py-3">通知</th>
+                        <th class="px-6 py-3">Token</th>
+                        <th class="px-6 py-3">过期</th>
+                        <th class="px-6 py-3">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for g in guardians %}
+                    <tr class="border-t border-gray-100">
+                        <td class="px-6 py-3 text-gray-500">#{{ g.id }}</td>
+                        <td class="px-6 py-3">{{ g.display_name or '—' }}</td>
+                        <td class="px-6 py-3 text-xs text-gray-600">
+                            {{ g.phone or '' }}{% if g.phone and g.email %} · {% endif %}{{ g.email or '' }}
+                        </td>
+                        <td class="px-6 py-3">{{ g.notify_channel }}</td>
+                        <td class="px-6 py-3 font-mono text-xs">{{ g.notify_token[:12] + '...' if g.notify_token else '—' }}</td>
+                        <td class="px-6 py-3 text-xs text-gray-500">{{ g.notify_token_expires_at or '—' }}</td>
+                        <td class="px-6 py-3">
+                            <a href="/parent/{{ g.notify_token }}" target="_blank" class="text-blue-600 hover:underline mr-2">预览</a>
+                            <form method="POST" action="/admin/students/{{ student.id }}/guardians/{{ g.id }}/rotate" class="inline">
+                                <button type="submit" class="text-orange-600 hover:underline">重置</button>
+                            </form>
+                            <form method="POST" action="/admin/students/{{ student.id }}/guardians/{{ g.id }}/delete" class="inline" onsubmit="return confirm('确认删除家长 #{{ g.id }}？');">
+                                <button type="submit" class="text-red-600 hover:underline ml-2">删除</button>
+                            </form>
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="p-8 text-center text-gray-400">尚未绑定家长</div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+
+ADMIN_STUDENTS_GOAL_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>学员目标 - {{ student.real_name or ('UID-' + student.luogu_uid) }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen p-6">
+    <div class="max-w-3xl mx-auto">
+        <div class="flex items-center justify-between mb-6">
+            <h1 class="text-3xl font-bold text-blue-900">🎯 学员目标路径</h1>
+            <a href="/admin/students/{{ student.id }}" class="text-blue-600 hover:underline">← 返回学员</a>
+        </div>
+        {% if notice %}
+        <div class="mb-4 rounded-lg border px-4 py-3 text-sm {% if notice_type == 'error' %}bg-red-50 border-red-200 text-red-700{% else %}bg-green-50 border-green-200 text-green-700{% endif %}">
+            {{ notice }}
+        </div>
+        {% endif %}
+        <div class="bg-white rounded-xl shadow p-6 mb-4">
+            <p class="text-gray-600">学员：<strong>{{ student.real_name or ('UID-' + student.luogu_uid) }}</strong>
+            · UID <code class="text-xs">{{ student.luogu_uid }}</code></p>
+        </div>
+
+        <form method="POST" class="bg-white rounded-xl shadow p-6 space-y-4 mb-6">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">主路径</label>
+                <select name="primary_path" class="w-full border rounded-lg px-3 py-2">
+                    {% for p in primary_paths %}
+                    <option value="{{ p }}" {% if goal.primary_path == p %}selected{% endif %}>{{ p }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">目标大学</label>
+                    <select name="target_university" class="w-full border rounded-lg px-3 py-2">
+                        <option value="">— 未指定 —</option>
+                        {% for u in sample_universities %}
+                        <option value="{{ u }}" {% if goal.target_university == u %}selected{% endif %}>{{ u }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">目标省份</label>
+                    <input type="text" name="target_province" value="{{ goal.target_province or '' }}"
+                           class="w-full border rounded-lg px-3 py-2" placeholder="如：北京">
+                </div>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">备注</label>
+                <textarea name="notes" rows="2" class="w-full border rounded-lg px-3 py-2">{{ goal.notes or '' }}</textarea>
+            </div>
+            <button type="submit" class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700">保存目标</button>
+        </form>
+
+        {% if rec and rec.next_eligible_level %}
+        <div class="bg-white rounded-xl shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-800 mb-3">🤖 AI 跳级建议</h2>
+            <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm">
+                <p class="mb-2"><strong>主路径：</strong>{{ rec.primary_path }}</p>
+                {% if rec.current_level %}<p class="mb-2"><strong>当前等级：</strong>GESP {{ rec.current_level }} 级{% if rec.last_score %} · 最近 {{ rec.last_score }} 分{% endif %}</p>{% endif %}
+                <p class="mb-2"><strong>下次可报：</strong>GESP {{ rec.next_eligible_level }} 级</p>
+                <p class="mb-2"><strong>推荐：</strong><span class="text-blue-700 font-bold">{{ rec.recommendation }}</span></p>
+                <p class="text-gray-600">{{ rec.reasoning }}</p>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</body>
+</html>
+"""
+
+
+ADMIN_STUDENTS_REPORTS_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>周报列表 - {{ student.real_name or ('UID-' + student.luogu_uid) }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen p-6">
+    <div class="max-w-4xl mx-auto">
+        <div class="flex items-center justify-between mb-6">
+            <h1 class="text-3xl font-bold text-blue-900">📊 家长周报</h1>
+            <div class="flex items-center gap-4">
+                <a href="/admin/students/{{ student.id }}" class="text-blue-600 hover:underline">← 返回学员</a>
+                <form method="POST" action="/admin/students/{{ student.id }}/reports/generate" class="inline">
+                    <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">⚡ 立即生成本周报</button>
+                </form>
+            </div>
+        </div>
+        {% if notice %}
+        <div class="mb-4 rounded-lg border px-4 py-3 text-sm {% if notice_type == 'error' %}bg-red-50 border-red-200 text-red-700{% else %}bg-green-50 border-green-200 text-green-700{% endif %}">{{ notice }}</div>
+        {% endif %}
+        <div class="bg-white rounded-xl shadow p-6 mb-4">
+            <p class="text-gray-600">学员：<strong>{{ student.real_name or ('UID-' + student.luogu_uid) }}</strong>
+            · GESP 最高 {{ student.gesp_highest_passed or 0 }} 级
+            · 下次可报 GESP {{ student.gesp_next_eligible_level or 1 }} 级</p>
+        </div>
+        <div class="bg-white rounded-xl shadow overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h2 class="text-lg font-semibold text-gray-800">历史周报（{{ reports|length }}）</h2>
+            </div>
+            {% if reports %}
+            <table class="min-w-full text-sm text-left">
+                <thead class="bg-gray-50 text-gray-600 font-medium">
+                    <tr>
+                        <th class="px-6 py-3">ID</th>
+                        <th class="px-6 py-3">周开始</th>
+                        <th class="px-6 py-3">送达时间</th>
+                        <th class="px-6 py-3">打开数</th>
+                        <th class="px-6 py-3">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for r in reports %}
+                    <tr class="border-t border-gray-100">
+                        <td class="px-6 py-3 text-gray-500">#{{ r.id }}</td>
+                        <td class="px-6 py-3">{{ r.week_start }}</td>
+                        <td class="px-6 py-3 text-xs text-gray-500">{{ r.delivered_at or '—' }}</td>
+                        <td class="px-6 py-3">{{ r.open_count or 0 }}</td>
+                        <td class="px-6 py-3">
+                            <a href="/admin/students/{{ student.id }}/reports/{{ r.id }}" target="_blank" class="text-blue-600 hover:underline">查看</a>
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="p-8 text-center text-gray-400">尚未生成周报 · 点上方"立即生成本周报"开始</div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+
+PARENT_PANEL_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>家长端 · 赛事仪表盘 - {{ student.real_name or ('UID-' + student.luogu_uid) }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }
+        .card-shadow { box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- 顶部 Banner（学而思图 2 风格：双 CTA + 强基倒计时） -->
+    <div class="bg-gradient-to-r from-blue-900 via-indigo-700 to-purple-700 text-white">
+        <div class="max-w-3xl mx-auto p-6">
+            <div class="flex items-center justify-between mb-3">
+                <h1 class="text-2xl font-bold">专业赛考规划 · 助力科特长生</h1>
+                <span class="text-xs opacity-75">v3.5.1</span>
+            </div>
+            <p class="text-sm opacity-90 mb-1">
+                学员：<strong>{{ student.real_name or ('UID-' + student.luogu_uid) }}</strong>
+                · 入学年份 {{ student.grade or '—' }}
+                · 通知渠道 {{ guardian.notify_channel }}
+            </p>
+            <p class="text-xs opacity-75">
+                您是 <strong>{{ guardian.display_name or '已绑定家长' }}</strong> · token 有效期至 {{ guardian.notify_token_expires_at }}
+            </p>
+        </div>
+    </div>
+
+    <div class="max-w-3xl mx-auto p-4 -mt-4">
+
+        <!-- CSP 12 岁年龄卡（v3.5.1 新增） -->
+        <div class="bg-white rounded-2xl card-shadow p-5 mb-4 border-l-4 {% if age_j2026.eligible %}border-green-500{% else %}border-amber-500{% endif %}">
+            <div class="flex items-start justify-between">
+                <div>
+                    <h2 class="text-base font-bold text-gray-800 mb-1">
+                        🗓️ CSP 报名年龄门槛
+                        <span class="text-xs text-gray-500 font-normal">（CCF 官方：当年 9/1 前满 12 周岁）</span>
+                    </h2>
+                    <div class="flex gap-4 mt-2">
+                        <div>
+                            <div class="text-xs text-gray-500">CSP-J 2026</div>
+                            {% if age_j2026.eligible %}
+                            <div class="text-lg font-bold text-green-600">✅ 满足</div>
+                            <div class="text-xs text-gray-500">cutoff {{ age_j2026.cutoff_date }}</div>
+                            {% else %}
+                            <div class="text-lg font-bold text-amber-600">⚠️ 不满足</div>
+                            <div class="text-xs text-gray-500">{{ age_j2026.reason }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="border-l pl-4">
+                            <div class="text-xs text-gray-500">CSP-J 2027</div>
+                            {% if age_j2027.eligible %}
+                            <div class="text-lg font-bold text-green-600">✅ 满足</div>
+                            {% else %}
+                            <div class="text-lg font-bold text-amber-600">⚠️ 不满足</div>
+                            <div class="text-xs text-gray-500">差 {{ ((age_j2027.reason.split('差 ')[1].split(' 天')[0])|int) if '差 ' in age_j2027.reason else '?' }} 天</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                <div class="text-right">
+                    <div class="text-xs text-gray-400">demo 出生日期</div>
+                    <div class="text-sm font-mono">2014-05-01</div>
+                    <div class="text-xs text-amber-500 mt-1">⚠️ 兜底值</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- v3.5.2 政策匹配学校库（家长版核心 · 地域+学段→升学路径） -->
+        <div class="bg-white rounded-2xl card-shadow p-5 mb-4 border-l-4 border-emerald-500">
+            <div class="flex items-start justify-between mb-3">
+                <div>
+                    <h2 class="text-base font-bold text-gray-800">
+                        🏫 升学路径匹配
+                        <span class="text-xs text-gray-500 font-normal">（基于 {{ student.city or '城市未填' }} · {{ policy_match.stage_label or student.grade or '—' }}）</span>
+                    </h2>
+                    <p class="text-xs text-gray-500 mt-1">
+                        {% if policy_match.matches %}
+                        当前匹配 <strong class="text-emerald-700">{{ policy_match.match_type_label }}</strong>，共 <strong>{{ policy_match.matches|length }}</strong> 所样板学校
+                        {% else %}
+                        暂无可匹配升学路径（请检查城市/年级是否填写）
+                        {% endif %}
+                    </p>
+                </div>
+                <span class="text-xs px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full">v3.5.2</span>
+            </div>
+
+            {% if policy_match.matches %}
+            <div class="space-y-2">
+                {% for m in policy_match.matches %}
+                <div class="border {% if m.is_recommended %}border-emerald-300 bg-emerald-50/30{% else %}border-gray-200{% endif %} rounded-lg p-3">
+                    <div class="flex items-start justify-between">
+                        <div class="flex-1">
+                            <div class="font-bold text-sm text-gray-800">
+                                {{ loop.index }}. {{ m.school_name }}
+                                {% if m.is_recommended %}
+                                <span class="text-xs px-1.5 py-0.5 bg-emerald-500 text-white rounded ml-1">⭐ 推荐</span>
+                                {% endif %}
+                            </div>
+                            <div class="text-xs text-gray-600 mt-1">
+                                📋 {{ m.policy_summary }}
+                            </div>
+                            <div class="flex gap-3 mt-1.5 text-xs text-gray-500">
+                                <span>👥 招生 {{ m.enrollment_count or '—' }} 人</span>
+                                <span>🎯 {{ m.requires_competition or '—' }}</span>
+                                <span>📍 {{ m.city }}{% if m.city != m.province %} · {{ m.province }}{% endif %}</span>
+                            </div>
+                        </div>
+                        {% if m.policy_url %}
+                        <a href="{{ m.policy_url }}" target="_blank" rel="noopener" class="text-xs text-emerald-600 hover:underline whitespace-nowrap">查看政策 →</a>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            <p class="text-xs text-gray-400 mt-3">
+                💡 数据为样板，v3.5 反向 Scope 限制：仅 6 城中小学/6 城自招高中 + 强基 5 校。
+                升学政策每年可能调整，请以教育局官方简章为准。
+            </p>
+            {% else %}
+            <div class="text-xs text-gray-400 py-2">
+                {% if policy_match.stage == 'college' or policy_match.stage == 'graduated' %}
+                ✅ 学员已毕业，升学匹配结束
+                {% elif policy_match.stage == 'unknown' %}
+                ⚠️ 学段未识别，请确认 {{ student.grade or '—' }} 字段
+                {% else %}
+                ⚠️ 当前城市（{{ student.city or '未填' }}）暂无匹配数据
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- 双 CTA 卡（学而思图 2 左下：课程政策 + 考试赛事） -->
+        <div class="grid grid-cols-2 gap-3 mb-4">
+            <a href="#course-policy" class="bg-white rounded-2xl card-shadow p-5 flex items-center gap-3 hover:shadow-lg transition">
+                <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-white text-2xl">📘</div>
+                <div>
+                    <div class="text-base font-bold text-gray-800">课程政策</div>
+                    <div class="text-xs text-gray-500 mt-1">退课 / 转课 / 续费</div>
+                </div>
+            </a>
+            <a href="#competition-path" class="bg-white rounded-2xl card-shadow p-5 flex items-center gap-3 hover:shadow-lg transition">
+                <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center text-white text-2xl">🏆</div>
+                <div>
+                    <div class="text-base font-bold text-gray-800">考试赛事</div>
+                    <div class="text-xs text-gray-500 mt-1">GESP / CSP / 强基</div>
+                </div>
+            </a>
+        </div>
+
+        <!-- 赛事路径规划（学而思图 2 中段：图标 + 名称 + 一句话价值主张 + CTA） -->
+        <div id="competition-path" class="bg-white rounded-2xl card-shadow p-5 mb-4">
+            <h2 class="text-lg font-bold text-gray-800 mb-3">📅 赛事路径规划</h2>
+            <div class="space-y-3">
+                <!-- GESP -->
+                <div class="flex items-center justify-between p-3 bg-green-50 rounded-xl">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-lg bg-green-600 flex items-center justify-center text-white font-bold">G</div>
+                        <div>
+                            <div class="font-bold text-gray-800">GESP 1-8 级</div>
+                            <div class="text-xs text-gray-600">CCF 编程能力等级认证 · 一年 4 次（3/6/9/12 月）</div>
+                        </div>
+                    </div>
+                    {% if progress and progress.progress_bar %}
+                    <div class="text-right">
+                        <div class="font-mono text-xs text-gray-700">{{ progress.progress_bar }}</div>
+                        <div class="text-xs text-gray-500 mt-1">下次可报：{{ progress.next_eligible_level or 1 }} 级</div>
+                    </div>
+                    {% endif %}
+                </div>
+                <!-- CSP-J -->
+                <div class="flex items-center justify-between p-3 bg-blue-50 rounded-xl">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold">J</div>
+                        <div>
+                            <div class="font-bold text-gray-800">CSP-J 入门级</div>
+                            <div class="text-xs text-gray-600">CCF 非专业级软件能力认证 · 9 月初赛 + 10 月复赛</div>
+                            {% if progress and progress.can_exempt_csp_j %}
+                            <div class="text-xs text-green-600 font-semibold mt-1">🎁 GESP 7 级 80+ 已解锁免初赛</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <span class="text-xs text-gray-400">每年 9/10 月</span>
+                </div>
+                <!-- CSP-S -->
+                <div class="flex items-center justify-between p-3 bg-indigo-50 rounded-xl">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold">S</div>
+                        <div>
+                            <div class="font-bold text-gray-800">CSP-S 提高级</div>
+                            <div class="text-xs text-gray-600">CCF 非专业级软件能力认证 · 难度高于 J</div>
+                            {% if progress and progress.can_exempt_csp_s %}
+                            <div class="text-xs text-green-600 font-semibold mt-1">🎁 GESP 8 级 80+ 已解锁免初赛</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <span class="text-xs text-gray-400">每年 9/10 月</span>
+                </div>
+                <!-- 强基 5 校 -->
+                <div class="flex items-center justify-between p-3 bg-purple-50 rounded-xl">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-lg bg-purple-600 flex items-center justify-center text-white text-lg">🏛️</div>
+                        <div>
+                            <div class="font-bold text-gray-800">强基计划 5 校样板</div>
+                            <div class="text-xs text-gray-600">清北复交浙 · 高考后 6 月校测 · 高考占 85% + 校测 15%</div>
+                        </div>
+                    </div>
+                    <span class="text-xs text-gray-400">每年 3-6 月</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- AI 跳级建议 -->
+        {% if rec and rec.next_eligible_level %}
+        <div class="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-2xl card-shadow p-5 mb-4 border border-blue-200">
+            <h2 class="text-base font-bold text-gray-800 mb-2">🤖 AI 跳级建议</h2>
+            <p class="text-sm text-gray-700 mb-1">主路径：<strong>{{ rec.primary_path }}</strong></p>
+            <p class="text-sm mb-1">推荐：<span class="text-blue-700 font-bold">{{ rec.recommendation }}</span></p>
+            <p class="text-xs text-gray-500">{{ rec.reasoning }}</p>
+        </div>
+        {% endif %}
+
+        <!-- 白名单赛事（教育部 2024 修订） -->
+        <div class="bg-white rounded-2xl card-shadow p-5 mb-4">
+            <h2 class="text-lg font-bold text-gray-800 mb-3">🏛️ 白名单赛事（教育部 2024 修订）</h2>
+            <p class="text-xs text-gray-500 mb-3">教育部公布的 2024-2026 学年面向中小学生的全国性竞赛活动名单 · 信息学相关条目：</p>
+            <div class="space-y-2 text-sm">
+                <div class="flex items-center justify-between p-2 hover:bg-gray-50 rounded">
+                    <span>📌 CCF 非专业级软件能力认证（CSP-J/S）</span>
+                    <span class="text-xs text-green-600 font-semibold">✅ 主办 CCF</span>
+                </div>
+                <div class="flex items-center justify-between p-2 hover:bg-gray-50 rounded">
+                    <span>📌 全国青少年信息学奥林匹克竞赛（NOI）</span>
+                    <span class="text-xs text-green-600 font-semibold">✅ 主办 CCF</span>
+                </div>
+                <div class="flex items-center justify-between p-2 hover:bg-gray-50 rounded">
+                    <span>📌 全国中学生信息学奥林匹克联赛（NOIP）</span>
+                    <span class="text-xs text-green-600 font-semibold">✅ 主办 CCF</span>
+                </div>
+            </div>
+            <p class="text-xs text-gray-400 mt-3">v3.5.1：v3.5 §8 反向 Scope 禁"CCF 规则解读 / 强基 39 校全数据"，故仅列名不解读</p>
+        </div>
+
+        <!-- 4 SKU 付费 CTA（v3.5.1 转化入口） -->
+        <div class="bg-gradient-to-r from-amber-50 to-orange-50 rounded-2xl card-shadow p-5 mb-4 border border-amber-200">
+            <h2 class="text-lg font-bold text-gray-800 mb-3">💎 4 SKU 升级路径</h2>
+            <div class="grid grid-cols-2 gap-3 text-sm">
+                <div class="bg-white rounded-xl p-3 border-2 border-gray-200">
+                    <div class="font-bold text-gray-800">学员 Pro</div>
+                    <div class="text-2xl font-bold text-amber-600 my-1">¥15<span class="text-xs text-gray-500">/月</span></div>
+                    <div class="text-xs text-gray-600">段位图 · 错题本 · StudyMate</div>
+                </div>
+                <div class="bg-white rounded-xl p-3 border-2 border-gray-200">
+                    <div class="font-bold text-gray-800">家长订阅</div>
+                    <div class="text-2xl font-bold text-amber-600 my-1">¥30<span class="text-xs text-gray-500">/月</span></div>
+                    <div class="text-xs text-gray-600">周报 · 倒推 · 政策水印</div>
+                </div>
+                <div class="bg-white rounded-xl p-3 border-2 border-blue-300">
+                    <div class="font-bold text-gray-800">普及组冲刺营</div>
+                    <div class="text-2xl font-bold text-blue-600 my-1">¥99<span class="text-xs text-gray-500">/4 周</span></div>
+                    <div class="text-xs text-gray-600">GESP 7 级 80+ → CSP-J 免初赛</div>
+                </div>
+                <div class="bg-white rounded-xl p-3 border-2 border-purple-300">
+                    <div class="font-bold text-gray-800">提高组冲刺营</div>
+                    <div class="text-2xl font-bold text-purple-600 my-1">¥299<span class="text-xs text-gray-500">/8 周</span></div>
+                    <div class="text-xs text-gray-600">GESP 8 级 80+ → CSP-S 免初赛</div>
+                </div>
+            </div>
+            <p class="text-xs text-gray-500 mt-3 text-center">📮 兑换码请向您的教练索取 · 当前页面（家长订阅 ¥30/月）已包含</p>
+        </div>
+
+        <!-- 课程政策区块（学而思图 2 左下 CTA 落地） -->
+        <div id="course-policy" class="bg-white rounded-2xl card-shadow p-5 mb-4">
+            <h2 class="text-lg font-bold text-gray-800 mb-3">📘 课程政策</h2>
+            <ul class="text-sm text-gray-700 space-y-2">
+                <li class="flex items-start gap-2">
+                    <span class="text-green-500 mt-0.5">✓</span>
+                    <span><strong>退课</strong>：开课 7 天内可全额退，联系您的教练</span>
+                </li>
+                <li class="flex items-start gap-2">
+                    <span class="text-green-500 mt-0.5">✓</span>
+                    <span><strong>转课</strong>：同级任意时段可调，不限次数</span>
+                </li>
+                <li class="flex items-start gap-2">
+                    <span class="text-green-500 mt-0.5">✓</span>
+                    <span><strong>续费</strong>：到期前 7 天邮件 + 短信双提醒</span>
+                </li>
+                <li class="flex items-start gap-2">
+                    <span class="text-green-500 mt-0.5">✓</span>
+                    <span><strong>冲刺营达成</strong>：完成度 ≥ 90% + GESP 真考 80+ → 不达标触发退费建议</span>
+                </li>
+            </ul>
+        </div>
+
+        <!-- 周报列表 -->
+        <div class="bg-white rounded-2xl card-shadow p-5 mb-4">
+            <h2 class="text-lg font-bold text-gray-800 mb-3">📊 家长周报</h2>
+            {% if reports %}
+            <ul class="divide-y divide-gray-100">
+                {% for r in reports %}
+                <li class="py-3 flex items-center justify-between">
+                    <a href="/parent/{{ token }}/report/{{ r.id }}" class="text-blue-600 hover:underline flex items-center gap-2">
+                        <span class="text-lg">📄</span>
+                        <span><strong>{{ r.week_start }}</strong> 周报</span>
+                    </a>
+                    <div class="text-right">
+                        <div class="text-xs text-gray-500">已打开 {{ r.open_count or 0 }} 次</div>
+                        <div class="text-xs text-gray-400">{{ r.delivered_at or '' }}</div>
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p class="text-gray-400 text-sm text-center py-4">尚未生成周报</p>
+            {% endif %}
+        </div>
+
+        <!-- 段位卡（v3.5.1 放底部） -->
+        {% if progress and progress.progress_bar %}
+        <div class="bg-white rounded-2xl card-shadow p-5 mb-4">
+            <h2 class="text-lg font-bold text-gray-800 mb-3">🏆 GESP 段位卡</h2>
+            <div class="font-mono bg-gray-50 p-3 rounded text-sm overflow-x-auto">{{ progress.progress_bar }}</div>
+            <p class="text-sm text-gray-600 mt-3">
+                最近真考: {% if progress.student.gesp_latest_score is not none %}{{ progress.student.gesp_latest_score }} 分{% else %}无{% endif %}
+                · 下次可报: GESP {{ progress.next_eligible_level or 1 }} 级
+            </p>
+            {% if progress.can_exempt_csp_s %}
+            <div class="mt-3 px-3 py-2 bg-purple-100 text-purple-800 rounded text-sm">🎁 已解锁 CSP-J + CSP-S 双免初赛</div>
+            {% elif progress.can_exempt_csp_j %}
+            <div class="mt-3 px-3 py-2 bg-green-100 text-green-800 rounded text-sm">🎁 已解锁 CSP-J 免初赛</div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <!-- 政策水印 + 免责 -->
+        <div class="text-center text-xs text-gray-400 mt-6 mb-4 px-4">
+            <p>📅 政策数据最后更新：{{ policy_last_updated }}（v3.5 §9 风险对冲：30 天未更新将显示水印）</p>
+            <p class="mt-2">本页面基于脱敏数据 · 不含 PII · v3.5.1 家长订阅功能</p>
+            <p class="mt-1">如有疑问请联系您的教练</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+
+PARENT_TOKEN_INVALID_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>家长链接无效</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-6">
+    <div class="bg-white rounded-xl shadow p-8 max-w-md w-full text-center">
+        <h1 class="text-2xl font-bold text-red-700 mb-3">⚠️ 链接无效</h1>
+        <p class="text-gray-600 mb-4">{{ message }}</p>
+        <p class="text-xs text-gray-400">请联系您的教练重新获取家长链接</p>
+    </div>
+</body>
+</html>
+"""
+
+
+PARENT_TOKEN_ENTRY_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>家长端入口 · 信竞 AI 报告</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body{font-family:-appleSystem,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;background:linear-gradient(135deg,#fef3c7 0%,#fef9c3 100%);min-height:100vh;}
+    </style>
+</head>
+<body class="flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-lg p-8 w-full max-w-md">
+        <div class="text-center mb-5">
+            <div class="inline-block px-3 py-1 bg-amber-100 text-amber-700 text-xs rounded-full mb-2">v3.5.2 · 家长端</div>
+            <h1 class="text-2xl font-bold text-gray-800 mb-1">👨‍👩‍👧 家长端入口</h1>
+            <p class="text-sm text-gray-500">输入教练给您的邀请码</p>
+        </div>
+        {% if error %}
+        <div class="mb-4 px-3 py-2 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">⚠️ {{ error }}</div>
+        {% endif %}
+        <form method="POST" class="space-y-3">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">家长邀请码</label>
+                <input type="text" name="token" required minlength="8" maxlength="64"
+                       value="{{ token or '' }}"
+                       placeholder="如：abc123def456"
+                       class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-amber-500 focus:border-amber-500">
+                <p class="text-xs text-gray-400 mt-1">由教练 1v1 邀请分发 · 8 位以上字母数字</p>
+            </div>
+            <button type="submit" class="w-full bg-gradient-to-r from-amber-500 to-amber-600 text-white font-bold py-2.5 rounded-lg hover:from-amber-600 hover:to-amber-700 transition">
+                进入家长面板
+            </button>
+        </form>
+
+        <!-- 加 V 引导（v3.5.2 终态） -->
+        <div class="mt-5 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+            <div class="font-bold mb-1">💬 没有邀请码？</div>
+            <p class="mb-1">加客服微信号 <span class="font-mono font-semibold select-all">xinjing-ai-vip</span>，回复「家长」领取。</p>
+            <p class="text-amber-700 text-xs">工作日 9:00-21:00 · 节假日 10:00-18:00</p>
+        </div>
+
+        <div class="text-center mt-4 text-xs text-gray-400">
+            <a href="/" class="text-amber-600 hover:underline">返回首页</a> · 教练入口 <a href="/coach" class="text-indigo-600 hover:underline">/coach</a>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+
+# 把 ROOT 注入到 _weekly_reports（避免循环导入）
+ROOT = _ROOT  # noqa: F821
 
 
 if __name__ == "__main__":

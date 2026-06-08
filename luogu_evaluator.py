@@ -743,7 +743,7 @@ def build_trusted_data_summary_md(export_data: dict) -> str:
         # item 是 dict（syllabus_matcher 写入），key 为 topic/ac_count/level/difficulty
         d1 = d2 = d3 = d4 = d5 = d6 = d7 = d_blank = 0
         for item in detail_list:
-            # item 是 dict（syllabus_matcher 写入的），key 为 topic/ac_count/level/difficulty
+            # item 是 dict（syllabus_matcher 写入），key 为 topic/ac_count/level/difficulty
             diff = int(item.get("difficulty") or 0) if isinstance(item, dict) else 0
             if diff == 1:
                 d1 += 1
@@ -779,7 +779,7 @@ def build_trusted_data_summary_md(export_data: dict) -> str:
             + _chip("#52C41A", d4, "提高")
             + _chip("#1890FF", n_provincial, "省选")
             + _chip("#2F54EB", d7, "NOI")
-            + _chip("#F5222D", d_blank, "空白")
+            + _chip("#FFFFFF", d_blank, "空白", fg="#9CA3AF", bd="#D1D5DB")
         )
         lines.append(f"<tr><td><strong>{label.split('（')[0].replace('级','')}</strong></td><td>{covered}/{total_topics}</td><td>{coverage}%</td><td>{details}</td></tr>")
 
@@ -2475,6 +2475,9 @@ def main():
 
             summary = _summarize(all_passed_problems, tag_by_id=tag_by_id)
             # 构建 tag → 题目难度列表（用于估算每个知识点的平均难度）
+            # 关键修复：prob.tags 是 List[int]（tag ID），而 top_tags 的 name 是中文名，
+            # 之前用 str(tag) 作为 key 会得到 "1"/"353" 这种 ID 串，跟中文 name 匹配不上。
+            # 必须用 tag_by_id 把 ID 转成中文名，否则 _match_topic 永远匹配失败。
             tag_difficulty_map: dict[str, list[int]] = {}
             for prob in all_passed_problems:
                 d = getattr(prob, "difficulty", None)
@@ -2487,7 +2490,11 @@ def main():
                 if di <= 0:
                     continue
                 for tag in (getattr(prob, "tags", None) or []):
-                    tag_name = str(tag).strip()
+                    try:
+                        tag_id = int(tag)
+                    except (TypeError, ValueError):
+                        continue
+                    tag_name = str(tag_by_id.get(tag_id) or "").strip()
                     if not tag_name:
                         continue
                     tag_difficulty_map.setdefault(tag_name, []).append(di)

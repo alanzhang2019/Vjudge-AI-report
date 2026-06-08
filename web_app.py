@@ -404,6 +404,28 @@ INDEX_HTML = """
         .app-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
         .app-space{margin-bottom:14px;}
         .app-small{font-size:12px;opacity:.9;}
+        /* Cookie guide mock (self-contained DevTools schematic) */
+        .cg-mock{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;color:#1f2937;font-size:11px;}
+        .cg-titlebar{background:#e5e7eb;padding:5px 8px;display:flex;align-items:center;gap:6px;border-bottom:1px solid #d1d5db;}
+        .cg-dot{width:9px;height:9px;border-radius:50%;display:inline-block;}
+        .cg-r{background:#ef4444;} .cg-y{background:#eab308;} .cg-g{background:#22c55e;}
+        .cg-url{flex:1;background:#fff;border:1px solid #d1d5db;border-radius:3px;padding:2px 8px;font-size:10.5px;color:#4b5563;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+        .cg-tabs{display:flex;background:#f3f4f6;border-bottom:1px solid #d1d5db;font-size:10.5px;color:#6b7280;overflow-x:auto;}
+        .cg-tab{padding:5px 10px;border-right:1px solid #e5e7eb;white-space:nowrap;}
+        .cg-tab.cg-on{background:#fff;color:#2563eb;font-weight:700;border-bottom:2px solid #2563eb;}
+        .cg-body{display:flex;background:#fff;min-height:160px;}
+        .cg-tree{flex:0 0 44%;border-right:1px solid #e5e7eb;padding:6px 8px;font-size:11px;line-height:1.55;color:#374151;}
+        .cg-indent{padding-left:10px;}
+        .cg-indent-2{padding-left:22px;}
+        .cg-sel{background:#fef3c7;padding:1px 5px;border-radius:2px;color:#92400e;}
+        .cg-tip{color:#9ca3af;font-size:10px;margin-left:2px;}
+        .cg-table{flex:1;padding:0;font-size:11px;}
+        .cg-th{background:#f9fafb;padding:4px 8px;font-weight:600;border-bottom:1px solid #e5e7eb;color:#6b7280;font-size:10.5px;}
+        .cg-tr{padding:4px 8px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;gap:6px;}
+        .cg-tr.cg-hl{background:#fef3c7;}
+        .cg-tr.cg-hl b{color:#b45309;}
+        .cg-val{color:#9ca3af;font-size:10px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+        .cg-tag{background:#fbbf24;color:#78350f;font-size:9.5px;padding:1px 6px;border-radius:8px;font-weight:700;letter-spacing:.5px;flex-shrink:0;}
     </style>
 </head>
 <body class="app-body bg-gray-100 min-h-screen flex items-center justify-center p-4">
@@ -430,9 +452,40 @@ INDEX_HTML = """
                 <li>在洛谷页面 <span class="font-semibold">右键 → 检查</span> → <kbd class="px-1 bg-yellow-100 rounded">Application(应用)</kbd> → <kbd class="px-1 bg-yellow-100 rounded">Storage(存储) → Cookies</kbd> → <code>https://www.luogu.com.cn</code></li>
                 <li>复制以下三个参数的 Name/Value 填入下方：</li>
             </ol>
-            <details class="mt-2 text-xs text-yellow-700">
-                <summary class="cursor-pointer select-none hover:text-yellow-900">📷 查看指引图（点击展开）</summary>
-                <img src="/static/luogu-cookies-guide.png" alt="洛谷 Cookies 获取指引图" class="mt-2 rounded-md border border-yellow-300 w-full max-w-full" loading="lazy" onerror="this.style.display='none'">
+            <details class="mt-2 text-xs text-yellow-700" open>
+                <summary class="cursor-pointer select-none hover:text-yellow-900">📷 查看指引图（点击展开 / 折叠）</summary>
+                <div class="cg-mock mt-2 rounded-md border border-yellow-300 overflow-hidden bg-white">
+                    <div class="cg-titlebar">
+                        <span class="cg-dot cg-r"></span>
+                        <span class="cg-dot cg-y"></span>
+                        <span class="cg-dot cg-g"></span>
+                        <span class="cg-url">🔒 https://www.luogu.com.cn</span>
+                    </div>
+                    <div class="cg-tabs">
+                        <span class="cg-tab">Elements</span>
+                        <span class="cg-tab">Console</span>
+                        <span class="cg-tab">Sources</span>
+                        <span class="cg-tab cg-on">Application</span>
+                        <span class="cg-tab">Network</span>
+                    </div>
+                    <div class="cg-body">
+                        <div class="cg-tree">
+                            <div>▸ Manifest</div>
+                            <div>▸ Service Workers</div>
+                            <div><b>▾ Storage</b></div>
+                            <div class="cg-indent"><b>▾ Cookies</b> <span class="cg-tip">← 展开</span></div>
+                            <div class="cg-indent-2"><span class="cg-sel">https://www.luogu.com.cn</span> <span class="cg-tip">← 点击</span></div>
+                            <div>▸ IndexedDB</div>
+                            <div>▸ Local Storage</div>
+                        </div>
+                        <div class="cg-table">
+                            <div class="cg-th">Name ▲ &nbsp; Value</div>
+                            <div class="cg-tr cg-hl"><span><b>__client_id</b></span><span class="cg-val">yf0bzf404…</span><span class="cg-tag">复制</span></div>
+                            <div class="cg-tr cg-hl"><span><b>_uid</b></span><span class="cg-val">582694</span><span class="cg-tag">复制</span></div>
+                            <div class="cg-tr cg-hl"><span><b>C3VK</b></span><span class="cg-val">ee7002…</span><span class="cg-tag">复制</span></div>
+                        </div>
+                    </div>
+                </div>
                 <p class="text-[11px] text-yellow-600 mt-1">提示：在已登录的洛谷页面按下 F12 也可呼出 DevTools，效果与右键检查一致。</p>
             </details>
         </div>

@@ -514,6 +514,18 @@ INDEX_HTML = """
 <body class="app-body p-4">
 <div class="max-w-4xl mx-auto py-6 space-y-4">
 
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="space-y-2">
+        {% for category, message in messages %}
+        <div class="app-box {% if category == 'warning' %}app-box-yellow{% elif category == 'error' %}app-box-red{% elif category == 'success' %}app-box-green{% else %}app-box-blue{% endif %}">
+            {{ message }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% endwith %}
+
     <!-- 顶部品牌 -->
     <div class="app-card text-center">
         <div class="inline-block px-3 py-1 bg-emerald-100 text-emerald-700 text-xs rounded-full mb-2">v3.5.2 · 选手成长平台</div>
@@ -832,18 +844,32 @@ def build_retry_form_snapshot(form: dict | None = None) -> dict[str, str]:
 
 
 def load_retry_form_snapshot(task: dict | None) -> dict[str, str]:
-    if not isinstance(task, dict):
-        return {}
-    raw_json = str(task.get("retry_form_json", "") or "").strip()
-    if not raw_json:
-        return {}
-    try:
-        payload = json.loads(raw_json)
-    except Exception:
-        return {}
-    if not isinstance(payload, dict):
-        return {}
-    return build_retry_form_snapshot(payload)
+    """读出"返回重试"所需的表单快照
+
+    优先级：
+      1) task.retry_form_json（v3.5.2+ 写入，包含完整 11 字段）
+      2) task 学生字段（student_name / school / grade）兜底
+         → 老 task 没存 retry_form_json 时，至少回填这三个字段，
+           让用户少填一遍，cookies 仍需补全
+    """
+    snapshot: dict[str, str] = {}
+    if isinstance(task, dict):
+        raw_json = str(task.get("retry_form_json", "") or "").strip()
+        if raw_json:
+            try:
+                payload = json.loads(raw_json)
+                if isinstance(payload, dict):
+                    snapshot = build_retry_form_snapshot(payload)
+            except Exception:
+                snapshot = {}
+        # 兜底：把 task 里能直接拿到的字段补上
+        if not snapshot.get("student_name") and task.get("student_name"):
+            snapshot["student_name"] = str(task.get("student_name") or "")
+        if not snapshot.get("school") and task.get("school"):
+            snapshot["school"] = str(task.get("school") or "")
+        if not snapshot.get("grade") and task.get("grade"):
+            snapshot["grade"] = str(task.get("grade") or "")
+    return snapshot
 
 
 def can_resume_from_ai_stage(task: dict | None) -> bool:
@@ -1659,12 +1685,16 @@ def status_page(task_id):
 
 @app.route("/retry/<task_id>")
 def retry_task(task_id):
-    task = get_task(task_id)
+    task = get_task(task_id) or {}
     snapshot = load_retry_form_snapshot(task)
+    # 即使 snapshot 为空（cookies 等未缓存），也至少把学生基础字段回填并提示
     if not snapshot:
         return redirect("/")
     if can_resume_from_ai_stage(task):
         snapshot["resume_task_id"] = task_id
+    # 兜底：若没有完整 retry_form_json（老 task 缺 cookies 缓存），flash 提示
+    if not str(task.get("retry_form_json", "") or "").strip():
+        flash("已自动回填「姓名 / 学校 / 年级」，Cookies / API Key 仍需补全后再生成。", "warning")
     return render_index(form=snapshot)
 
 

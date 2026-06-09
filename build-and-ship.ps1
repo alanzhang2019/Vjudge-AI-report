@@ -1,4 +1,4 @@
-# ============================================================================
+﻿# ============================================================================
 # luogu-AI-report 本地构建 + 推送（Windows）
 # 用法（在 PowerShell 里）：
 #   .\build-and-ship.ps1                                      # 默认：build 当前分支 -> tar -> scp -> ssh 调 deploy-image.sh
@@ -22,7 +22,8 @@ param(
     [string]$TagSuffix = "",         # 留空 = 自动用 <branch>-<hash>
     [switch]$SkipBuild,
     [switch]$OnlyTar,
-    [switch]$NoPush                 # build + tar + 留本地，不上传
+    [switch]$NoPush,                # build + tar + 留本地，不上传
+    [switch]$DryRun                 # 干跑：打印所有会做的事，不真 build/save/scp
 )
 
 $ErrorActionPreference = "Stop"
@@ -38,6 +39,10 @@ function Write-Err($msg)  { Write-Host "[ERR] $msg" -ForegroundColor Red }
 
 function Test-Docker {
     Write-Step "检查 docker 可用性..."
+    if ($DryRun) {
+        Write-Warn "DryRun 模式：跳过 docker daemon 检查"
+        return
+    }
     $docker = Get-Command docker -ErrorAction SilentlyContinue
     if (-not $docker) {
         Write-Err "找不到 docker 命令"
@@ -50,6 +55,7 @@ function Test-Docker {
     } catch {
         Write-Err "Docker daemon 不可用：$($_.Exception.Message)"
         Write-Warn "Windows 上需要在管理员 PowerShell 跑（Docker Desktop 需要 elevated shell）"
+        Write-Warn "如需快速预览整个流程，先启 Docker Desktop 后再跑，或加 -DryRun 走 mock 路径"
         exit 1
     }
     Write-OK "docker OK"
@@ -153,6 +159,16 @@ Write-Step "image tag: $imageTag"
 Write-Step "tar 路径:  $tarPath"
 
 # 3. build + save
+if ($DryRun) {
+    Write-Warn "DryRun：不真 build，只打印计划"
+    Write-Host "  → docker build -t $imageTag -f Dockerfile ."
+    Write-Host "  → docker tag  $imageTag luogu-ai-report/webapp:latest"
+    Write-Host "  → docker save -o $tarPath $imageTag"
+    Write-Host "  → scp $tarPath ${Server}:${RemoteDir}/webapp-image.tar"
+    Write-Host "  → ssh $Server '$RemoteDir/deploy-image.sh up --tar webapp-image.tar --tag $imageTag'"
+    Write-OK "DryRun 结束（未真执行任何 docker/scp/ssh 命令）"
+    exit 0
+}
 if (-not $SkipBuild) {
     New-Image -ImageTag $imageTag -TarPath $tarPath
 } else {

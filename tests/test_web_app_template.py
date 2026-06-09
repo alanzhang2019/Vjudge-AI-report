@@ -98,6 +98,8 @@ class TestWebAppTemplate(unittest.TestCase):
         flask.url_for = lambda *args, **kwargs: ""
         flask.send_from_directory = lambda *args, **kwargs: ""
         flask.send_file = lambda *args, **kwargs: types.SimpleNamespace(headers={})
+        flask.session = {}
+        flask.flash = lambda *args, **kwargs: None
 
         original_flask = sys.modules.get("flask")
         original_web_app = sys.modules.pop("web_app", None)
@@ -141,6 +143,8 @@ class TestWebAppTemplate(unittest.TestCase):
         flask.url_for = lambda *args, **kwargs: ""
         flask.send_from_directory = lambda *args, **kwargs: ""
         flask.send_file = lambda *args, **kwargs: types.SimpleNamespace(headers={})
+        flask.session = {}
+        flask.flash = lambda *args, **kwargs: None
 
         original_flask = sys.modules.get("flask")
         original_web_app = sys.modules.pop("web_app", None)
@@ -185,6 +189,8 @@ class TestWebAppTemplate(unittest.TestCase):
         flask.url_for = lambda *args, **kwargs: ""
         flask.send_from_directory = lambda *args, **kwargs: ""
         flask.send_file = lambda *args, **kwargs: types.SimpleNamespace(headers={})
+        flask.session = {}
+        flask.flash = lambda *args, **kwargs: None
 
         original_flask = sys.modules.get("flask")
         original_web_app = sys.modules.pop("web_app", None)
@@ -229,6 +235,8 @@ class TestWebAppTemplate(unittest.TestCase):
         flask.url_for = lambda *args, **kwargs: ""
         flask.send_from_directory = lambda *args, **kwargs: ""
         flask.send_file = lambda *args, **kwargs: types.SimpleNamespace(headers={})
+        flask.session = {}
+        flask.flash = lambda *args, **kwargs: None
 
         original_flask = sys.modules.get("flask")
         original_web_app = sys.modules.pop("web_app", None)
@@ -293,6 +301,8 @@ class TestWebAppTemplate(unittest.TestCase):
         flask.url_for = lambda *args, **kwargs: ""
         flask.send_from_directory = lambda *args, **kwargs: ""
         flask.send_file = lambda *args, **kwargs: types.SimpleNamespace(headers={})
+        flask.session = {}
+        flask.flash = lambda *args, **kwargs: None
 
         original_flask = sys.modules.get("flask")
         original_web_app = sys.modules.pop("web_app", None)
@@ -373,6 +383,8 @@ class TestWebAppTemplate(unittest.TestCase):
         flask.url_for = lambda *args, **kwargs: ""
         flask.send_from_directory = lambda *args, **kwargs: ""
         flask.send_file = lambda *args, **kwargs: types.SimpleNamespace(headers={})
+        flask.session = {}
+        flask.flash = lambda *args, **kwargs: None
 
         original_flask = sys.modules.get("flask")
         original_web_app = sys.modules.pop("web_app", None)
@@ -472,6 +484,8 @@ class TestWebAppTemplate(unittest.TestCase):
         flask.send_from_directory = lambda *args, **kwargs: ""
         flask.send_file = lambda *args, **kwargs: types.SimpleNamespace(headers={})
         flask.session = {}
+        flask.flash = lambda *args, **kwargs: None
+        flask.session = {}
 
         original_flask = sys.modules.get("flask")
         original_web_app = sys.modules.pop("web_app", None)
@@ -526,6 +540,7 @@ class TestWebAppTemplate(unittest.TestCase):
         flask.url_for = lambda endpoint, **kwargs: f"/{endpoint}?notice={kwargs.get('notice','')}&notice_type={kwargs.get('notice_type','')}"
         flask.send_from_directory = lambda *args, **kwargs: ""
         flask.send_file = lambda *args, **kwargs: types.SimpleNamespace(headers={})
+        flask.flash = lambda *args, **kwargs: None
         flask.session = {"admin_authed": True, "admin_user": "admin"}
 
         original_flask = sys.modules.get("flask")
@@ -569,6 +584,7 @@ class TestWebAppTemplate(unittest.TestCase):
         flask.url_for = lambda endpoint, **kwargs: f"/{endpoint}"
         flask.send_from_directory = lambda *args, **kwargs: ""
         flask.send_file = lambda *args, **kwargs: types.SimpleNamespace(headers={})
+        flask.flash = lambda *args, **kwargs: None
         flask.session = {"admin_authed": True, "admin_user": "admin"}
 
         original_flask = sys.modules.get("flask")
@@ -623,6 +639,8 @@ class TestWebAppTemplate(unittest.TestCase):
         flask.send_from_directory = lambda *args, **kwargs: types.SimpleNamespace(headers={})
         flask.send_file = lambda *args, **kwargs: types.SimpleNamespace(headers={})
         flask.session = {}
+        flask.flash = lambda *args, **kwargs: None
+        flask.session = {}
 
         original_flask = sys.modules.get("flask")
         original_web_app = sys.modules.pop("web_app", None)
@@ -668,6 +686,7 @@ class TestWebAppTemplate(unittest.TestCase):
         flask.url_for = lambda endpoint, **kwargs: f"/{endpoint}"
         flask.send_from_directory = lambda *args, **kwargs: types.SimpleNamespace(headers={})
         flask.send_file = lambda *args, **kwargs: types.SimpleNamespace(headers={})
+        flask.flash = lambda *args, **kwargs: None
         flask.session = {"admin_authed": True, "admin_user": "admin"}
 
         original_flask = sys.modules.get("flask")
@@ -756,6 +775,8 @@ class TestWebAppTemplate(unittest.TestCase):
         flask.send_from_directory = lambda *args, **kwargs: types.SimpleNamespace(headers={})
         flask.send_file = lambda *args, **kwargs: types.SimpleNamespace(headers={})
         flask.session = {}
+        flask.flash = lambda *args, **kwargs: None
+        flask.session = {}
 
         original_flask = sys.modules.get("flask")
         original_web_app = sys.modules.pop("web_app", None)
@@ -796,6 +817,8 @@ class TestWebAppTemplate(unittest.TestCase):
         flask.url_for = lambda endpoint, **kwargs: f"/{endpoint}"
         flask.send_from_directory = lambda *args, **kwargs: types.SimpleNamespace(headers={})
         flask.send_file = lambda *args, **kwargs: types.SimpleNamespace(headers={})
+        flask.session = {}
+        flask.flash = lambda *args, **kwargs: None
         flask.session = {}
 
         original_flask = sys.modules.get("flask")
@@ -850,6 +873,8 @@ class TestWebAppTemplate(unittest.TestCase):
         flask.url_for = lambda endpoint, **kwargs: f"/{endpoint}/{kwargs.get('task_id', '')}".rstrip("/")
         flask.send_from_directory = lambda *args, **kwargs: types.SimpleNamespace(headers={})
         flask.send_file = lambda *args, **kwargs: types.SimpleNamespace(headers={})
+        flask.session = {}
+        flask.flash = lambda *args, **kwargs: None
         flask.session = {}
 
         original_flask = sys.modules.get("flask")
@@ -912,6 +937,8 @@ class TestWebAppTemplate(unittest.TestCase):
         flask.send_from_directory = lambda *args, **kwargs: types.SimpleNamespace(headers={})
         flask.send_file = lambda *args, **kwargs: types.SimpleNamespace(headers={})
         flask.session = {}
+        flask.flash = lambda *args, **kwargs: None
+        flask.session = {}
 
         original_flask = sys.modules.get("flask")
         original_web_app = sys.modules.pop("web_app", None)
@@ -953,6 +980,8 @@ class TestWebAppTemplate(unittest.TestCase):
         flask.url_for = lambda endpoint, **kwargs: f"/{endpoint}"
         flask.send_from_directory = lambda *args, **kwargs: types.SimpleNamespace(headers={})
         flask.send_file = lambda *args, **kwargs: types.SimpleNamespace(headers={})
+        flask.session = {}
+        flask.flash = lambda *args, **kwargs: None
         flask.session = {}
 
         original_flask = sys.modules.get("flask")
@@ -1021,6 +1050,8 @@ class TestWebAppTemplate(unittest.TestCase):
         flask.send_from_directory = lambda *args, **kwargs: types.SimpleNamespace(headers={})
         flask.send_file = lambda *args, **kwargs: types.SimpleNamespace(headers={})
         flask.session = {}
+        flask.flash = lambda *args, **kwargs: None
+        flask.session = {}
 
         original_flask = sys.modules.get("flask")
         original_web_app = sys.modules.pop("web_app", None)
@@ -1057,7 +1088,7 @@ class TestWebAppTemplate(unittest.TestCase):
                 web_app.load_resume_export_data = lambda task_id: (export_data, {"task_id": task_id})
                 web_app.update_task = lambda task_id, **kwargs: updates.append(kwargs)
                 web_app.unregister_active_generation_task = lambda task_id: None
-                web_app.generate_ai_report = lambda data, api_key, base_url, model_name: "# AI Report"
+                web_app.generate_ai_report = lambda data, api_key, base_url, model_name, output_path=None, resume_prefix=None: "# AI Report"
                 web_app.generate_chart_images = lambda data, assets_dir: {"difficulty": str(Path(assets_dir) / "difficulty.png")}
 
                 def fake_build_html_and_pdf(report_md, data, html_path, pdf_path, chart_paths):

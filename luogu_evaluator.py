@@ -789,6 +789,39 @@ def build_trusted_data_summary_md(export_data: dict) -> str:
         ]
     )
 
+    # ------------------------------------------------------------------
+    # 掌握度判定标准小节（独立 H2）
+    # 重要：必须用 H2 而非 H3。normalize_report_markdown 会用
+    # "^## 知识点覆盖统计表（按算法标签）..." 整块吞掉 AI 重复生成的统计表，
+    # "掌握度判定标准"作为同级 H2 不会被吞，会原样保留。
+    # ------------------------------------------------------------------
+    def _legend_chip(c: dict, name: str) -> str:
+        """无数字的纯色块图例（用于判定标准表的"颜色图例"列）。"""
+        border = f"border:1px solid {c.get('bd','')};" if c.get('bd') else ""
+        return (
+            f'<span style="display:inline-block;padding:2px 12px;'
+            f'border-radius:6px;background:{c["fill"]};color:{c["fg"]};'
+            f'{border}font-size:12px;font-weight:600;">{name}</span>'
+        )
+
+    lines.append("")
+    lines.append("## 掌握度判定标准（5 档）")
+    lines.append(
+        '<table><thead><tr>'
+        '<th>掌握度</th><th>判定标准（AC 题目数）</th><th>颜色图例</th>'
+        '</tr></thead><tbody>'
+    )
+    for name, rule in _MASTERY_RULES:
+        chip = _legend_chip(_MASTERY_COLOR[name], name)
+        lines.append(
+            f'<tr><td><strong>{name}</strong></td><td>{rule}</td><td>{chip}</td></tr>'
+        )
+    lines.append("</tbody></table>")
+    lines.append(
+        "- 口径说明：5 档阈值是『知识点覆盖统计表』中『掌握度分布』列的统一判定标准；"
+        "AC = 实际通过的题目数（去重）；『空白』档使用灰色警示色，提示该知识点未接触。"
+    )
+
     # 知识树图谱（HTML 块，python-markdown 会原样保留到最终 HTML）
     # 关键：包一层 page-break + 大标题，让它独占一页、视觉上不会被表格吞掉
     # 注：python-markdown 默认不解析 <div> 内的 markdown 语法，所以直接用 <h2>
@@ -823,6 +856,18 @@ _DIFF_TIER: dict[int, dict] = {
     6: dict(name="省选/NOI-", fill="#722ED1", fg="#FFFFFF", bd="#531DAB"),
     7: dict(name="NOI/NOI+/CTSC", fill="#2F54EB", fg="#FFFFFF", bd="#1D39C4"),
 }
+
+# 掌握度 5 档 → AC 题目数判定阈值（单一来源）
+# 顺序敏感：判定时从高到低匹配（精通 → 空白），与 _MASTERY_VIS / _MASTERY_COLOR 对齐。
+# 报告中的"掌握度判定标准"小节直接读取本表渲染，_level_for_ac() 同步遵守。
+# 备注：AC = 实际通过的题目数（去重），与"知识点覆盖统计表"中的 AC 口径一致。
+_MASTERY_RULES: list[tuple[str, str]] = [
+    ("精通", "AC ≥ 20 道"),
+    ("熟练", "10 ≤ AC ≤ 19"),
+    ("入门", "3  ≤ AC ≤ 9"),
+    ("初窥", "1  ≤ AC ≤ 2"),
+    ("空白", "AC = 0（警示色：未接触该知识点）"),
+]
 
 # 掌握度 → 果子半径（r 越大 = AC 越多 = 掌握越好）
 # 最小 r=6 仍清晰可辨；最大 r=18
@@ -883,6 +928,8 @@ def _classify_topic(topic: str) -> str:
 
 
 def _level_for_ac(ac_count: int) -> str:
+    # ⚠️ 阈值与 _MASTERY_RULES 强绑定，修改时务必同步更新二者
+    # （"掌握度判定标准"小节和"知识点覆盖统计表-掌握度分布"列都基于此）。
     if ac_count >= 20:
         return "精通"
     if ac_count >= 10:

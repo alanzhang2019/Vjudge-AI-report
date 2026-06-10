@@ -20,7 +20,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "docs"))
 
 from gesp_estimator import (  # noqa: E402
     compute_exemptions,

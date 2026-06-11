@@ -7037,6 +7037,158 @@ STUDENT_ME_HTML = """
 """
 
 
+REPORT_PREVIEW_HTML = r"""<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="robots" content="noindex">
+<meta property="og:type" content="article">
+<meta property="og:title" content="{{ student_name }} 的洛谷 AI 测评报告">
+<meta property="og:image" content="/me/{{ luogu_uid }}/share-card.png">
+<title>{{ student_name }} 的洛谷 AI 测评报告</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+       background: linear-gradient(180deg, #f0fdf4 0%, #ffffff 100%); }
+.glass { backdrop-filter: blur(8px); background: rgba(255,255,255,0.85); }
+</style>
+</head>
+<body class="min-h-screen">
+
+<header class="sticky top-0 z-40 glass border-b border-gray-200">
+  <div class="max-w-[480px] mx-auto px-4 py-3 flex items-center justify-between">
+    <div class="text-sm font-bold text-emerald-700">🌱 洛谷 AI 测评</div>
+    <a href="/?ref={{ ref or '' }}" class="text-xs bg-emerald-600 text-white px-3 py-1.5 rounded-full font-bold">✨ 免费生成</a>
+  </div>
+</header>
+
+<main class="max-w-[480px] mx-auto px-4 py-5">
+
+  {% if not has_report %}
+  <div class="bg-white rounded-2xl shadow p-8 text-center mt-8">
+    <div class="text-5xl mb-3">📭</div>
+    <h1 class="text-lg font-bold text-gray-800 mb-2">该选手暂未生成报告</h1>
+    <p class="text-sm text-gray-500 mb-5">UID {{ luogu_uid }} · 暂无 AI 测评数据</p>
+    <a href="/?ref={{ ref or '' }}" class="inline-block px-5 py-2.5 bg-emerald-600 text-white text-sm font-bold rounded-lg">✨ 立即生成我的报告</a>
+  </div>
+  {% else %}
+
+  <section class="bg-gradient-to-br from-emerald-50 via-white to-amber-50 rounded-2xl shadow p-5 text-center">
+    <div class="text-xs text-gray-500 mb-1">洛谷 UID</div>
+    <div class="text-2xl font-extrabold text-gray-800 mb-3 font-mono">{{ luogu_uid }}</div>
+    <div class="text-xs text-amber-700 font-bold mb-1">AI 评测分</div>
+    <div class="text-5xl font-extrabold text-amber-600 my-2">
+      {{ achievements.ai_score_thousand if achievements.ai_score_thousand is not none else '—' }}
+      <span class="text-base text-gray-500 font-normal">/1000</span>
+    </div>
+    <div class="text-sm font-bold text-amber-700">{{ achievements.ai_score_label or '—' }}</div>
+    <div class="grid grid-cols-3 gap-2 mt-4 text-center text-xs">
+      <div class="bg-white/60 rounded-lg p-2"><div class="text-gray-500">错题</div><div class="text-base font-bold text-red-600 mt-0.5">{{ achievements.mistakes|length }}</div></div>
+      <div class="bg-white/60 rounded-lg p-2"><div class="text-gray-500">GESP 段位</div><div class="text-base font-bold text-emerald-600 mt-0.5">—</div></div>
+      <div class="bg-white/60 rounded-lg p-2"><div class="text-gray-500">能力维度</div><div class="text-base font-bold text-blue-600 mt-0.5">{{ achievements.six_dim|length }} 维</div></div>
+    </div>
+  </section>
+
+  {% if ai_summary %}
+  <section class="mt-4 bg-purple-50 border border-purple-200 rounded-2xl p-4">
+    <div class="text-xs text-purple-700 font-bold mb-1.5">💡 AI 一句话总结</div>
+    <p class="text-sm text-gray-700 leading-relaxed">{{ ai_summary }}</p>
+  </section>
+  {% endif %}
+
+  {% if achievements.six_dim %}
+  <section class="mt-4 bg-white rounded-2xl shadow p-5">
+    <h2 class="text-sm font-bold text-gray-800 mb-3">📊 6 维能力评分</h2>
+    <div class="space-y-2">
+      {% for k, v in achievements.six_dim.items() %}
+      <div class="flex items-center gap-2 text-xs">
+        <div class="w-20 text-gray-600 text-right">{{ k }}</div>
+        <div class="flex-1 bg-gray-100 rounded-full h-2.5 overflow-hidden">
+          <div class="h-full rounded-full {% if v >= 75 %}bg-green-500{% elif v >= 55 %}bg-emerald-400{% elif v >= 40 %}bg-amber-400{% else %}bg-red-400{% endif %}"
+               style="width: {{ v }}%"></div>
+        </div>
+        <div class="w-10 text-right font-mono font-bold {% if v >= 75 %}text-green-700{% elif v >= 55 %}text-emerald-700{% elif v >= 40 %}text-amber-700{% else %}text-red-700{% endif %}">{{ v }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  {% if achievements.mistakes %}
+  <section class="mt-4 bg-white rounded-2xl shadow p-5">
+    <h2 class="text-sm font-bold text-gray-800 mb-3">🎯 错题本预览（Top {{ achievements.mistakes|length }}）</h2>
+    <div class="space-y-2">
+      {% for m in achievements.mistakes[:3] %}
+      <div class="border border-gray-200 rounded-lg p-2.5">
+        <div class="flex items-center gap-1.5 flex-wrap text-xs">
+          <span class="text-gray-400 font-mono">#{{ m.idx }}</span>
+          {% if m.problem_id %}<span class="font-bold text-blue-700">{{ m.problem_id }}</span>{% endif %}
+          <span class="font-bold text-gray-800">{{ m.title }}</span>
+          {% if m.source %}<span class="text-[10px] px-1 py-0.5 bg-purple-100 text-purple-700 rounded">{{ m.source }}</span>{% endif %}
+        </div>
+        {% if m.summary %}<div class="text-xs text-gray-600 mt-1">💡 {{ m.summary[:60] }}{% if m.summary|length > 60 %}…{% endif %}</div>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  {% if suggestions %}
+  <section class="mt-4 bg-gradient-to-br from-amber-50 to-yellow-50 border border-amber-200 rounded-2xl p-4">
+    <h2 class="text-sm font-bold text-amber-800 mb-2">🎯 训练建议</h2>
+    <ul class="space-y-1.5 text-sm text-gray-700">
+      {% for s in suggestions %}
+      <li class="flex gap-2"><span class="text-amber-600 font-bold">✓</span><span>{{ s }}</span></li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  <section class="mt-5 grid grid-cols-1 md:grid-cols-2 gap-3">
+    <a href="/reports/{{ luogu_uid }}/report.html" target="_blank"
+       class="block bg-white border-2 border-emerald-600 rounded-xl p-4 text-center hover:bg-emerald-50">
+      <div class="text-2xl mb-1">🔍</div>
+      <div class="text-sm font-bold text-emerald-700">看完整 AI 报告</div>
+      <div class="text-[10px] text-gray-500 mt-1">在新窗口打开 · HTML 版</div>
+    </a>
+    <a href="/?ref={{ ref or luogu_uid }}"
+       class="block bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl p-4 text-center text-white shadow-lg hover:from-emerald-600">
+      <div class="text-2xl mb-1">✨</div>
+      <div class="text-sm font-bold">生成你的报告</div>
+      <div class="text-[10px] text-emerald-100 mt-1">3 分钟拿到 AI 测评</div>
+    </a>
+  </section>
+
+  {% endif %}
+
+  <section class="mt-6 text-center text-xs text-gray-400">
+    <p>🌱 已为 100+ 位信竞家长提供 AI 测评服务</p>
+    <p class="mt-1">家长分享 · 报告内容仅展示 UID，不含个人隐私</p>
+  </section>
+
+  <footer class="mt-6 pt-4 border-t border-gray-200 text-center text-xs text-gray-400 pb-24">
+    <a href="/" class="hover:text-emerald-600 mx-2">首页</a>·
+    <a href="/about" class="hover:text-emerald-600 mx-2">关于</a>·
+    <a href="/privacy" class="hover:text-emerald-600 mx-2">隐私</a>
+    <p class="mt-2">© 2026 洛谷 AI 测评 · 让数据帮孩子少走弯路</p>
+  </footer>
+</main>
+
+{% if has_report %}
+<div class="fixed bottom-0 inset-x-0 z-30 md:hidden bg-white/95 backdrop-blur border-t border-gray-200 p-3 shadow-2xl">
+  <a href="/?ref={{ ref or luogu_uid }}"
+     class="block w-full text-center px-5 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 text-white text-sm font-bold rounded-xl">
+    ✨ 免费生成我的报告（3 分钟）
+  </a>
+</div>
+{% endif %}
+
+</body>
+</html>
+"""
+
+
 REGISTER_INVALID_HTML = """
 <!DOCTYPE html>
 <html lang="zh-CN">

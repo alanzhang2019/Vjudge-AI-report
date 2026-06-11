@@ -1,4 +1,5 @@
 import os
+from markupsafe import Markup
 import json
 import uuid
 import threading
@@ -285,7 +286,7 @@ def _app_skin_head() -> str:
 
     设计目标：所有页面与 INDEX_HTML 风格一致（emerald/teal 主色 + 浅绿渐变背景）。
     """
-    return _APP_SKIN_CSS
+    return Markup(_APP_SKIN_CSS)
 
 
 # 注册到 Jinja2 全局，所有 render_template_string 调用都能直接用 {{ app_skin_head() }}
@@ -4131,8 +4132,7 @@ GENERATE_FORM_HTML = """
         .app-btn-primary{background:linear-gradient(135deg,#059669 0%,#0d9488 100%);color:#fff;border:none;}
         .app-btn-primary:hover{transform:translateY(-1px);box-shadow:0 8px 20px rgba(5,150,105,.3);}
     </style>
-    {{ app_skin_head() }}
-</head>
+    </head>
 <body class="app-body p-4">
 <div class="max-w-2xl mx-auto py-6 space-y-4">
 

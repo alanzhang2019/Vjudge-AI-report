@@ -1797,15 +1797,38 @@ def serve_static(filename):
 
 @app.route("/reports/<path:filename>")
 def serve_report(filename):
+    # v3.7 · 可见性拦截（PDF 默认隐藏，HTML 公开）
+    rel = f"reports/{filename}"
+    visible, reason = _check_file_visibility(rel)
+    if not visible:
+        return (
+            f"""<!doctype html><html><head><meta charset="utf-8">
+<title>暂未开放</title>
+<style>body{{font-family:sans-serif;max-width:480px;margin:80px auto;
+padding:0 20px;text-align:center;color:#444}}
+h1{{font-size:18px;color:#dc2626}}
+p{{font-size:14px;line-height:1.6}}</style></head>
+<body><h1>🔒 {reason}</h1>
+<p>如需查看报告内容，请通过家长分享的海报扫码进入在线版。</p>
+<p><a href="/">← 返回首页</a></p>
+</body></html>""",
+            403,
+            {"Content-Type": "text/html; charset=utf-8"},
+        )
+
     report_root = (_ROOT / "reports").resolve()
     file_path = (report_root / filename).resolve()
     try:
         file_path.relative_to(report_root)
     except ValueError:
-        return send_from_directory(str(report_root), filename)
+        return ("Forbidden", 403)
 
-    if file_path.suffix.lower() == ".pdf" and file_path.is_file():
-        response = send_file(
+    if not file_path.is_file():
+        return ("Not Found", 404)
+
+    if file_path.suffix.lower() == ".pdf":
+        from flask import send_file as _send_file
+        response = _send_file(
             str(file_path),
             mimetype="application/pdf",
             as_attachment=False,

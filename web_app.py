@@ -1715,7 +1715,8 @@ STATUS_HTML = """
         {% elif status == 'done' %}
         <div class="space-y-3">
             <a href="{{ html }}" target="_blank" class="block w-full bg-blue-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-blue-700 transition">查看 HTML 报告</a>
-            <a href="{{ pdf }}" target="_blank" class="block w-full bg-gray-700 text-white font-semibold py-2 px-4 rounded-md hover:bg-gray-800 transition">下载 PDF 报告</a>
+            {# v3.7 · PDF 暂未开放：灰显按钮，强制走海报分享 #}
+            <button type="button" disabled class="block w-full bg-gray-200 text-gray-500 font-semibold py-2 px-4 rounded-md cursor-not-allowed" title="v3.7 PDF 暂未开放 · 请用海报分享">🔒 PDF 暂未开放</button>
             <a href="{{ md }}" target="_blank" class="block w-full bg-gray-200 text-gray-800 font-semibold py-2 px-4 rounded-md hover:bg-gray-300 transition">查看 Markdown 原文</a>
             {% if me_url %}
             {# v3.6 修复：点击"最终生成家长订阅版"按钮 → 直接 POST 触发生成（不再跳到 API key 表单页） #}
@@ -1743,6 +1744,31 @@ STATUS_HTML = """
     </div>
 </body>
 </html>
+"""
+
+
+# v3.7 · 报告列表的「单行模板」（admin 后台 / 状态页共用）
+# - PDF 链接灰显：v3.7 PDF 暂未开放（生成但不下载，强制走海报分享）
+# - HTML / MD 保持原样可用
+LIST_REPORTS_HTML = """
+{# 单个报告在列表中的一行（含 HTML / PDF / MD 三个操作 pill） #}
+<td class="px-6 py-3 space-x-2">
+  {% if task.html %}
+  <a href="{{ task.html }}" target="_blank" class="text-blue-600 hover:underline text-xs">HTML</a>
+  {% endif %}
+  {# v3.7 · PDF 灰显 pill：暂不开放，引导走海报分享 #}
+  {% if task.pdf %}
+  <span class="text-xs px-2 py-1 bg-gray-200 text-gray-500 rounded cursor-not-allowed" title="v3.7 暂未开放 PDF 版本">🔒 PDF 暂未开放</span>
+  {% endif %}
+  {% if task.md %}
+  <a href="{{ task.md }}" target="_blank" class="text-blue-600 hover:underline text-xs">MD</a>
+  {% endif %}
+  {% if task.can_rebuild %}
+  <form method="post" action="/admin/rebuild-html/{{ task.id }}" class="inline">
+    <button type="submit" class="text-xs text-indigo-600 hover:underline">重建 HTML</button>
+  </form>
+  {% endif %}
+</td>
 """
 
 
@@ -2133,7 +2159,8 @@ ADMIN_HTML = """
                                 <a href="{{ task.html }}" target="_blank" class="text-blue-600 hover:underline text-xs">HTML</a>
                                 {% endif %}
                                 {% if task.pdf %}
-                                <a href="{{ task.pdf }}" target="_blank" class="text-blue-600 hover:underline text-xs">下载PDF</a>
+                                {# v3.7 · PDF 暂未开放：灰显 pill，强制走海报分享 #}
+                                <span class="text-xs px-2 py-1 bg-gray-200 text-gray-500 rounded cursor-not-allowed" title="v3.7 暂未开放 PDF 版本">🔒 PDF 暂未开放</span>
                                 {% endif %}
                                 {% if task.md %}
                                 <a href="{{ task.md }}" target="_blank" class="text-blue-600 hover:underline text-xs">MD</a>

@@ -57,3 +57,10 @@ class TestStudentMePdfGray(unittest.TestCase):
         from web_app import STUDENT_ME_HTML
         for k in ["PDF 暂未开放", "请用海报分享", "🔒"]:
             self.assertIn(k, STUDENT_ME_HTML, f"missing: {k}")
+
+
+class TestListReportsPdfGray(unittest.TestCase):
+    def test_contains_pdf_disabled_pill(self):
+        from web_app import LIST_REPORTS_HTML
+        for k in ["PDF 暂未开放", "未开放"]:
+            self.assertIn(k, LIST_REPORTS_HTML, f"missing: {k}")

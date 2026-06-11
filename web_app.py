@@ -5290,6 +5290,37 @@ def _extract_ai_summary(report_md: str) -> str:
     return text
 
 
+def _extract_top_suggestions(report_md: str) -> list[str]:
+    """v3.7 · 从 report.md 第 9 节「训练建议」抓 ≤3 条 bullet。
+
+    锚点变体：## 九、训练建议 / ## 9. 训练建议 / ## 训练建议
+    bullet 形如：- xxx / * xxx / • xxx
+    缺节时返回 []。
+    """
+    if not report_md:
+        return []
+    import re as _re
+    m = _re.search(
+        r"^#{2,4}\s*[（(]?[一二三四五六七八九十\d]+[)）、\.]?\s*训练建议.*?$",
+        report_md, _re.M,
+    )
+    if not m:
+        m = _re.search(r"^#{2,4}\s*[（(]?\d+[)）]?\s*[^\n]*建议[^\n]*$", report_md, _re.M)
+        if not m:
+            return []
+    body = report_md[m.end():]
+    end_m = _re.search(r"^#{2,3}\s+[一二三四五六七八九十\d]", body, _re.M)
+    section = body[: end_m.start() if end_m else len(body)]
+    bullets = _re.findall(r"^\s*[-*•]\s+(.+?)\s*$", section, _re.M)
+    cleaned = []
+    for b in bullets[:3]:
+        text = _re.sub(r"\*\*?(.+?)\*\*?", r"\1", b)
+        text = _re.sub(r"\s+", " ", text).strip()
+        if text:
+            cleaned.append(text)
+    return cleaned
+
+
 def _extract_ai_evaluation_from_report(report_md: str) -> dict:
     """从 report.md 抽取 AI 测评内容（v3.6 · 关键修复）
 

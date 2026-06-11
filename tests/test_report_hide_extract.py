@@ -73,3 +73,34 @@ class TestExtractAiSummary(unittest.TestCase):
         out = _extract_ai_summary(md)
         self.assertIn("子解读细节", out)
         self.assertIn("继续主体内容", out)
+
+
+from web_app import _extract_top_suggestions
+
+
+SAMPLE_SUGGESTIONS = """# 报告
+
+## 九、训练建议
+
+- 优先补「动态规划」专项训练，建议每周 3 题
+- 错题本：贪心/构造可专项突破
+- GESP 7 级已具备，建议冲 8 级免 CSP-J 初赛
+- 暂时不考虑
+
+## 十、错题
+"""
+
+
+class TestExtractTopSuggestions(unittest.TestCase):
+    def test_empty_report(self):
+        self.assertEqual(_extract_top_suggestions(""), [])
+
+    def test_extracts_three_bullets(self):
+        out = _extract_top_suggestions(SAMPLE_SUGGESTIONS)
+        self.assertEqual(len(out), 3)
+        self.assertIn("动态规划", out[0])
+
+    def test_truncates_to_three(self):
+        md = "## 九、训练建议\n\n" + "\n".join(f"- 建议 {i}" for i in range(10)) + "\n\n## 十、"
+        out = _extract_top_suggestions(md)
+        self.assertEqual(len(out), 3)

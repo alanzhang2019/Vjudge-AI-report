@@ -127,7 +127,29 @@ from task_store import (
     get_task,
     list_tasks,
     get_stats,
+    _get_conn,
 )
+
+
+def _init_report_hides_table() -> None:
+    """v3.7 · 幂等创建 report_hides 表（PDF 隐藏标记）。"""
+    conn = _get_conn()
+    try:
+        conn.executescript("""
+        CREATE TABLE IF NOT EXISTS report_hides (
+            task_id     TEXT PRIMARY KEY,
+            hide_pdf    INTEGER NOT NULL DEFAULT 1,
+            hide_html   INTEGER NOT NULL DEFAULT 0,
+            ref_uid     TEXT,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at  TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_report_hides_ref ON report_hides(ref_uid);
+        """)
+        conn.commit()
+    finally:
+        conn.close()
+
 
 app = Flask(__name__)
 app.secret_key = (
@@ -135,6 +157,12 @@ app.secret_key = (
     or os.environ.get("FLASK_SECRET_KEY")
     or "luogu-ai-report-admin-secret-change-me"
 )
+
+# v3.7 · report_hides 表初始化（幂等）
+try:
+    _init_report_hides_table()
+except Exception as _e:
+    print(f"[v3.7] report_hides init warning: {_e}")
 
 # 任务状态锁（数据库操作线程安全）
 TASKS_LOCK = threading.Lock()

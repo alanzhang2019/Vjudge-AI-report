@@ -1,4 +1,5 @@
 import unittest
+import textwrap
 from web_app import _extract_ai_summary
 
 
@@ -28,8 +29,10 @@ class TestExtractAiSummary(unittest.TestCase):
     def test_truncates_to_200_chars(self):
         long = "### （一）AI 核心解读\n\n" + "测试" * 500 + "\n\n## 二、"
         out = _extract_ai_summary(long)
-        self.assertLessEqual(len(out), 200)
+        # 截断后追加省略号「…」,故最大长度为 200 + 1 = 201
+        self.assertLessEqual(len(out), 201)
         self.assertGreater(len(out), 0)
+        self.assertTrue(out.endswith("…"))
 
     def test_returns_empty_when_section_missing(self):
         out = _extract_ai_summary("""# 报告
@@ -38,3 +41,35 @@ class TestExtractAiSummary(unittest.TestCase):
 选手是小学生。
 """)
         self.assertEqual(out, "")
+
+    def test_none_input(self):
+        self.assertEqual(_extract_ai_summary(None), "")
+
+    def test_multiple_sections_returns_first(self):
+        md = textwrap.dedent("""\
+            ### （一）AI 核心解读
+
+            第一节内容，包含重要信息。
+
+            ### （二）AI 核心解读
+
+            第二节内容，不应被返回。
+        """)
+        out = _extract_ai_summary(md)
+        self.assertIn("第一节", out)
+        self.assertNotIn("第二节", out)
+
+    def test_section_with_h4_subhead(self):
+        md = textwrap.dedent("""\
+            ### （一）AI 核心解读
+
+            主体内容第一段。
+
+            #### 子解读细节
+
+            这里是 h4 子标题，不应终止 section。
+            继续主体内容。
+        """)
+        out = _extract_ai_summary(md)
+        self.assertIn("子解读细节", out)
+        self.assertIn("继续主体内容", out)

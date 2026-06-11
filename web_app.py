@@ -5277,15 +5277,17 @@ def _extract_ai_summary(report_md: str) -> str:
     if not m:
         return ""
     body = report_md[m.end():]
-    # 抓下一个二级或三级标题之前
-    end_m = _re.search(r"^#{2,4}\s+\S+", body, _re.M)
+    # 抓下一个二级或三级标题之前（仅 h2/h3 + 可选括号 + 中文/数字序号，避免 #### 子标题误终止）
+    end_m = _re.search(r"^#{2,3}\s+[（(]?[一二三四五六七八九十\d]", body, _re.M)
     section = body[: end_m.start() if end_m else len(body)]
     # 去掉 markdown 标记 / 多余空白
     text = _re.sub(r"\*\*?(.+?)\*\*?", r"\1", section)
     text = _re.sub(r"`([^`]+)`", r"\1", text)
     text = _re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", text)
     text = _re.sub(r"\s+", " ", text).strip()
-    return text[:200]
+    if len(text) > 200:
+        text = text[:200].rstrip() + "…"
+    return text
 
 
 def _extract_ai_evaluation_from_report(report_md: str) -> dict:

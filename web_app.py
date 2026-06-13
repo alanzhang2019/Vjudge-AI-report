@@ -221,8 +221,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.9.10"
-APP_VERSION_BUILD = "20260614_v3p9p10"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.9.11"
+APP_VERSION_BUILD = "20260614_v3p9p11"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -1602,6 +1602,21 @@ RETRY_FORM_FIELDS = (
 )
 
 
+def _detect_401_invalid_api_key(task: dict | None) -> bool:
+    """v3.9.11 · 检测任务失败原因是否为 OpenAI 401 invalid api key
+
+    任务 message 字段会记录错误，例如：
+      "[阶段: 生成 AI 报告] AuthenticationError: ... 'message': 'invalid api key ...' [status code=401] ..."
+    """
+    if not isinstance(task, dict):
+        return False
+    msg = str(task.get("message", "") or "")
+    if not msg:
+        return False
+    needles = ("401", "invalid api key", "authentication_error", "Incorrect API key")
+    return any(n in msg for n in needles)
+
+
 def build_retry_form_snapshot(form: dict | None = None) -> dict[str, str]:
     src = form or {}
     return {field: str(src.get(field, "") or "") for field in RETRY_FORM_FIELDS}
@@ -2531,6 +2546,17 @@ STATUS_HTML = """
             </div>
         </div>
         {% endif %}
+        {# v3.9.11 · 401 错误专项提示：让用户知道是 Key 的问题、不是 cookies / 网络的问题 #}
+        {% if is_401_api_key %}
+        <div class="mb-4 rounded-lg border-2 border-rose-300 bg-rose-50 p-4 text-left text-sm">
+            <p class="font-bold text-rose-800 mb-1">🔑 错误原因：OpenAI 拒绝请求（HTTP 401 invalid api key）</p>
+            <ul class="text-rose-700 text-xs space-y-1 list-disc list-inside">
+                <li>您的 API Key 已被 OpenAI 拒绝（key 删除 / 余额耗尽 / 复制漏字符）</li>
+                <li>👉 点击下方「返回表单」后，页面会自动滚到「API Key」输入框并用红色高亮</li>
+                <li>改完后直接点「立即生成」即可，cookies / 姓名等都已自动回填</li>
+            </ul>
+        </div>
+        {% endif %}
         <p class="text-gray-700 mb-6">{{ message }}</p>
         {% if task_type == 'parent_subscribe' %}
         <div class="mb-4 text-left">
@@ -2773,6 +2799,8 @@ def status_page(task_id):
         tag_fetch_total=int(task.get("tag_fetch_total", 0) or 0),
         ai_progress=int(task.get("ai_progress", 0) or 0),
         ai_elapsed_seconds=int(task.get("ai_elapsed_seconds", 0) or 0),
+        # v3.9.11 · 401 错误标记：让 status_page 顶部显示专项提示
+        is_401_api_key=_detect_401_invalid_api_key(task),
         html=task.get("html", ""),
         pdf=_download_report_url(pdf_url),
         md=task.get("md", ""),
@@ -2832,10 +2860,21 @@ def retry_task(task_id):
         snapshot["resume_task_id"] = task_id
 
     # 提示
+    is_401 = _detect_401_invalid_api_key(task)
     if not str(task.get("retry_form_json", "") or "").strip():
         flash(
             "已自动回填「姓名 / 学校 / 年级」，Cookies / API Key 仍需补全后再生成。",
             "warning",
+        )
+    elif is_401:
+        # v3.9.11 · 401 专项引导：清空 api_key + 顶部红色提示 + 跳锚点
+        snapshot["api_key"] = ""  # 强制让用户重填
+        flash(
+            "🔑 您的 OpenAI API Key 已被 OpenAI 拒绝（401 invalid api key）。\n"
+            "· 请检查 Key 是否已删除 / 余额不足 / 复制时漏字符\n"
+            "· 修正后，页面会自动滚动到「API Key」输入框并高亮等待填入\n"
+            "· Cookies / 姓名 / 学校等已自动回填，不用重新输入",
+            "error",
         )
     else:
         flash(
@@ -2851,6 +2890,8 @@ def retry_task(task_id):
         server_key_hint=_get_server_key_hint(),
         gesp_default_year=date.today().year,
         validation_result=None,
+        # v3.9.11 · 401 时表单自动滚动到 api_key 字段 + 自动获得焦点
+        focus_api_key=is_401,
     )
 
 
@@ -5639,7 +5680,25 @@ GENERATE_FORM_HTML = """
         .app-btn{width:100%;font-weight:800;border-radius:10px;padding:12px 16px;transition:all .15s ease;cursor:pointer;font-size:15px;}
         .app-btn-primary{background:linear-gradient(135deg,#059669 0%,#0d9488 100%);color:#fff;border:none;}
         .app-btn-primary:hover{transform:translateY(-1px);box-shadow:0 8px 20px rgba(5,150,105,.3);}
+        {# v3.9.11 · 401 invalid api key 时的输入框高亮 + 脉冲动画（提示用户改这里） #}
+        .api-key-alert{border:2px solid #ef4444 !important;box-shadow:0 0 0 4px rgba(239,68,68,.18) !important;animation:key-pulse 1.6s ease-in-out infinite;}
+        .api-key-alert:focus{border-color:#dc2626 !important;box-shadow:0 0 0 4px rgba(220,38,38,.28) !important;}
+        @keyframes key-pulse{0%,100%{box-shadow:0 0 0 4px rgba(239,68,68,.18);}50%{box-shadow:0 0 0 8px rgba(239,68,68,.32);}}
     </style>
+    {% if focus_api_key %}
+    {# v3.9.11 · 自动滚动到 api_key 字段 + 弹出提示 "已为您定位" #}
+    <script>
+    window.addEventListener('load', function() {
+        try {
+            var el = document.getElementById('api_key');
+            if (el) {
+                el.scrollIntoView({behavior: 'smooth', block: 'center'});
+                el.focus();
+            }
+        } catch (e) { console.error('focus_api_key err:', e); }
+    });
+    </script>
+    {% endif %}
     </head>
 <body class="app-body p-4">
 <div class="max-w-2xl mx-auto py-6 space-y-4">
@@ -5943,12 +6002,17 @@ GENERATE_FORM_HTML = """
         </details>
 
         <!-- 4. OpenAI 配置（可选） -->
-        <details class="field-section">
+        <details class="field-section" {% if focus_api_key %}open{% endif %}>
             <summary class="cursor-pointer text-sm font-bold text-gray-600 hover:text-emerald-600">🤖 4. OpenAI 配置（可选 · 留空使用服务端默认）</summary>
             <div class="space-y-2 mt-3">
                 <div>
                     <label class="app-label">API Key</label>
-                    <input type="password" name="api_key" value="{{ form.get('api_key','') }}" class="app-input mt-1" placeholder="sk-...">
+                    {# v3.9.11 · id="api_key" 锚点 + 401 时 autofocus + 红边高亮 #}
+                    <input type="password" id="api_key" name="api_key"
+                           value="{{ form.get('api_key','') }}"
+                           {% if focus_api_key %}autofocus{% endif %}
+                           class="app-input mt-1 {% if focus_api_key %}api-key-alert{% endif %}"
+                           placeholder="sk-...">
                 </div>
                 <div class="grid grid-cols-2 gap-3">
                     <div>

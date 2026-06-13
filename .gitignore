@@ -176,3 +176,20 @@ deploy-pkg.zip
 # 镜像化部署产物
 webapp-*.tar
 webapp-image.tar
+
+# v3.9.4 · 编辑器/诊断/部署残渣（git push 前自动清理）
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+check_*.ps1
+commit_now.ps1
+decode_b64.ps1
+git_check.ps1
+git_diag.txt
+git_status.ps1
+push_result.txt
+report_md.b64
+report_md_latest.txt
+"tatus --short"

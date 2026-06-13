@@ -2604,9 +2604,9 @@ def generate_parent_subscribe(
             from task_store import _get_conn as _ts_get_conn, match_school_for_student
             conn = _ts_get_conn()
             try:
-                # 学籍档案（含性别、生日、学校、城市）
+                # 学籍档案（含性别、生日、学校、城市、年级）v3.9 增强：加 province
                 stu_row = conn.execute(
-                    "SELECT id, real_name, gender, birth_date, school, city, grade "
+                    "SELECT id, real_name, gender, birth_date, school, city, grade, province "
                     "FROM students WHERE luogu_uid = ?",
                     (str(luogu_uid).strip(),),
                 ).fetchone()
@@ -2664,9 +2664,10 @@ def generate_parent_subscribe(
                         )
                     profile_block_lines = [
                         f"- 姓名：{sd.get('real_name') or '未填'}",
-                        f"- 性别/年龄：{'男' if (sd.get('gender') or '').upper() == 'M' else '女' if (sd.get('gender') or '').upper() == 'F' else '未填'} / {age_str or '未填生日'}",
-                        f"- 学校：{sd.get('school') or '未填'}",
-                        f"- 城市/年级：{sd.get('city') or '未填'} / {sd.get('grade') or '未填'}",
+                        f"- 性别/年龄：{'男' if (sd.get('gender') or '').upper() == 'M' else '女' if (sd.get('gender') or '').upper() == 'F' else '未填'} / {age_str or '暂未填生日'}",
+                        f"- 学校：{sd.get('school') or '暂未填学校'}",
+                        f"- 城市/省份：{sd.get('city') or '暂未填城市'} / {sd.get('province') or '暂未填省份'}",
+                        f"- 年级：{sd.get('grade') or '未填'}",
                         f"- 累计洛谷：通过 {solved} 题，未通过 {failed} 题",
                     ]
                     if gesp_lines:
@@ -2720,11 +2721,19 @@ def generate_parent_subscribe(
         "  - 给出**具体动作**（如『每周刷 10 道贪心』），不要『加强训练』这种空话\n"
         "  - 涉及未来时间点用『距您家孩子还有 N 年』\n"
         "  - 决策建议必须给 2-3 个分支，**不要假设一定要走 OI**\n"
-        "**必须**在分析中**显式引用**下方【选手完整档案】中的所有数据：\n"
+        "**根据**下方【选手完整档案】和【当地升学政策】中的现有数据自然生成报告：\n"
         "  - 学校/城市/年级/年龄 → 影响升学窗口与目标校选择\n"
         "  - GESP/CSP/NOIP/NOI 历年奖项 → 影响『已具备什么能力 / 还要补什么』\n"
-        "  - 当地升学政策 + 目标学校政策 → 章节 3 必须**逐条引用**，给家长『具体哪所学校要什么奖』\n"
+        "  - 当地升学政策 + 目标学校政策 → 章节 3 引用政策原文，给家长『具体哪所学校要什么奖』\n"
         "  - 已通过/未通过题数 → 评估学习曲线\n"
+        "  - 字段未填（如未参加 GESP）→ 用『该学员暂未参加』表述，**不要**输出'数据缺失/拉取失败/校验失败'等任何警示性文字\n"
+        "  - 当地政策未匹配到具体学校 → 推荐家长查看当地教育局/目标校官网当年招生简章\n"
+        "**严禁**输出以下任何内容：\n"
+        "  - ✗『档案数据校验』类提示\n"
+        "  - ✗『数据拉取失败』类提示\n"
+        "  - ✗『无法引用 X 信息』类警告\n"
+        "  - ✗『报告仅供参考』类免责声明（章节 5 末尾统一加一行水印即可）\n"
+        "  - ✗『AI 无法保证准确性』类自谦话术\n"
         "输出格式：Markdown，必须严格按以下 5 个 H2 章节输出，缺一不可：\n"
         "## 1. 学习进度评估（家长版）\n"
         "## 2. 学习规划建议（短/中/长期）\n"

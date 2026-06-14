@@ -6526,20 +6526,48 @@ def redeem_code():
                             # 3. 激活：更新 redeemed_at + student_id
                             conn = _get_conn()
                             try:
+                                # v3.9.26 · duration_days=0 表示"不限期"（不立即过期），
+                                # 设 expires_at=NULL。否则 query 中 `expires_at > now` 立即失败，
+                                # parent_invite 用户刚激活就被判定"已过期"，has_parent_sub 永远 False。
+                                _dur = int(row_dict.get("duration_days") or 0)
+                                if _dur <= 0:
+                                    _expires_sql = "NULL"
+                                else:
+                                    _expires_sql = f"datetime('now', '+{_dur} days')"
                                 conn.execute(
-                                    "UPDATE activation_codes "
-                                    "SET redeemed_at = datetime('now'), "
-                                    "    student_id = ?, "
-                                    "    expires_at = datetime('now', '+' || duration_days || ' days') "
-                                    "WHERE code = ?",
+                                    f"UPDATE activation_codes "
+                                    f"SET redeemed_at = datetime('now'), "
+                                    f"    student_id = ?, "
+                                    f"    expires_at = {_expires_sql} "
+                                    f"WHERE code = ?",
                                     (stu["id"], code),
                                 )
+                                # v3.9.26 · parent_invite 是「家长订阅邀请码」(0 元 · 客服手动派发)，
+                                # 激活时等价于同时激活一份 30 天 parent_sub 订阅。
+                                # 原因：v3.9 之前生成的 parent_invite 邀请码只 bind 到 student_id，
+                                # 不会让 has_parent_sub(SKU='parent_sub') 通过 → AI 讲题页仍显示「需家长订阅」🔒。
+                                # 此举对已激活的 6 个 parent_invite 码（id 16/17/18/19/20/21）
+                                # 同样安全：INSERT OR IGNORE 用新 code 不与旧码冲突，user 重新激活时才走这里。
+                                sku_value = row_dict.get("sku", "parent_sub")
+                                if sku_value == "parent_invite":
+                                    _auto_code = f"AUTO-{code}-{stu['id']}"
+                                    conn.execute(
+                                        "INSERT OR IGNORE INTO activation_codes "
+                                        "(code, sku, duration_days, student_id, redeemed_at, expires_at, created_by) "
+                                        "VALUES (?, 'parent_sub', 30, ?, "
+                                        "        datetime('now'), datetime('now', '+30 days'), 'auto-from-parent_invite')",
+                                        (_auto_code, stu["id"]),
+                                    )
+                                    app.logger.info(
+                                        f"[redeem] parent_invite {code} 已绑定到 sid={stu['id']} uid={student_uid}，"
+                                        f"并自动创建 30 天 parent_sub 订阅（_auto_code={_auto_code}）"
+                                    )
                                 conn.commit()
                             finally:
                                 conn.close()
                             success = {
                                 "code": code,
-                                "sku": row_dict.get("sku", "parent_sub"),
+                                "sku": sku_value,
                                 "student_uid": student_uid,
                             }
             except Exception as e:
@@ -8046,7 +8074,7 @@ def studymate_ai_tutor():
             row = conn.execute(
                 "SELECT COUNT(*) AS n FROM activation_codes ac "
                 "JOIN students s ON s.id = ac.student_id "
-                "WHERE ac.sku = 'parent_sub' AND s.luogu_uid = ? "
+                "WHERE ac.sku IN ('parent_sub', 'parent_invite') AND s.luogu_uid = ? "
                 "AND ac.redeemed_at IS NOT NULL "
                 "AND (ac.expires_at IS NULL OR ac.expires_at > datetime('now'))",
                 (str(luogu_uid).strip(),),
@@ -8336,7 +8364,7 @@ def student_me(luogu_uid: str):
             row = conn.execute(
                 "SELECT COUNT(*) AS n FROM activation_codes ac "
                 "JOIN students s ON s.id = ac.student_id "
-                "WHERE ac.sku = 'parent_sub' AND s.luogu_uid = ? "
+                "WHERE ac.sku IN ('parent_sub', 'parent_invite') AND s.luogu_uid = ? "
                 "AND ac.redeemed_at IS NOT NULL "
                 "AND (ac.expires_at IS NULL OR ac.expires_at > datetime('now'))",
                 (str(luogu_uid).strip(),),

@@ -8780,7 +8780,7 @@ STUDENT_ME_LITE_HTML = r"""
                     <div class="text-xs text-amber-700 font-bold">⭐ AI 评测分（千分制）</div>
                     {% if achievements.ai_score_thousand is not none %}
                     <div class="text-4xl font-extrabold text-amber-700 mt-1">{{ achievements.ai_score_thousand }}</div>
-                    <div class="text-xs text-amber-600 mt-1">{{ achievements.ai_score_label }} · 满分 1000</div>
+                    <div class="text-xs text-amber-600 mt-1 px-1 break-words leading-snug">{{ achievements.ai_score_label }} · 满分 1000</div>
                     {% else %}
                     <div class="text-3xl font-extrabold text-gray-300 mt-1">—</div>
                     <div class="text-xs text-gray-400 mt-1">暂未生成 AI 报告</div>
@@ -10176,16 +10176,30 @@ def _extract_achievements_from_report(report_md: str) -> dict:
     if not report_md:
         return out
 
-    # 1) 6 维评分：兼容两种格式
+    # 1) 6 维评分：兼容多种格式
     six_dim_keys = ["基础算法", "数据结构", "图论", "动态规划", "字符串", "数学"]
     for k in six_dim_keys:
-        # 格式 A（旧）：`| **基础算法** | **72** | ...`
+        m = None
+        # 格式 A（旧）：`| **基础算法** | **72** | ...`（key 与 score 都加粗）
         m = _re.search(rf"\*\*\s*{_re.escape(k)}\s*\*\*\s*\|\s*\*\*\s*(\d+)\s*\*\*", report_md)
         if not m:
-            # 格式 B（新）：`| 基础算法 | 72 | ...`
+            # 格式 B（新报告）：`| **基础算法** | 95 | ...`（仅 key 加粗，score 数字未加粗）
+            m = _re.search(
+                rf"\*\*\s*{_re.escape(k)}\s*\*\*\s*\|\s*\*?\s*(\d{{1,3}})\s*\|",
+                report_md,
+            )
+        if not m:
+            # 格式 C（新报告纯文本）：`| 基础算法 | 72 | ...`（无加粗）
             m = _re.search(
                 rf"\|\s*{_re.escape(k)}\s*\|\s*(\d{{1,3}})\s*\|",
                 report_md,
+            )
+        if not m:
+            # 格式 D：HTML 行内 `<td><b>基础算法</b></td><td>95</td>`（SVG 报告兜底）
+            m = _re.search(
+                rf"<(?:b|strong)>\s*{_re.escape(k)}\s*</(?:b|strong)>\s*</td>\s*<td[^>]*>\s*(\d{{1,3}})\s*</td>",
+                report_md,
+                _re.IGNORECASE,
             )
         if m:
             try:
@@ -11598,7 +11612,7 @@ STUDENT_ME_HTML = """
                     <div class="text-xs text-amber-700 font-bold" title="数据来源: {{ achievements.report_dir or '暂无' }}">📊 能力总分（6 维均分 × 10）</div>
                     {% if achievements.ai_score_thousand is not none %}
                     <div class="text-4xl font-extrabold text-amber-700 mt-1">{{ achievements.ai_score_thousand }}</div>
-                    <div class="text-xs text-amber-600 mt-1">{{ achievements.ai_score_label }} · 满分 1000</div>
+                    <div class="text-xs text-amber-600 mt-1 px-1 break-words leading-snug">{{ achievements.ai_score_label }} · 满分 1000</div>
                     {# v3.9.31 · label 区分数据源（之前「AI 报告未生成」红色警示容易让人以为 723 是瞎编的） #}
                     {% if achievements.six_dim_source == 'export_data' %}
                     <div class="text-[10px] text-sky-700 mt-1.5 bg-sky-50 rounded px-1.5 py-0.5">
@@ -11972,7 +11986,7 @@ REPORT_PREVIEW_HTML = r"""<!doctype html>
       {{ achievements.ai_score_thousand if achievements.ai_score_thousand is not none else '—' }}
       <span class="text-base text-gray-500 font-normal">/1000</span>
     </div>
-    <div class="text-sm font-bold text-amber-700">{{ achievements.ai_score_label or '—' }}</div>
+    <div class="text-sm font-bold text-amber-700 px-2 break-words leading-snug">{{ achievements.ai_score_label or '—' }}</div>
     <div class="grid grid-cols-3 gap-2 mt-4 text-center text-xs">
       <div class="bg-white/60 rounded-lg p-2"><div class="text-gray-500">错题</div><div class="text-base font-bold text-red-600 mt-0.5">{{ achievements.mistakes|length }}</div></div>
       <div class="bg-white/60 rounded-lg p-2">

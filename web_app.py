@@ -2629,7 +2629,8 @@ STATUS_HTML = """
                              class="w-28 h-28 border border-amber-200 rounded bg-white p-1 flex-shrink-0" />
                         <div class="text-[11px] text-amber-700 leading-relaxed flex-1">
                             📞 <strong>邀请码获取方式：</strong>
-                            <ol class="list-decimal pl-4 mt-1 space-y-0.5">
+                            {# v3.9.24 · 改 list-inside + 去掉 pl-4：旧版 numbers 排在 li 外面，配合 pl-4 把序号挤到左侧 QR 区域，看上去「1.2.3.4.」和文字分两列。list-inside 把序号收回文字前，与 li 文本对齐。 #}
+                            <ol class="list-decimal list-inside mt-1 space-y-0.5 marker:font-bold marker:text-amber-800">
                                 <li>微信扫码左侧二维码</li>
                                 <li>添加客服为好友</li>
                                 <li>备注"<strong>家长订阅</strong>"</li>

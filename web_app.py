@@ -8358,9 +8358,10 @@ def student_me(luogu_uid: str):
                 achievements.update(ext)
                 achievements["report_dir"] = latest.name
                 # v3.9.19 · report.md 读到了但 6 维/错题为空 → 兜底 export_data.json
+                # v3.9.22 · 改成"逐字段"补全：之前是"6 维+错题都空才触发"，但 report.md 经常
+                #   有错题没 6 维（或反之），导致漏 6 维时一直空白。
                 # 原因：AI 报告格式漂移、prompt 改了导致提取不到。export_data 是数据源，最权威。
-                _need_fb = (not ext.get("six_dim")) and (not ext.get("mistakes"))
-                if _need_fb and (latest / "export_data.json").exists():
+                if (latest / "export_data.json").exists():
                     _ext_fb = _extract_achievements_from_export_data(latest)
                     # 只补缺失字段（已从 report.md 读到的优先保留）
                     if not ext.get("six_dim") and _ext_fb.get("six_dim"):
@@ -8370,7 +8371,10 @@ def student_me(luogu_uid: str):
                     if not ext.get("ai_score_thousand") and _ext_fb.get("ai_score_thousand"):
                         achievements["ai_score_thousand"] = _ext_fb["ai_score_thousand"]
                         achievements["ai_score_label"] = f"预估 {_ext_fb['ai_score_thousand']}/1000（AI 报告未提取到，6 维兜底自 export_data）"
-                    achievements["is_partial"] = True
+                    # 只要 fallback 触发过，就标 partial（影响标题/警示语）
+                    if (_ext_fb.get("six_dim") and not ext.get("six_dim")) or \
+                       (_ext_fb.get("mistakes") and not ext.get("mistakes")):
+                        achievements["is_partial"] = True
             else:
                 # v3.9.17 · report.md 是 0 字节（AI 失败），从 export_data.json 兜底
                 ext = _extract_achievements_from_export_data(latest)
@@ -8582,6 +8586,20 @@ def _render_student_me_lite(luogu_uid: str):
                 ext = _extract_achievements_from_report(report_md)
                 achievements.update(ext)
                 achievements["report_dir"] = latest.name
+                # v3.9.22 · 逐字段补全（与主路径保持一致）：report.md 没提取到 6 维/错题时
+                # 用 export_data.json 兜底。
+                if (latest / "export_data.json").exists():
+                    _ext_fb = _extract_achievements_from_export_data(latest)
+                    if not ext.get("six_dim") and _ext_fb.get("six_dim"):
+                        achievements["six_dim"] = _ext_fb["six_dim"]
+                    if not ext.get("mistakes") and _ext_fb.get("mistakes"):
+                        achievements["mistakes"] = _ext_fb["mistakes"]
+                    if not ext.get("ai_score_thousand") and _ext_fb.get("ai_score_thousand"):
+                        achievements["ai_score_thousand"] = _ext_fb["ai_score_thousand"]
+                        achievements["ai_score_label"] = f"预估 {_ext_fb['ai_score_thousand']}/1000（AI 报告未提取到，6 维兜底自 export_data）"
+                    if (_ext_fb.get("six_dim") and not ext.get("six_dim")) or \
+                       (_ext_fb.get("mistakes") and not ext.get("mistakes")):
+                        achievements["is_partial"] = True
             else:
                 # v3.9.18 · report.md 是 0 字节（AI 失败）→ 兜底 export_data.json
                 ext = _extract_achievements_from_export_data(latest)

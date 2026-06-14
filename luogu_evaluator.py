@@ -2506,6 +2506,7 @@ def generate_ai_report(
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         initial_content = _trim_to_safe_boundary(resume_prefix) if resume_prefix else ""
         collected_chunks: list[str] = []
+        collected_reasoning_chunks: list[str] = []  # v3.9.13 · DeepSeek-R1 推理链
         with open(output_path, "w", encoding="utf-8") as f:
             if initial_content:
                 f.write(initial_content)
@@ -2518,17 +2519,36 @@ def generate_ai_report(
                     timeout=1800.0,
                 )
                 for chunk in stream:
-                    if chunk.choices and chunk.choices[0].delta.content:
-                        piece = chunk.choices[0].delta.content
-                        collected_chunks.append(piece)
-                        f.write(piece)
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta
+                    # v3.9.13 · 兼容 DeepSeek-R1 推理模型：delta 同时含 reasoning_content（思考链）
+                    # 和 content（最终答案）。普通模型只有 content（reasoning_content 始终为 None）。
+                    # 我们把 reasoning 也单独存一份，作为 content 为空时的兜底。
+                    reasoning_piece = getattr(delta, "reasoning_content", None) or ""
+                    if reasoning_piece:
+                        collected_reasoning_chunks.append(reasoning_piece)
+                    content_piece = getattr(delta, "content", None) or ""
+                    if content_piece:
+                        collected_chunks.append(content_piece)
+                        f.write(content_piece)
                         f.flush()
             except Exception:
                 # 不吞异常：让上层 retry 捕获，但 partial 已经在文件里
                 raise
+        # v3.9.13 · 优先用 content（最终答案）；如 R1 推理模型 max_tokens 不够时 content 为空，
+        # fallback 到 reasoning_content（思考链也有参考价值）
+        full_content = initial_content + "".join(collected_chunks)
+        full_reasoning = "".join(collected_reasoning_chunks)
+        if not full_content.strip() and full_reasoning.strip():
+            print(
+                f"[WARN] 流式响应只含 reasoning_content（{len(full_reasoning)} 字符）"
+                f"· content 为空 · 推测 max_tokens 太小被 R1 思考链耗尽 · fallback to reasoning",
+                flush=True,
+            )
+            full_content = full_reasoning
         # 流式成功后做一次归一化（替换 AI 编的 ASCII 表/难度名/日期等），再覆盖回文件
-        full_raw = initial_content + "".join(collected_chunks)
-        normalized = normalize_report_markdown(full_raw, export_data)
+        normalized = normalize_report_markdown(full_content, export_data)
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(normalized)
         return normalized

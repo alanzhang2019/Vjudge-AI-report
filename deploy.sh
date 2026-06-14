@@ -154,8 +154,8 @@ cmd_zip() {
     rmdir "$PROJECT_DIR/luogu-AI-report"
   fi
 
-  log "4/6 清理不进镜像的垃圾"
-  rm -rf .git .source_cache reports __pycache__ tasks.db* *.pdf .dbg
+  log "4/6 清理不进镜像的垃圾（reports 保留！那是 bind-mount 用户数据）"
+  rm -rf .git .source_cache __pycache__ tasks.db* *.pdf .dbg
   find "$PROJECT_DIR" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null
   rm -f "$ZIP_PATH"
 

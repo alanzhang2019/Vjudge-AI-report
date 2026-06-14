@@ -3716,6 +3716,17 @@ def _auto_upsert_student_profile(luogu_uid: str, form: dict) -> None:
             app.logger.info(
                 f"v3.8 自动补全学员档案 UID={luogu_uid} (sid={existing['id']}): 补全字段 {list(updates.keys())}"
             )
+            # v3.9.18 · 档案补全后，失效 parent_subscribe.html/.md 缓存，
+            # 避免之前 AI 生成的「未填城市」陈旧内容误导家长。
+            try:
+                _latest_dir = _find_latest_report_dir(luogu_uid, (existing.get("real_name") or "").strip())
+                if _latest_dir:
+                    for _fn in ("parent_subscribe.html", "parent_subscribe.md"):
+                        _fp = _latest_dir / _fn
+                        if _fp.exists():
+                            _fp.unlink()
+            except Exception:
+                pass
         except Exception as _ue:
             app.logger.warning(f"v3.8 自动补全学员档案失败 UID={luogu_uid}: {_ue}")
         finally:
@@ -4881,9 +4892,9 @@ _PARENT_SUBSCRIBE_SHELL_HTML = """
                 <p class="text-xs text-gray-500 mt-1">UID {{ luogu_uid }} · 生成于 {{ generated_at }}</p>
             </div>
             <div class="flex gap-2">
+                {# v3.9.18 · 只保留「学员中心」+「首页」两个入口；原「学员版报告」「家长版报告」按钮已合并到 /me/，避免重复入口 #}
                 <a href="/me/{{ luogu_uid }}" class="text-xs px-3 py-1.5 bg-emerald-100 text-emerald-700 rounded-md hover:bg-emerald-200">🎓 学员中心</a>
-                <a href="/report/student/{{ luogu_uid }}" target="_blank" class="text-xs px-3 py-1.5 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200">📊 学员版报告</a>
-                <a href="/report/parent/{{ luogu_uid }}" target="_blank" class="text-xs px-3 py-1.5 bg-purple-100 text-purple-700 rounded-md hover:bg-purple-200">👨‍👩‍👧 家长版报告</a>
+                <a href="/" class="text-xs px-3 py-1.5 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200">🏠 首页</a>
             </div>
         </div>
         {# v3.9 · 取消开发者/免责话术，改成"实用信息"，站在家长角度 #}
@@ -5571,6 +5582,19 @@ def generate_form_submit():
                     ),
                 )
                 conn.commit()
+                # v3.9.18 · 主报告入口的学员档案更新后，失效 parent_subscribe.html/.md 缓存，
+                # 避免之前 AI 生成的「未填城市」陈旧内容误导家长。
+                try:
+                    _latest_dir = _find_latest_report_dir(
+                        luogu_uid, (form.get("real_name") or "").strip()
+                    )
+                    if _latest_dir:
+                        for _fn in ("parent_subscribe.html", "parent_subscribe.md"):
+                            _fp = _latest_dir / _fn
+                            if _fp.exists():
+                                _fp.unlink()
+                except Exception:
+                    pass
             finally:
                 conn.close()
         else:

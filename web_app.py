@@ -1741,10 +1741,12 @@ def render_index(form: dict | None = None, validation_result: dict | None = None
         _uid = str(session.get("student_uid") or "").strip()
         _name = str(session.get("student_name") or "").strip()
         if _uid and _uid.isdigit():
+            # v3.9.20 · 首页用深空主题，app-btn-primary 的白字+绿底在首页 CSS 里没注册，
+            # 退化为浏览器默认 <a> 蓝色，文字就看不见。改用 Tailwind 显式指定绿底白字。
             logged_in_banner = (
-                f'<div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3 mb-4 flex items-center justify-between gap-3">'
-                f'<div class="text-sm text-emerald-800">✅ 已识别身份：<strong>{_name or "学员"}</strong>（UID {_uid}）</div>'
-                f'<a href="/me/{_uid}" class="app-btn app-btn-primary text-xs">🎓 回我的个人中心 →</a>'
+                f'<div class="bg-emerald-500/10 border border-emerald-400/40 rounded-lg p-3 mb-4 flex items-center justify-between gap-3">'
+                f'<div class="text-sm text-emerald-100">✅ 已识别身份：<strong class="text-white">{_name or "学员"}</strong>（UID {_uid}）</div>'
+                f'<a href="/me/{_uid}" class="inline-flex items-center justify-center px-3 py-1.5 rounded-md text-xs font-bold bg-gradient-to-r from-emerald-500 to-teal-500 text-white hover:from-emerald-400 hover:to-teal-400 whitespace-nowrap shadow-lg shadow-emerald-500/30">🎓 回我的个人中心 →</a>'
                 f'</div>'
             )
     except Exception:

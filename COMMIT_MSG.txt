@@ -1,0 +1,24 @@
+fix(v3.9.20): 首页登录横幅「回个人中心」按钮文字不可见
+
+用户截图：深空主题首页上，「🎓 回我的个人中心 →」按钮文字看不清，
+跟背景色几乎一样（实际是浏览器默认 <a> 蓝色 + 文字同色）。
+
+根因：
+- 首页 INDEX_HTML 用的是深空主题（`--bg-0:#06080F`），没有调用 `app_skin_head()`，
+  所以 `_APP_SKIN_CSS` 里的 `.app-btn-primary` 规则没注册到首页
+- 退回浏览器默认 <a> 样式：深色 + 默认蓝色文字 → 不可见
+
+修复（web_app.py render_index 1743-1751）：
+- 横幅容器换成 `bg-emerald-500/10 border-emerald-400/40`（适配深空主题的半透明绿）
+- 文字颜色改 `text-emerald-100` + `text-white`（深空主题下高对比）
+- 按钮改用 Tailwind 类显式指定：
+  - bg-gradient-to-r from-emerald-500 to-teal-500（亮绿到青色）
+  - text-white（强制白字）
+  - shadow-lg shadow-emerald-500/30（发光感）
+  - hover:from-emerald-400 hover:to-teal-400（hover 提亮）
+- 不再依赖 `app-btn-primary` 类（首页没注册）
+
+测试：
+- /me/780124 session 模拟登录后访问 /，返回 200
+- 按钮 HTML 包含：text-white ✓ bg-gradient ✓ shadow ✓ hover ✓
+- 横幅背景半透明绿（`bg-emerald-500/10`），文字白（`text-white`），对比度清晰

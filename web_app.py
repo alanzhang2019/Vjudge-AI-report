@@ -8355,6 +8355,20 @@ def student_me(luogu_uid: str):
                 ext = _extract_achievements_from_report(report_md)
                 achievements.update(ext)
                 achievements["report_dir"] = latest.name
+                # v3.9.19 · report.md 读到了但 6 维/错题为空 → 兜底 export_data.json
+                # 原因：AI 报告格式漂移、prompt 改了导致提取不到。export_data 是数据源，最权威。
+                _need_fb = (not ext.get("six_dim")) and (not ext.get("mistakes"))
+                if _need_fb and (latest / "export_data.json").exists():
+                    _ext_fb = _extract_achievements_from_export_data(latest)
+                    # 只补缺失字段（已从 report.md 读到的优先保留）
+                    if not ext.get("six_dim") and _ext_fb.get("six_dim"):
+                        achievements["six_dim"] = _ext_fb["six_dim"]
+                    if not ext.get("mistakes") and _ext_fb.get("mistakes"):
+                        achievements["mistakes"] = _ext_fb["mistakes"]
+                    if not ext.get("ai_score_thousand") and _ext_fb.get("ai_score_thousand"):
+                        achievements["ai_score_thousand"] = _ext_fb["ai_score_thousand"]
+                        achievements["ai_score_label"] = f"预估 {_ext_fb['ai_score_thousand']}/1000（AI 报告未提取到，6 维兜底自 export_data）"
+                    achievements["is_partial"] = True
             else:
                 # v3.9.17 · report.md 是 0 字节（AI 失败），从 export_data.json 兜底
                 ext = _extract_achievements_from_export_data(latest)
@@ -8688,16 +8702,21 @@ STUDENT_ME_LITE_HTML = r"""
         </div>
 
         <!-- 错题集 -->
-        <div class="bg-white rounded-2xl shadow p-5">
+        <div class="bg-white rounded-2xl shadow p-5" id="mistakes-section">
             <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
                 <h2 class="text-lg font-bold text-gray-800">📚 我的错题集</h2>
-                <span class="text-xs text-gray-500">{{ mistake_count }} 道错题</span>
+                {# v3.9.19 · 显示"显示 N / 共 M 道"，让用户知道有更多错题可展开 #}
+                <span class="text-xs text-gray-500">
+                    显示 {{ mistake_count }}{% if achievements.total_mistakes and achievements.total_mistakes > mistake_count %} / 共 {{ achievements.total_mistakes }} 道{% endif %}
+                    {% if achievements.report_dir %}· 来自 {{ achievements.report_dir[:8] }}{% endif %}
+                </span>
             </div>
 
             {% if mistake_count > 0 %}
-            <div class="space-y-2 max-h-[520px] overflow-y-auto pr-1">
+            {# v3.9.19 · 默认显示全部（> 5 道时给个「折叠」按钮），按用户要求：先全部展示再可折叠 #}
+            <div id="mistakes-list" class="space-y-2 max-h-[420px] overflow-y-auto pr-1">
                 {% for m in achievements.mistakes %}
-                <div class="border border-gray-200 rounded-lg p-3 hover:border-emerald-300 transition">
+                <div class="mistake-item border border-gray-200 rounded-lg p-3 hover:border-emerald-300 transition{% if loop.index0 >= 5 %} extra-mistake{% endif %}">
                     <div class="flex items-start justify-between gap-2 flex-wrap">
                         <div class="min-w-0 flex-1">
                             <div class="flex items-center gap-1.5 flex-wrap text-sm">
@@ -8723,10 +8742,39 @@ STUDENT_ME_LITE_HTML = r"""
                 </div>
                 {% endfor %}
             </div>
+            {# v3.9.19 · 「折叠」切换按钮，错题 > 5 道才显示。默认全部展开 #}
+            {% if achievements.mistakes|length > 5 %}
+            <div class="text-center mt-3">
+                <button id="mistakes-toggle-btn" onclick="toggleMistakes()" type="button"
+                        class="text-xs px-4 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-md font-bold">
+                    折叠错题（仅看前 5 道）
+                </button>
+            </div>
+            <style>
+                #mistakes-list.collapsed .extra-mistake { display: none; }
+            </style>
+            <script>
+                function toggleMistakes() {
+                    var list = document.getElementById('mistakes-list');
+                    var btn = document.getElementById('mistakes-toggle-btn');
+                    if (!list || !btn) return;
+                    list.classList.toggle('collapsed');
+                    if (list.classList.contains('collapsed')) {
+                        btn.textContent = '展开全部错题（{{ achievements.mistakes|length }} 道）';
+                    } else {
+                        btn.textContent = '折叠错题（仅看前 5 道）';
+                    }
+                }
+            </script>
+            {% endif %}
             <p class="text-[10px] text-gray-400 mt-2">💡 点击「AI 讲题」直跳 aijiangti.cn · 自动用 C++ 代码实现并讲解（题目已传入）</p>
             {% else %}
             <div class="text-center py-6 text-sm text-gray-400">
+                {% if achievements.is_partial %}
+                🌱 最新一份报告 <code class="text-emerald-600">{{ achievements.report_dir }}</code> 未抽取到错题
+                {% else %}
                 🌱 暂无错题记录 · <a href="/" class="text-emerald-600 hover:underline">去生成新报告 →</a>
+                {% endif %}
             </div>
             {% endif %}
         </div>
@@ -9026,8 +9074,11 @@ def _extract_achievements_from_export_data(report_dir) -> dict:
             out["ai_score_thousand"] = int(round(mean_100 * 10))
             out["ai_score_label"] = f"预估 {out['ai_score_thousand']}/1000（练习阶段 · AI 报告未生成）"
 
-        # 3) 错题（前 5 道）
-        for i, m in enumerate((d.get("failed_items") or [])[:5], 1):
+        # 3) 错题 - v3.9.19 · 扩大提取数（默认 50 道），让"展开全部"按钮可点
+        # 之前只取前 5 道，导致「更多错题」永远只是同一个数字。
+        _MAX_MISTAKES = 50
+        _all_failed = d.get("failed_items") or []
+        for i, m in enumerate(_all_failed[:_MAX_MISTAKES], 1):
             # v3.9.18 · 修复结构：实际是 m.problem.pid / m.problem.title（嵌套对象）
             # 兼容旧结构（m.pid / m.title 直接挂在 top）
             problem_obj = m.get("problem") or {}
@@ -9044,6 +9095,8 @@ def _extract_achievements_from_export_data(report_dir) -> dict:
                 "source": str(problem_obj.get("tag_type") or m.get("source") or m.get("tag_type") or "")[:30],
                 "summary": f"难度 {problem_obj.get('difficulty', m.get('difficulty', '?'))} · AC 失败",
             })
+        # v3.9.19 · 实际错题总数（用于"共 N 道"展示），以及 total_mistakes 字段
+        out["total_mistakes"] = len(_all_failed)
     except Exception:
         pass
     return out
@@ -11383,13 +11436,17 @@ STUDENT_ME_HTML = """
         <div class="bg-white rounded-2xl shadow p-5 mb-4" id="mistakes">
             <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
                 <h2 class="text-lg font-bold text-gray-800">📚 我的错题集</h2>
-                <span class="text-xs text-gray-500">{{ mistake_count }} 道错题 · 来自最新 AI 报告</span>
+                {# v3.9.19 · 显示"显示 N / 共 M 道"，让用户知道有更多错题可展开 #}
+                <span class="text-xs text-gray-500">
+                    显示 {{ mistake_count }}{% if achievements.total_mistakes and achievements.total_mistakes > mistake_count %} / 共 {{ achievements.total_mistakes }} 道{% endif %}
+                    · 来自最新 AI 报告
+                </span>
             </div>
 
             {% if mistake_count > 0 %}
-            <div class="space-y-2 max-h-[480px] overflow-y-auto pr-1">
+            <div id="mistakes-list" class="space-y-2 max-h-[480px] overflow-y-auto pr-1">
                 {% for m in achievements.mistakes %}
-                <div class="border border-gray-200 rounded-lg p-3 hover:border-emerald-300 transition">
+                <div class="mistake-item border border-gray-200 rounded-lg p-3 hover:border-emerald-300 transition{% if loop.index0 >= 5 %} extra-mistake{% endif %}">
                     <div class="flex items-start justify-between gap-2 flex-wrap">
                         <div class="min-w-0 flex-1">
                             <div class="flex items-center gap-1.5 flex-wrap text-sm">
@@ -11418,6 +11475,31 @@ STUDENT_ME_HTML = """
                 </div>
                 {% endfor %}
             </div>
+            {# v3.9.19 · 「折叠」切换按钮，错题 > 5 道才显示。默认全部展开 #}
+            {% if achievements.mistakes|length > 5 %}
+            <div class="text-center mt-3">
+                <button id="mistakes-toggle-btn" onclick="toggleMistakesMain()" type="button"
+                        class="text-xs px-4 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-md font-bold">
+                    折叠错题（仅看前 5 道）
+                </button>
+            </div>
+            <style>
+                #mistakes-list.collapsed .extra-mistake { display: none; }
+            </style>
+            <script>
+                function toggleMistakesMain() {
+                    var list = document.getElementById('mistakes-list');
+                    var btn = document.getElementById('mistakes-toggle-btn');
+                    if (!list || !btn) return;
+                    list.classList.toggle('collapsed');
+                    if (list.classList.contains('collapsed')) {
+                        btn.textContent = '展开全部错题（{{ achievements.mistakes|length }} 道）';
+                    } else {
+                        btn.textContent = '折叠错题（仅看前 5 道）';
+                    }
+                }
+            </script>
+            {% endif %}
             <p class="text-[10px] text-gray-400 mt-2">💡 点击「AI 讲题」直跳 aijiangti.cn · 自动用 C++ 代码实现并讲解（题号 / 标题 / 来源已直传）</p>
             {% else %}
             <div class="text-center py-6 text-sm text-gray-400">

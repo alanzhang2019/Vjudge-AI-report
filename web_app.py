@@ -8194,6 +8194,14 @@ def student_me(luogu_uid: str):
 
     v3.9.6 · 自动续期会话：每次进入都刷新 student_uid / student_name session，
     保证 180 天内不会"掉登录"。
+
+    v3.9.18 · 5 项关键修复：
+      1) _find_latest_report_dir 允许 data_only 目录（无 report.md）也能返回
+      2) _extract_achievements_from_export_data 修正 failed_items 结构
+         （m.problem.pid / m.problem.title 而非 m.pid / m.title）
+      3) GESP 兜底加第三层（gesp_exams 表查询），视图层完成避免模板复杂
+      4) data_only 状态的历史报告增加「📊 数据预览」入口（/me/<uid>/report-data/<dir>）
+      5) lite 版个人中心也展示历史报告（不再仅依赖主路径）
     """
     import sys
     print(f"[DEBUG student_me] uid={luogu_uid!r}", file=sys.stderr, flush=True)
@@ -8225,7 +8233,10 @@ def student_me(luogu_uid: str):
             _reports_root = _P_fb(__file__).parent / "reports"
             if _reports_root.exists():
                 for _d in _reports_root.iterdir():
-                    if not _d.is_dir() or not (_d / "report.md").exists():
+                    if not _d.is_dir():
+                        continue
+                    # v3.9.18 · 放宽：report.md 或 export_data.json 任一即可
+                    if not (_d / "report.md").exists() and not (_d / "export_data.json").exists():
                         continue
                     _sidecar = _d / "luogu_uid.txt"
                     if _sidecar.exists():
@@ -8245,10 +8256,42 @@ def student_me(luogu_uid: str):
         # 有 report → 渲染轻量版（用 STUDENT_ME_HTML + 空 student dict）
         return _render_student_me_lite(luogu_uid)
     progress = _admin_students.get_student_gesp_progress(int(student["id"])) or {}
+    # v3.9.18 · GESP 第三层兜底：学生表的 gesp_highest_passed/gesp_latest_score 可能为 0
+    # （用户自录后没重算 / 注册前在 gesp_exams 表里有记录但 students 表未更新），
+    # 直接查 gesp_exams 表兜底，确保 /me 页 GESP 段位永远有值。
+    try:
+        _gh = int(student.get("gesp_highest_passed") or 0)
+        _gs = int(student.get("gesp_latest_score") or 0)
+        if not _gh:
+            from task_store import _get_conn as _gconn
+            _gc = _gconn()
+            try:
+                _gr = _gc.execute(
+                    "SELECT MAX(registered_level) AS lvl, MAX(actual_score) AS sc "
+                    "FROM gesp_exams WHERE student_id=? AND passed=1",
+                    (int(student["id"]),),
+                ).fetchone()
+                if _gr and _gr["lvl"]:
+                    student_dict_gesp_level = int(_gr["lvl"])
+                    student_dict_gesp_score = int(_gr["sc"] or 0)
+                else:
+                    student_dict_gesp_level = _gh
+                    student_dict_gesp_score = _gs
+            finally:
+                _gc.close()
+        else:
+            student_dict_gesp_level = _gh
+            student_dict_gesp_score = _gs
+    except Exception:
+        student_dict_gesp_level = int(student.get("gesp_highest_passed") or 0)
+        student_dict_gesp_score = int(student.get("gesp_latest_score") or 0)
     # v3.5.2: 解析 city 所在省份 + grade 中文 label
     student_dict = dict(student)
     student_dict["province"] = _city_to_province(student_dict.get("city"))
     student_dict["grade_label"] = _grade_to_label(student_dict.get("grade"))
+    # v3.9.18 · 把 GESP 兜底结果显式写回 student_dict（覆盖原 0 值），让模板直读
+    student_dict["gesp_highest_passed"] = student_dict_gesp_level
+    student_dict["gesp_latest_score"] = student_dict_gesp_score
     # v3.5.2: 检查家长订阅状态（决定 AI 讲题是否可用）
     # activation_codes 表字段：code, sku, student_id, redeemed_at, expires_at
     # sku 实际值：parent_sub / popularize_camp / improve_camp
@@ -8320,6 +8363,153 @@ def student_me(luogu_uid: str):
     )
 
 
+@app.route("/me/<luogu_uid>/report-data/<dir_name>")
+def student_me_report_data(luogu_uid: str, dir_name: str):
+    """v3.9.18 · 半完成报告（data_only）的数据预览：6 维评分 + 错题 + 抓题概况。
+
+    学员点「📊 数据预览」按钮直达这里。直接读 export_data.json 渲染，
+    不依赖 report.md（AI 失败时就是 0 字节）。
+    """
+    # 安全检查：dir_name 必须是 8 字符 hex 开头（task_id 短哈希），防止路径穿越
+    if "/" in dir_name or "\\" in dir_name or ".." in dir_name:
+        return "Invalid dir name", 400
+    if not (dir_name[:8].isalnum() and len(dir_name) >= 8):
+        return "Invalid dir name", 400
+    reports_root = _ROOT / "reports"
+    report_dir = reports_root / dir_name
+    if not report_dir.exists() or not (report_dir / "export_data.json").exists():
+        return render_template_string(REGISTER_INVALID_HTML, message="报告目录不存在或已删除"), 404
+    # 校验该 dir 与该 uid 匹配
+    try:
+        _sidecar = report_dir / "luogu_uid.txt"
+        if _sidecar.exists():
+            if _sidecar.read_text(encoding="utf-8", errors="replace").strip() != str(luogu_uid).strip():
+                return render_template_string(REGISTER_INVALID_HTML, message="无权限查看该报告"), 403
+        elif str(luogu_uid) not in dir_name:
+            return render_template_string(REGISTER_INVALID_HTML, message="无权限查看该报告"), 403
+    except Exception:
+        pass
+    # 提取 6 维 + 错题 + 抓题概况
+    ach = _extract_achievements_from_export_data(report_dir)
+    try:
+        with open(report_dir / "export_data.json", "r", encoding="utf-8") as fp:
+            d = json.load(fp)
+    except Exception as _e:
+        return f"export_data.json 解析失败: {_e}", 500
+    solved = d.get("solved_count", 0)
+    failed = d.get("failed_count", 0)
+    student_info = d.get("student_info") or {}
+    eval_time = (student_info.get("eval_time") or "").strip()
+    return render_template_string(
+        _REPORT_DATA_PREVIEW_HTML,
+        dir_name=dir_name,
+        luogu_uid=luogu_uid,
+        achievements=ach,
+        solved=solved,
+        failed=failed,
+        total=solved + failed,
+        eval_time=eval_time,
+    )
+
+
+_REPORT_DATA_PREVIEW_HTML = r"""
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数据预览 · {{ dir_name }} · v3.9.18</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .preview-hero{background:linear-gradient(135deg,#f59e0b 0%,#ef4444 100%);color:#fff;border-radius:16px;padding:20px;}
+    </style>
+</head>
+<body class="bg-gradient-to-br from-amber-50 to-rose-50 min-h-screen p-4">
+    <div class="max-w-3xl mx-auto">
+        <div class="preview-hero mb-4">
+            <h1 class="text-2xl font-extrabold mb-1">📊 数据预览</h1>
+            <p class="text-sm opacity-90">UID <strong>{{ luogu_uid }}</strong> · {{ dir_name }}</p>
+            <p class="text-xs opacity-75 mt-1">⚠️ AI 报告未生成 · 以下数据来自 export_data.json 练习阶段</p>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow p-5 mb-4">
+            <h2 class="text-lg font-bold text-gray-800 mb-3">🎯 抓题概况</h2>
+            <div class="grid grid-cols-3 gap-3 text-center">
+                <div class="bg-emerald-50 rounded-xl p-3">
+                    <div class="text-xs text-emerald-700 font-bold">AC 通过</div>
+                    <div class="text-3xl font-extrabold text-emerald-700 mt-1">{{ solved }}</div>
+                </div>
+                <div class="bg-rose-50 rounded-xl p-3">
+                    <div class="text-xs text-rose-700 font-bold">失败</div>
+                    <div class="text-3xl font-extrabold text-rose-700 mt-1">{{ failed }}</div>
+                </div>
+                <div class="bg-blue-50 rounded-xl p-3">
+                    <div class="text-xs text-blue-700 font-bold">总计</div>
+                    <div class="text-3xl font-extrabold text-blue-700 mt-1">{{ total }}</div>
+                </div>
+            </div>
+            {% if eval_time %}
+            <div class="text-[11px] text-gray-400 mt-3">抓题时间：{{ eval_time }}</div>
+            {% endif %}
+        </div>
+
+        <div class="bg-white rounded-2xl shadow p-5 mb-4">
+            <h2 class="text-lg font-bold text-gray-800 mb-3">📊 6 维能力评分（练习阶段预估）</h2>
+            {% if achievements.six_dim %}
+            <div class="space-y-2">
+                {% for k, v in achievements.six_dim.items() %}
+                <div class="flex items-center gap-2 text-sm">
+                    <div class="w-20 text-gray-600 text-right">{{ k }}</div>
+                    <div class="flex-1 bg-gray-100 rounded-full h-3 overflow-hidden">
+                        <div class="h-full rounded-full
+                            {% if v >= 75 %}bg-green-500
+                            {% elif v >= 55 %}bg-emerald-400
+                            {% elif v >= 40 %}bg-amber-400
+                            {% else %}bg-red-400{% endif %}" style="width: {{ v }}%"></div>
+                    </div>
+                    <div class="w-10 text-right font-mono font-bold
+                        {% if v >= 75 %}text-green-700
+                        {% elif v >= 55 %}text-emerald-700
+                        {% elif v >= 40 %}text-amber-700
+                        {% else %}text-red-700{% endif %}">{{ v }}</div>
+                </div>
+                {% endfor %}
+            </div>
+            <div class="text-[11px] text-gray-400 mt-3">
+                千分制预估：<strong>{{ achievements.ai_score_thousand }}/1000</strong>（来自 6 维均分 ×10，AI 报告未生成时使用）
+            </div>
+            {% else %}
+            <div class="text-sm text-gray-400">暂未抓到 6 维评分</div>
+            {% endif %}
+        </div>
+
+        <div class="bg-white rounded-2xl shadow p-5 mb-4">
+            <h2 class="text-lg font-bold text-gray-800 mb-3">❌ 错题预览（前 5）</h2>
+            {% if achievements.mistakes %}
+            <div class="space-y-2">
+                {% for m in achievements.mistakes %}
+                <div class="border border-gray-200 rounded-lg p-3">
+                    <div class="font-bold text-sm text-gray-800">{{ m.idx }}. {{ m.title }}</div>
+                    <div class="text-[11px] text-gray-400 mt-1">
+                        {{ m.problem_id }} · {{ m.summary }}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="text-sm text-gray-400">无错题</div>
+            {% endif %}
+        </div>
+
+        <div class="text-center mt-4">
+            <a href="/me/{{ luogu_uid }}" class="text-sm text-emerald-700 hover:underline">← 返回个人中心</a>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+
 def _render_student_me_lite(luogu_uid: str):
     """v3.6 · 轻量版个人中心（学员未注册但有 report.md 时回退到这）
 
@@ -8348,9 +8538,22 @@ def _render_student_me_lite(luogu_uid: str):
         latest = _find_latest_report_dir(luogu_uid, _lite_name)
         if latest and (latest / "report.md").exists():
             report_md = (latest / "report.md").read_text(encoding="utf-8", errors="replace")
-            ext = _extract_achievements_from_report(report_md)
+            if len(report_md.strip()) > 100:
+                ext = _extract_achievements_from_report(report_md)
+                achievements.update(ext)
+                achievements["report_dir"] = latest.name
+            else:
+                # v3.9.18 · report.md 是 0 字节（AI 失败）→ 兜底 export_data.json
+                ext = _extract_achievements_from_export_data(latest)
+                achievements.update(ext)
+                achievements["report_dir"] = latest.name
+                achievements["is_partial"] = True
+        elif latest and (latest / "export_data.json").exists():
+            # v3.9.18 · 没有 report.md 但有 export_data.json → 兜底
+            ext = _extract_achievements_from_export_data(latest)
             achievements.update(ext)
             achievements["report_dir"] = latest.name
+            achievements["is_partial"] = True
     except Exception as _e:
         achievements["_err"] = str(_e)[:200]
 
@@ -8365,12 +8568,18 @@ def _render_student_me_lite(luogu_uid: str):
         "grade_label": None,
         "registered_via": "report-only",
     }
+    # v3.9.18 · 也传历史报告列表（lite 版学员虽未注册，但仍能看到历史报告入口）
+    try:
+        _report_htmls = _list_student_report_htmls(luogu_uid, _lite_name, limit=8)
+    except Exception:
+        _report_htmls = []
     return render_template_string(
         STUDENT_ME_LITE_HTML,
         student=student_dict,
         token=luogu_uid,
         achievements=achievements,
         mistake_count=len(achievements.get("mistakes") or []),
+        report_htmls=_report_htmls,
     )
 
 
@@ -8495,6 +8704,43 @@ STUDENT_ME_LITE_HTML = r"""
             <div class="text-center py-6 text-sm text-gray-400">
                 🌱 暂无错题记录 · <a href="/" class="text-emerald-600 hover:underline">去生成新报告 →</a>
             </div>
+            {% endif %}
+        </div>
+
+        <!-- v3.9.18 · 历史报告（lite 版也展示，让未注册学员能查看数据预览） -->
+        <div class="bg-white rounded-2xl shadow p-5">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-lg font-bold text-gray-800">📄 历史报告</h2>
+                <span class="text-xs text-gray-400">共 {{ report_htmls|length }} 份</span>
+            </div>
+            {% if report_htmls %}
+            <div class="space-y-2">
+                {% for r in report_htmls %}
+                <div class="flex items-center justify-between border border-gray-200 rounded-lg p-3 hover:bg-gray-50">
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2">
+                            <span class="text-sm font-bold text-emerald-700">📅 {{ r.mtime_display }}</span>
+                            {% if loop.first %}<span class="text-[10px] px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded">最新</span>{% endif %}
+                            {% if r.status == "data_only" %}
+                            <span class="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded">📦 数据已抓取</span>
+                            {% endif %}
+                        </div>
+                        <div class="text-[11px] text-gray-400 mt-0.5 truncate">{{ r.dir_name }} · {{ r.size_kb }} KB</div>
+                    </div>
+                    <div class="ml-2">
+                        {% if r.status == "complete" and r.html_url %}
+                        <a href="{{ r.html_url }}" target="_blank"
+                           class="px-2.5 py-1.5 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold">🔍 查看</a>
+                        {% elif r.status == "data_only" %}
+                        <a href="/me/{{ token }}/report-data/{{ r.dir_name }}" target="_blank"
+                           class="px-2.5 py-1.5 rounded-md bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold">📊 数据预览</a>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="text-center py-3 text-sm text-gray-400">🌱 暂无历史报告</div>
             {% endif %}
         </div>
 
@@ -8758,16 +9004,21 @@ def _extract_achievements_from_export_data(report_dir) -> dict:
 
         # 3) 错题（前 5 道）
         for i, m in enumerate((d.get("failed_items") or [])[:5], 1):
-            pid = str(m.get("pid") or m.get("problem_id") or "").strip()
-            title = str(m.get("title") or "").strip()
+            # v3.9.18 · 修复结构：实际是 m.problem.pid / m.problem.title（嵌套对象）
+            # 兼容旧结构（m.pid / m.title 直接挂在 top）
+            problem_obj = m.get("problem") or {}
+            if not isinstance(problem_obj, dict):
+                problem_obj = {}
+            pid = str(problem_obj.get("pid") or m.get("pid") or m.get("problem_id") or "").strip()
+            title = str(problem_obj.get("title") or m.get("title") or "").strip()
             if not title and pid:
                 title = pid
             out["mistakes"].append({
                 "idx": i,
                 "problem_id": pid,
                 "title": title[:60] or "(无标题)",
-                "source": str(m.get("source") or m.get("tag_type") or "")[:30],
-                "summary": f"难度 {m.get('difficulty', '?')} · AC 失败",
+                "source": str(problem_obj.get("tag_type") or m.get("source") or m.get("tag_type") or "")[:30],
+                "summary": f"难度 {problem_obj.get('difficulty', m.get('difficulty', '?'))} · AC 失败",
             })
     except Exception:
         pass
@@ -10423,7 +10674,12 @@ def _find_latest_report_dir(luogu_uid: str, student_name: str = "") -> "Path | N
     for d in reports_root.iterdir():
         if not d.is_dir():
             continue
-        if not (d / "report.md").exists():
+        # v3.9.18 · 放宽：report.md 或 export_data.json 任一存在即可
+        # data_only 目录（只有 export_data.json、无 report.md）也能命中，
+        # 让 /me 页的 AI 评测分兜底分支生效。
+        has_report_md = (d / "report.md").exists()
+        has_export_data = (d / "export_data.json").exists()
+        if not (has_report_md or has_export_data):
             continue
         # 1) 侧车文件精确匹配
         if target_uid:
@@ -10969,13 +11225,9 @@ STUDENT_ME_HTML = """
                 <!-- GESP 段位 -->
                 <div class="bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-xl p-4 text-center">
                     <div class="text-xs text-green-700 font-bold">🏆 GESP 段位</div>
-                    {# v3.9.17 · GESP 段位同步三层：progress → student.gesp_highest_passed → gesp_exams 表 #}
-                    {% set gesp_display_level = (progress.student.gesp_latest_level or 0) if progress and progress.student else 0 %}
-                    {% set gesp_display_score = (progress.student.gesp_latest_score or 0) if progress and progress.student else 0 %}
-                    {% if not gesp_display_level and student.gesp_highest_passed %}
-                        {% set gesp_display_level = student.gesp_highest_passed %}
-                        {% set gesp_display_score = student.gesp_latest_score or 0 %}
-                    {% endif %}
+                    {# v3.9.18 · GESP 段位优先读 student_dict.gesp_highest_passed（视图层已做三层兜底：students → gesp_exams） #}
+                    {% set gesp_display_level = student.gesp_highest_passed or 0 %}
+                    {% set gesp_display_score = student.gesp_latest_score or 0 %}
                     {% if gesp_display_level %}
                     <div class="text-4xl font-extrabold text-green-700 mt-1">{{ gesp_display_level }}<span class="text-lg"> 级</span></div>
                     <div class="text-xs text-green-600 mt-1">
@@ -11028,7 +11280,7 @@ STUDENT_ME_HTML = """
         <!-- v3.9.7 · 历史报告（从原学员版 /report/student 合并过来） -->
         <div class="bg-white rounded-2xl shadow p-5 mb-4" id="history-reports">
             <div class="flex items-center justify-between mb-3">
-                <h2 class="text-lg font-bold text-gray-800">📄 历史报告（HTML）</h2>
+                <h2 class="text-lg font-bold text-gray-800">📄 历史报告</h2>
                 <span class="text-xs text-gray-400">共 {{ report_htmls|length }} 份</span>
             </div>
             {% if report_htmls %}
@@ -11040,7 +11292,7 @@ STUDENT_ME_HTML = """
                             <span class="text-sm font-bold text-emerald-700">📅 {{ r.mtime_display }}</span>
                             {% if loop.first %}<span class="text-[10px] px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded">最新</span>{% endif %}
                             {% if r.has_poster %}<span class="text-[10px] px-1.5 py-0.5 bg-rose-100 text-rose-700 rounded">海报已生成</span>{% endif %}
-                            {# v3.9.17 · 半完成状态：AI 报告未生成，但 export_data 完整 #}
+                            {# v3.9.18 · 半完成状态：AI 报告未生成，但 export_data 完整。给出「数据预览」入口 #}
                             {% if r.status == "data_only" %}
                             <span class="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded" title="报告数据已抓取（6 维评分/错题/难度分布），AI 报告未生成">📦 数据已抓取</span>
                             {% endif %}
@@ -11051,8 +11303,11 @@ STUDENT_ME_HTML = """
                         {% if r.status == "complete" and r.html_url %}
                         <a href="{{ r.html_url }}" target="_blank"
                            class="px-2.5 py-1.5 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold">🔍 查看</a>
+                        {% elif r.status == "data_only" %}
+                        <a href="/me/{{ token }}/report-data/{{ r.dir_name }}" target="_blank"
+                           class="px-2.5 py-1.5 rounded-md bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold">📊 数据预览</a>
                         {% else %}
-                        <span class="text-[10px] text-gray-400">无 HTML 报告</span>
+                        <span class="text-[10px] text-gray-400">无报告</span>
                         {% endif %}
                     </div>
                 </div>
@@ -11064,8 +11319,9 @@ STUDENT_ME_HTML = """
         </div>
 
         <!-- v3.9.7 · 下一步行动（从原学员版合并） -->
-        {% set gesp_level = (progress.student.gesp_latest_level or 0) if progress and progress.student else 0 %}
-        {% set gesp_score = (progress.student.gesp_latest_score or 0) if progress and progress.student else 0 %}
+        {# v3.9.18 · 改读 student_dict.gesp_highest_passed（视图层已做三层兜底），避免 progress.student.gesp_latest_level 字段不存在 #}
+        {% set gesp_level = student.gesp_highest_passed or 0 %}
+        {% set gesp_score = student.gesp_latest_score or 0 %}
         {% set next_level = (progress.next_eligible_level or (gesp_level + 1)) if progress else 1 %}
         {% set exemptions = (progress.exemptions or []) if progress else [] %}
         <div class="bg-white rounded-2xl shadow p-5 mb-4" id="next-action">

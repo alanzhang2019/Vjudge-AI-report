@@ -221,8 +221,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.9.14"
-APP_VERSION_BUILD = "20260614_v3p9p14"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.9.15"
+APP_VERSION_BUILD = "20260614_v3p9p15"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -957,7 +957,21 @@ def describe_generation_error(exc: Exception, stage: str) -> str:
 def resolve_openai_api_key(form: dict) -> tuple[str, str]:
     from_form = str(form.get("api_key", "") or "").strip()
     if from_form:
-        return from_form, "form"
+        # v3.9.15 · 启发式校验：表单填的"非 sk- 开头"的串
+        # （如登录密码、卡密、随手字符串）会被七牛云/所有 OpenAI 兼容服务
+        # 一律 401 拒掉。之前 6 次重试失败就是这个原因。
+        # 启发式判断：合法 API Key 通常以 sk- / sk-.../ 等前缀开头
+        # 且长度 >= 20。如果表单填的不符合，自动忽略、走 .env。
+        # 启发式不会把"短 sk-test"误杀（sk- 后接任意字符就放过）。
+        looks_like_key = from_form.startswith(("sk-", "key-", "API-", "Bearer ")) or len(from_form) >= 32
+        if not looks_like_key:
+            app.logger.warning(
+                f"[v3.9.15] 表单 api_key 不像合法 Key（前缀/长度不对）: {from_form[:6]}*** "
+                f"（长度 {len(from_form)}），自动忽略、改用服务端 .env",
+            )
+            from_form = ""
+        else:
+            return from_form, "form"
     for env_name in ("OPENAI_API_KEY", "OPENAI_ADMIN_KEY"):
         env_value = str(os.environ.get(env_name, "") or "").strip()
         if env_value:
@@ -6012,13 +6026,20 @@ GENERATE_FORM_HTML = """
             <summary class="cursor-pointer text-sm font-bold text-gray-600 hover:text-emerald-600">🤖 4. OpenAI 配置（可选 · 留空使用服务端默认）</summary>
             <div class="space-y-2 mt-3">
                 <div>
-                    <label class="app-label">API Key</label>
-                    {# v3.9.11 · id="api_key" 锚点 + 401 时 autofocus + 红边高亮 #}
+                    <label class="app-label">
+                        API Key
+                        <button type="button" onclick="toggleKeyVisibility('api_key', this)"
+                                class="ml-1 text-xs text-gray-500 hover:text-emerald-700"
+                                title="点击查看 / 隐藏 API Key（避免填错）">👁 查看</button>
+                    </label>
+                    {# v3.9.15 · 加 oninput JS 校验：不是 sk- 开头时红边 + 提示，但不阻挡提交（启发式服务端兜底） #}
                     <input type="password" id="api_key" name="api_key"
                            value="{{ form.get('api_key','') }}"
                            {% if focus_api_key %}autofocus{% endif %}
+                           oninput="validateApiKeyFormat(this)"
                            class="app-input mt-1 {% if focus_api_key %}api-key-alert{% endif %}"
-                           placeholder="sk-...">
+                           placeholder="sk-...（七牛云/OpenAI 的 API Key，留空用服务端默认）">
+                    <p id="api_key_hint" class="hidden text-xs mt-1"></p>
                 </div>
                 <div class="grid grid-cols-2 gap-3">
                     <div>
@@ -6303,10 +6324,55 @@ LIST_REPORTS_HTML = """
         <div>信竞 AI 报告 · v3.6</div>
     </div>
 </div>
+<script>
+// v3.9.15 · API Key 可见性切换（避免填错：填完能立刻看到）
+function toggleKeyVisibility(inputId, btn) {
+    var el = document.getElementById(inputId);
+    if (!el) return;
+    if (el.type === 'password') {
+        el.type = 'text';
+        if (btn) btn.innerHTML = '🙈 隐藏';
+    } else {
+        el.type = 'password';
+        if (btn) btn.innerHTML = '👁 查看';
+    }
+}
+
+// v3.9.15 · 实时校验 API Key 格式：不以 sk- 开头时红边 + 提示
+// 注意：这是提示性校验，不阻挡提交（服务端还有启发式兜底）
+function validateApiKeyFormat(input) {
+    var hint = document.getElementById('api_key_hint');
+    if (!hint) return;
+    var v = (input.value || '').trim();
+    if (!v) {
+        // 空 → 用服务端默认，不提示
+        hint.classList.add('hidden');
+        input.style.borderColor = '';
+        return;
+    }
+    var looksLikeKey = v.startsWith('sk-') || v.startsWith('key-') || v.startsWith('API-') || v.length >= 32;
+    if (looksLikeKey) {
+        hint.classList.add('hidden');
+        input.style.borderColor = '';
+    } else {
+        hint.classList.remove('hidden');
+        hint.className = 'text-xs mt-1 text-rose-600';
+        hint.innerHTML = '⚠️ 这串不像 API Key（应以 <code>sk-</code> 开头）。<br>· 如果你只是想用服务端默认 Key，请<strong>留空</strong>本字段<br>· 七牛云控制台路径：AI 服务 → API Key → 复制 <code>sk-...</code> 开头的串';
+        input.style.borderColor = '#f43f5e';
+    }
+}
+
+// v3.9.15 · 页面加载时立即校验一次（重试场景下表单已回填值）
+document.addEventListener('DOMContentLoaded', function() {
+    var el = document.getElementById('api_key');
+    if (el && el.value) validateApiKeyFormat(el);
+});
+</script>
 </body>
 </html>
 """
 
+# GENERATE_FORM_HTML ends at line ~6329
 
 @app.route("/redeem", methods=["GET", "POST"])
 def redeem_code():

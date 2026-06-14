@@ -221,8 +221,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.9.16"
-APP_VERSION_BUILD = "20260614_v3p9p16"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.9.17"
+APP_VERSION_BUILD = "20260614_v3p9p17"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -4121,7 +4121,11 @@ def _collect_report_data(student: dict) -> dict:
 def _list_student_report_htmls(luogu_uid: str, student_name: str = "", limit: int = 10) -> list[dict]:
     """v3.8 · 列出学员最近 N 份 HTML 报告（按 mtime 倒序）
 
-    返回：[{dir_name, html_url, mtime_display, share_url, has_poster, size_kb}, ...]
+    返回：[{dir_name, html_url, mtime_display, share_url, has_poster, size_kb, status}, ...]
+
+    v3.9.17 · 不再只列有 report.html 的 dir：有 export_data.json 的也算"数据已抓取"
+    （AI 报告生成失败时 export_data.json 仍存在，只是 report.md 是 0 字节）。
+    这些"半完成"状态对学员仍有价值：能看到 6 维评分、抓题数、难度分布等。
     """
     items: list[dict] = []
     try:
@@ -4132,22 +4136,43 @@ def _list_student_report_htmls(luogu_uid: str, student_name: str = "", limit: in
         for d in reports_root.iterdir():
             if not d.is_dir():
                 continue
+            # v3.9.17 · 改为：要求 export_data.json 存在（不再要求 report.html）
+            # 这能让"AI 报告未生成"的 dir 也显示在历史里
+            export_p = d / "export_data.json"
             html_p = d / "report.html"
-            if not html_p.exists():
+            if not export_p.exists():
                 continue
             dir_name = d.name
             # 校验目录与该 uid 相关
             if luogu_uid and str(luogu_uid) not in dir_name:
                 continue
-            stat = html_p.stat()
+            # v3.9.17 · 状态分三种：
+            #   - "complete": report.html 存在且非 0 字节
+            #   - "data_only": 只有 export_data.json（AI 报告未生成）
+            #   - "broken": 都没
+            html_size = html_p.stat().st_size if html_p.exists() else 0
+            report_md_size = (d / "report.md").stat().st_size if (d / "report.md").exists() else 0
+            if html_size > 1024:  # > 1KB 才算完整
+                status = "complete"
+            elif export_p.exists() and export_p.stat().st_size > 1024:
+                if report_md_size > 100:
+                    status = "data_only"  # AI 部分输出但没生成 HTML
+                else:
+                    status = "data_only"  # 数据齐了但 AI 失败
+            else:
+                continue
+            # 优先用 report.html mtime，否则 export_data.json
+            ref_p = html_p if status == "complete" else export_p
+            stat = ref_p.stat()
             mtime = datetime.fromtimestamp(stat.st_mtime)
             items.append({
                 "dir_name": dir_name,
-                "html_url": f"/reports/{dir_name}/report.html",
+                "html_url": f"/reports/{dir_name}/report.html" if status == "complete" else "",
                 "mtime_display": mtime.strftime("%Y-%m-%d %H:%M"),
                 "share_url": f"/me/{luogu_uid}/share-card.png",
                 "has_poster": (d / "share-card.png").exists(),
                 "size_kb": round(stat.st_size / 1024, 1),
+                "status": status,  # v3.9.17
             })
         items.sort(key=lambda x: x["mtime_display"], reverse=True)
         return items[:limit]
@@ -8237,15 +8262,29 @@ def student_me(luogu_uid: str):
         "ai_score_label": "—",
         "mistakes": [],
         "report_dir": None,
+        "is_partial": False,  # v3.9.17 · 标记是否"半完成"（export_data 完整，AI 报告未生成）
     }
     # v3.9.3 · 把 name 传给 _find_latest_report_dir，让"目录名以 _姓名 结尾"兜底分支生效
     try:
         latest = _find_latest_report_dir(luogu_uid, (student.get("real_name") or "") if student else "")
         if latest and (latest / "report.md").exists():
             report_md = (latest / "report.md").read_text(encoding="utf-8", errors="replace")
-            ext = _extract_achievements_from_report(report_md)
+            if len(report_md.strip()) > 100:  # v3.9.17 · 报告非空
+                ext = _extract_achievements_from_report(report_md)
+                achievements.update(ext)
+                achievements["report_dir"] = latest.name
+            else:
+                # v3.9.17 · report.md 是 0 字节（AI 失败），从 export_data.json 兜底
+                ext = _extract_achievements_from_export_data(latest)
+                achievements.update(ext)
+                achievements["report_dir"] = latest.name
+                achievements["is_partial"] = True
+        elif latest and (latest / "export_data.json").exists():
+            # v3.9.17 · 没有 report.md 但有 export_data.json
+            ext = _extract_achievements_from_export_data(latest)
             achievements.update(ext)
             achievements["report_dir"] = latest.name
+            achievements["is_partial"] = True
     except Exception as _e:
         achievements["_err"] = str(_e)[:200]
 
@@ -8663,6 +8702,63 @@ def _extract_ai_evaluation_from_report(report_md: str) -> dict:
 
     return out
 
+
+def _extract_achievements_from_export_data(report_dir) -> dict:
+    """v3.9.17 · 从 export_data.json 抽成就（AI 报告失败时的兜底）
+
+    之前 _extract_achievements_from_report 只读 report.md，
+    但 report.md 经常 0 字节（AI 401 / 流式中断），导致 /me 页空白。
+    export_data.json 是抓题/分析阶段生成的，**总是**完整的，所以用它兜底。
+
+    返回 dict 字段同 _extract_achievements_from_report：
+      - six_dim: dict  6 维能力评分（基础算法/数据结构/图论/DP/字符串/数学）
+      - ai_score_thousand: int (0-1000) = mean(six_dim) * 10
+      - ai_score_label:    str   "预估分（AI 报告未生成）" 标记
+      - mistakes: list[dict]   从 failed_items 抽 top 5
+    """
+    import json as _json_e
+    out = {
+        "six_dim": {},
+        "ai_score_thousand": None,
+        "ai_score_label": "—（AI 报告未生成）",
+        "mistakes": [],
+    }
+    try:
+        export_path = report_dir / "export_data.json"
+        if not export_path.exists():
+            return out
+        with open(export_path, "r", encoding="utf-8") as fp:
+            d = _json_e.load(fp)
+
+        # 1) 6 维评分
+        six = d.get("six_dimension_scores") or {}
+        if isinstance(six, dict) and six:
+            out["six_dim"] = {k: int(v) for k, v in six.items() if isinstance(v, (int, float))}
+
+        # 2) 千分制 = 6 维平均分 * 10
+        if out["six_dim"]:
+            mean_100 = sum(out["six_dim"].values()) / len(out["six_dim"])
+            out["ai_score_thousand"] = int(round(mean_100 * 10))
+            out["ai_score_label"] = f"预估 {out['ai_score_thousand']}/1000（练习阶段 · AI 报告未生成）"
+
+        # 3) 错题（前 5 道）
+        for i, m in enumerate((d.get("failed_items") or [])[:5], 1):
+            pid = str(m.get("pid") or m.get("problem_id") or "").strip()
+            title = str(m.get("title") or "").strip()
+            if not title and pid:
+                title = pid
+            out["mistakes"].append({
+                "idx": i,
+                "problem_id": pid,
+                "title": title[:60] or "(无标题)",
+                "source": str(m.get("source") or m.get("tag_type") or "")[:30],
+                "summary": f"难度 {m.get('difficulty', '?')} · AC 失败",
+            })
+    except Exception:
+        pass
+    return out
+
+
 def _extract_achievements_from_report(report_md: str) -> dict:
     """v3.6 · 从 report.md 抽「个人成就」+「错题集」。
 
@@ -8674,6 +8770,8 @@ def _extract_achievements_from_report(report_md: str) -> dict:
       - mistakes: list[dict]，每项：
           { idx, problem_id, title, source, summary, bottleneck }
         problem_id 可能是 "P11229" 或 ""（无法识别时）
+
+    v3.9.17 · 抽出 _extract_achievements_from_export_data 作为 AI 失败时的兜底。
     """
     import re
     out = {
@@ -10842,6 +10940,11 @@ STUDENT_ME_HTML = """
                     {% if achievements.ai_score_thousand is not none %}
                     <div class="text-4xl font-extrabold text-amber-700 mt-1">{{ achievements.ai_score_thousand }}</div>
                     <div class="text-xs text-amber-600 mt-1">{{ achievements.ai_score_label }} · 满分 1000</div>
+                    {% if achievements.is_partial %}
+                    <div class="text-[10px] text-rose-600 mt-1.5 bg-rose-50 rounded px-1.5 py-0.5">
+                        ⚠️ AI 报告未生成 · 分数来自 export_data 练习阶段
+                    </div>
+                    {% endif %}
                     {% else %}
                     <div class="text-3xl font-extrabold text-gray-300 mt-1">—</div>
                     <div class="text-xs text-gray-400 mt-1">暂未生成 AI 报告</div>
@@ -10851,10 +10954,17 @@ STUDENT_ME_HTML = """
                 <!-- GESP 段位 -->
                 <div class="bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-xl p-4 text-center">
                     <div class="text-xs text-green-700 font-bold">🏆 GESP 段位</div>
-                    {% if progress and progress.student and progress.student.gesp_latest_level %}
-                    <div class="text-4xl font-extrabold text-green-700 mt-1">{{ progress.student.gesp_latest_level }}<span class="text-lg"> 级</span></div>
+                    {# v3.9.17 · GESP 段位同步三层：progress → student.gesp_highest_passed → gesp_exams 表 #}
+                    {% set gesp_display_level = (progress.student.gesp_latest_level or 0) if progress and progress.student else 0 %}
+                    {% set gesp_display_score = (progress.student.gesp_latest_score or 0) if progress and progress.student else 0 %}
+                    {% if not gesp_display_level and student.gesp_highest_passed %}
+                        {% set gesp_display_level = student.gesp_highest_passed %}
+                        {% set gesp_display_score = student.gesp_latest_score or 0 %}
+                    {% endif %}
+                    {% if gesp_display_level %}
+                    <div class="text-4xl font-extrabold text-green-700 mt-1">{{ gesp_display_level }}<span class="text-lg"> 级</span></div>
                     <div class="text-xs text-green-600 mt-1">
-                        {% if progress.student.gesp_latest_score is not none %}{{ progress.student.gesp_latest_score }} 分{% else %}免初赛通道{% endif %}
+                        {% if gesp_display_score %}真考 {{ gesp_display_score }} 分{% else %}免初赛通道{% endif %}
                     </div>
                     {% else %}
                     <div class="text-3xl font-extrabold text-gray-300 mt-1">—</div>
@@ -10915,12 +11025,20 @@ STUDENT_ME_HTML = """
                             <span class="text-sm font-bold text-emerald-700">📅 {{ r.mtime_display }}</span>
                             {% if loop.first %}<span class="text-[10px] px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded">最新</span>{% endif %}
                             {% if r.has_poster %}<span class="text-[10px] px-1.5 py-0.5 bg-rose-100 text-rose-700 rounded">海报已生成</span>{% endif %}
+                            {# v3.9.17 · 半完成状态：AI 报告未生成，但 export_data 完整 #}
+                            {% if r.status == "data_only" %}
+                            <span class="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded" title="报告数据已抓取（6 维评分/错题/难度分布），AI 报告未生成">📦 数据已抓取</span>
+                            {% endif %}
                         </div>
                         <div class="text-[11px] text-gray-400 mt-0.5 truncate">{{ r.dir_name }} · {{ r.size_kb }} KB</div>
                     </div>
                     <div class="flex items-center gap-1.5 ml-2">
+                        {% if r.status == "complete" and r.html_url %}
                         <a href="{{ r.html_url }}" target="_blank"
                            class="px-2.5 py-1.5 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold">🔍 查看</a>
+                        {% else %}
+                        <span class="text-[10px] text-gray-400">无 HTML 报告</span>
+                        {% endif %}
                     </div>
                 </div>
                 {% endfor %}

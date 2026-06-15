@@ -22,9 +22,14 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC
 # ---------- 默认值 ----------
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="luogu-ai-report-luogu-coach"
-ZIP_PATH="${PROJECT_DIR}/deploy-pkg.tar.gz"  # v3.9.42: 默认 tar.gz（Windows tar 永远 / 分隔）
-# 向后兼容：找老的 zip
+# v3.9.43: deploy.ps1 上传的是 luogu-ai-report-pkg.{tar.gz,zip}（不是 deploy-pkg.*），
+# 兼容老名字 + 新名字
+ZIP_PATH="${PROJECT_DIR}/luogu-ai-report-pkg.tar.gz"
+# 向后兼容：找老的 zip / 老的命名
+[[ ! -f "$ZIP_PATH" ]] && [[ -f "${PROJECT_DIR}/deploy-pkg.tar.gz" ]] && ZIP_PATH="${PROJECT_DIR}/deploy-pkg.tar.gz"
+[[ ! -f "$ZIP_PATH" ]] && [[ -f "${PROJECT_DIR}/luogu-ai-report-pkg.zip" ]] && ZIP_PATH="${PROJECT_DIR}/luogu-ai-report-pkg.zip"
 [[ ! -f "$ZIP_PATH" ]] && [[ -f "${PROJECT_DIR}/deploy-pkg.zip" ]] && ZIP_PATH="${PROJECT_DIR}/deploy-pkg.zip"
+echo "[v3.9.43] ZIP_PATH=$ZIP_PATH"
 BACKUP_PREFIX="luogu-ai-report.bak"
 MODE="default"
 

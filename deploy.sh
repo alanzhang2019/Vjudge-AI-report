@@ -22,7 +22,9 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC
 # ---------- 默认值 ----------
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="luogu-ai-report-luogu-coach"
-ZIP_PATH="${PROJECT_DIR}/deploy-pkg.zip"
+ZIP_PATH="${PROJECT_DIR}/deploy-pkg.tar.gz"  # v3.9.42: 默认 tar.gz（Windows tar 永远 / 分隔）
+# 向后兼容：找老的 zip
+[[ ! -f "$ZIP_PATH" ]] && [[ -f "${PROJECT_DIR}/deploy-pkg.zip" ]] && ZIP_PATH="${PROJECT_DIR}/deploy-pkg.zip"
 BACKUP_PREFIX="luogu-ai-report.bak"
 MODE="default"
 
@@ -45,7 +47,7 @@ while [[ $# -gt 0 ]]; do
     --help|-h)      usage ;;
     *)              echo -e "${RED}未知参数: $1${NC}"; usage ;;
   esac
-  shift
+  shift || true   # v3.9.41 fix: $#=0 时 shift 返回 1，set -e 会让脚本静默退出
 done
 
 # ---------- 工具函数 ----------
@@ -144,9 +146,22 @@ cmd_zip() {
   fi
 
   log "3/6 解压新包"
-  command -v unzip >/dev/null || { warn "装 unzip..."; apt-get install -y unzip >/dev/null; }
+  command -v tar >/dev/null || { warn "装 tar..."; apt-get install -y tar >/dev/null; }
   rm -rf .git
-  unzip -oq "$ZIP_PATH" -d "$PROJECT_DIR"
+  # v3.9.42 兼容 zip 和 tar.gz：自动识别
+  case "$ZIP_PATH" in
+    *.tar.gz|*.tgz)
+      tar -xzf "$ZIP_PATH" -C "$PROJECT_DIR"
+      ;;
+    *.zip)
+      command -v unzip >/dev/null || { warn "装 unzip..."; apt-get install -y unzip >/dev/null; }
+      unzip -oq "$ZIP_PATH" -d "$PROJECT_DIR"
+      ;;
+    *)
+      err "未知压缩格式: $ZIP_PATH（需要 .zip / .tar.gz / .tgz）"
+      exit 1
+      ;;
+  esac
   # 处理嵌套目录
   if [[ -d "$PROJECT_DIR/luogu-AI-report" ]]; then
     shopt -s dotglob

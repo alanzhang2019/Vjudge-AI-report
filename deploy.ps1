@@ -1,4 +1,4 @@
-﻿# ============================================================================
+# ============================================================================
 # luogu-AI-report 一键部署脚本（Windows 客户端）
 # 用法（在 PowerShell 里）：
 #   .\deploy.ps1                                 # 默认：打包+scp+调用服务器 deploy.sh
@@ -95,9 +95,24 @@ function New-Package {
     Get-ChildItem -Path $staging -Recurse -Include *.pdf -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
     Get-ChildItem -Path $staging -Recurse -Include *.pyc -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
 
-    # 打包
-    Compress-Archive -Path "$staging\*" -DestinationPath $ZipPath -CompressionLevel Optimal
-    Remove-Item -Recurse -Force $staging
+    # 打包（用 tar.gz 替代 zip：路径分隔符永远是 /，Windows / Linux 通用，体积更小）
+    $tarExe = (Get-Command tar -ErrorAction SilentlyContinue).Source
+    if (-not $tarExe) {
+        $gitTar = "$env:ProgramFiles\Git\usr\bin\tar.exe"
+        if (Test-Path $gitTar) { $tarExe = $gitTar }
+    }
+    if ($tarExe) {
+        $PkgPath = [System.IO.Path]::ChangeExtension($ZipPath, '.tar.gz')
+        $oldLocation = Get-Location
+        Set-Location $staging
+        & $tarExe -czf $PkgPath -- *
+        Set-Location $oldLocation
+        Remove-Item -Recurse -Force $staging
+        $ZipPath = $PkgPath   # 改用 .tar.gz 路径
+    } else {
+        Compress-Archive -Path "$staging\*" -DestinationPath $ZipPath -CompressionLevel Optimal
+        Remove-Item -Recurse -Force $staging
+    }
 
     $size = [math]::Round((Get-Item $ZipPath).Length / 1MB, 2)
     Write-OK "打包完成: $ZipPath ($size MB)"
@@ -106,7 +121,9 @@ function New-Package {
 function Send-Package {
     Write-Step "scp $ZipPath → ${Server}:${RemoteDir}/"
     ssh $Server "mkdir -p $RemoteDir" | Out-Null
-    scp $ZipPath "${Server}:${RemoteDir}/deploy-pkg.zip"
+    # v3.9.42: 远程文件名跟本地一致（tar.gz 或 zip）
+    $remoteName = Split-Path $ZipPath -Leaf
+    scp $ZipPath "${Server}:${RemoteDir}/${remoteName}"
     if ($LASTEXITCODE -ne 0) { Write-Err "scp 失败"; exit 1 }
     Write-OK "传输完成"
 }
@@ -154,4 +171,4 @@ if ($OnlyZip) {
 
 Send-Package
 Invoke-Remote "cd $RemoteDir && chmod +x deploy.sh && ./deploy.sh --from-zip"
-Write-OK "部署完成 ✓"
+Write-OK "Deploy done. Open http://YOUR_SERVER_IP:5000/ to verify."

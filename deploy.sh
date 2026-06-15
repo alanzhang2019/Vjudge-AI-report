@@ -184,8 +184,24 @@ cmd_zip() {
   fi
 
   log "4/6 清理不进镜像的垃圾（reports 保留！那是 bind-mount 用户数据）"
-  rm -rf .git .source_cache __pycache__ tasks.db* *.pdf .dbg
+  # v3.9.43：明确只清构建产物，避开所有用户数据（reports/ tasks.db 命名卷 / source_cache 命名卷）。
+  # 原来 `rm -rf .git .source_cache __pycache__ tasks.db* *.pdf .dbg` 这行虽然 glob 不递归、
+  # 不会误伤 bind mount，但语义上很危险：
+  #   1) tasks.db* 写出来像个通用 sqlite 模式，未来如果有人误把 tasks.db 写到项目根目录就清空了
+  #   2) *.pdf 同样，未来如果 REPORTS_DIR 改成不 bind mount，会被这一行误删历史报告
+  # 因此拆开成 3 类：
+  #   - 项目根的 git 元数据（不是 .gitignore 里那种，是真的 .git 目录——docker build 不会带，但 deploy 安全起见再清一次）
+  #   - 项目根的源码缓存（Dockerfile 应当 .dockerignore 它，但保险起见）
+  #   - 全目录 __pycache__（必须递归，否则 .pyc 会污染下一轮镜像）
+  #   - 全目录 .dbg 调试文件（递归）
+  # **不**碰：*.pdf / *.db / *.sqlite（这些是用户数据，可能落在项目根或者任何子目录）
+  rm -rf "$PROJECT_DIR/.git" "$PROJECT_DIR/.source_cache" "$PROJECT_DIR/.dbg"
   find "$PROJECT_DIR" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null
+  find "$PROJECT_DIR" -name "*.dbg" -type f -delete 2>/dev/null
+  # 约定的临时导出目录（如果存在则清空，不删目录本身，保留权限）
+  if [[ -d "$PROJECT_DIR/exports" ]]; then
+    find "$PROJECT_DIR/exports" -mindepth 1 -delete 2>/dev/null
+  fi
   rm -f "$ZIP_PATH"
 
   log "5/6 检查 .env"

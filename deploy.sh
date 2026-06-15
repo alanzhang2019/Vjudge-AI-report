@@ -30,6 +30,40 @@ ZIP_PATH="${PROJECT_DIR}/luogu-ai-report-pkg.tar.gz"
 [[ ! -f "$ZIP_PATH" ]] && [[ -f "${PROJECT_DIR}/luogu-ai-report-pkg.zip" ]] && ZIP_PATH="${PROJECT_DIR}/luogu-ai-report-pkg.zip"
 [[ ! -f "$ZIP_PATH" ]] && [[ -f "${PROJECT_DIR}/deploy-pkg.zip" ]] && ZIP_PATH="${PROJECT_DIR}/deploy-pkg.zip"
 echo "[v3.9.43] ZIP_PATH=$ZIP_PATH"
+
+# v3.9.43: self-heal —— 1Panel 文件保护会回滚 deploy.sh 到老版本。
+# 在这里强制用包内新版 deploy.sh 覆盖自己，然后 exec 重启自己。
+# 这样无论 1Panel 多久回滚一次，下次部署都自动用最新版本。
+_self_heal_deploy_sh() {
+  if [[ ! -f "$ZIP_PATH" ]]; then return 0; fi
+  local new_deploy="" tmp
+  tmp="$(mktemp)"
+  # 从包内抽 deploy.sh（同时支持 tar.gz / zip）
+  if [[ "$ZIP_PATH" == *.zip ]]; then
+    unzip -p "$ZIP_PATH" deploy.sh > "$tmp" 2>/dev/null || true
+  elif [[ "$ZIP_PATH" == *.tar.gz ]] || [[ "$ZIP_PATH" == *.tgz ]]; then
+    tar -xOf "$ZIP_PATH" deploy.sh > "$tmp" 2>/dev/null || true
+  fi
+  if [[ -s "$tmp" ]]; then
+    new_deploy="$tmp"
+  else
+    rm -f "$tmp"
+    return 0
+  fi
+  # 比较：自己 vs 包内新版
+  if ! diff -q "$new_deploy" "$0" >/dev/null 2>&1; then
+    echo "[v3.9.43][self-heal] deploy.sh 与包内版本不同，强制覆盖自己"
+    cp "$new_deploy" "$0"
+    chmod +x "$0" 2>/dev/null || true
+    rm -f "$new_deploy"
+    # re-exec：让后续流程跑在新版 deploy.sh 里
+    exec bash "$0" "$@"
+  fi
+  rm -f "$new_deploy"
+  return 0
+}
+_self_heal_deploy_sh "$@"
+
 BACKUP_PREFIX="luogu-ai-report.bak"
 MODE="default"
 

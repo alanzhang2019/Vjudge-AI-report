@@ -57,10 +57,19 @@ warn()     { echo -e "${YELLOW}⚠${NC} $*"; }
 err()      { echo -e "${RED}✗${NC} $*" >&2; }
 
 need_root() {
-  if [[ $EUID -ne 0 ]]; then
-    err "请用 root 或 sudo 运行（首次需要写 /var/lib/docker）"
-    exit 1
+  # v3.9.43: 服务器上 ubuntu 用户在 docker 组里，能直接跑 docker compose（不需要 sudo），
+  # 原先严格检查 EUID=0 会让 ubuntu 部署全部失败。改为：root 直接通过；
+  # docker 组用户警告后通过；其他用户拒绝。
+  if [[ $EUID -eq 0 ]]; then
+    return 0
   fi
+  if id -nG "$USER" 2>/dev/null | tr ' ' '\n' | grep -qx 'docker' \
+     || groups 2>/dev/null | tr ' ' '\n' | grep -qx 'docker'; then
+    warn "EUID=$EUID（非 root），但用户 $USER 在 docker 组里，docker compose 可以直接跑"
+    return 0
+  fi
+  err "请用 root 或 sudo 运行（首次需要写 /var/lib/docker），或把当前用户加入 docker 组"
+  exit 1
 }
 
 # ---------- 子命令 ----------

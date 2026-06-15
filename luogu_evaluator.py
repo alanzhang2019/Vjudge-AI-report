@@ -1656,6 +1656,63 @@ def normalize_report_markdown(report_md: str, export_data: dict) -> str:
     return f"{trusted_block}\n\n{normalized}"
 
 
+def _build_evolution_prompt(export_data: dict) -> str:
+    """v3.9.39 + v3.9.43 · 提交代码考古（多版 diff）喂给 AI 的 prompt 构造器。
+
+    v3.9.43 关键改进：禁止"代码丢失 / 历史代码丢失 / 源码丢失"误导性措辞。
+    真实情况：源码缓存**有数据**（`web_app.py` 已抓到 1143+ 条 `<uid>/<pid>.json`），
+    只是 v3.9.39「代码考古」需要「同一道题多次提交」才能做 diff，
+    对于「一提交就 AC」的好学生，`selected_problems` 自然为空。
+    原措辞「无代码考古数据」太短，AI 经常脑补成「历史代码全部丢失」，
+    给用户造成「bug 丢数据」的误解。
+
+    Returns:
+        str: 喂给 AI 的 prompt 片段。
+    """
+    evolution_data = export_data.get("submission_evolution", {}) or {}
+    if evolution_data.get("selected_problems"):
+        try:
+            from submission_evolution import evolution_to_prompt_block
+            return evolution_to_prompt_block(evolution_data)
+        except Exception as _evol_e:
+            return f"（代码考古数据格式化失败：{_evol_e}）"
+
+    # ----- v3.9.43 · 无多次提交时的友好 fallback -----
+    _total_records = sum(
+        len(items) for items in (
+            export_data.get("passed_items", []) or [],
+            export_data.get("failed_items", []) or [],
+        )
+    )
+    _no_diff_note = (
+        f"（v3.9.43 · 提示：未抓取到该用户同一道题多次提交的源码记录，"
+        f"无法做「逐版 diff」分析；"
+        f"但本份报告已抓取 {_total_records} 条提交记录的源码，"
+        f"位于「提交行为分析」和「代码风格」章节。）"
+    )
+    _no_misleading_warn = (
+        "（请在 7.5 节输出「代码风格观察」子章节，"
+        "引用「提交行为分析」中的 1-2 段代码片段，"
+        "分析命名 / 缩进 / 结构 / 算法风格；"
+        "**严禁使用「代码丢失」「历史代码丢失」「源码丢失」等措辞**——"
+        "这些表述严重误导用户，会让人以为是 bug 丢数据。）"
+    )
+    return _no_diff_note + "\n" + _no_misleading_warn
+
+
+def _build_report_prompt(export_data: dict) -> str:
+    """v3.9.43 · 单元测试 hook（从 generate_ai_report 里抽出以便单测）。
+
+    当前仅测试用：调用 _build_evolution_prompt 并把结果嵌到一个最小化的
+    7.5 节 prompt 框架里。生产路径走 generate_ai_report 不会用到本函数。
+    """
+    evolution_prompt = _build_evolution_prompt(export_data)
+    return (
+        "### 7.5 提交代码考古（v3.9.39 · 多版源码 diff · 重点分析）\n"
+        + evolution_prompt
+    )
+
+
 def compute_ability_scores(export_data: dict) -> dict[str, int]:
     summary = export_data.get("summary", {}) or {}
     top_tags = summary.get("top_algorithm_tags", []) or summary.get("top_tags", []) or []
@@ -2318,16 +2375,7 @@ def generate_ai_report(
     code_analysis_summary = format_code_analysis(code_analysis_data)
 
     # v3.9.39 · 提交代码考古（多版 diff）喂给 AI
-    evolution_data = export_data.get("submission_evolution", {}) or {}
-    evolution_prompt = ""
-    if evolution_data.get("selected_problems"):
-        try:
-            from submission_evolution import evolution_to_prompt_block
-            evolution_prompt = evolution_to_prompt_block(evolution_data)
-        except Exception as _evol_e:
-            evolution_prompt = f"（代码考古数据格式化失败：{_evol_e}）"
-    else:
-        evolution_prompt = "（该选手没有多次提交的题目，无代码考古数据）"
+    evolution_prompt = _build_evolution_prompt(export_data)
 
     # 大纲对标数据
     syllabus_eval = export_data.get("syllabus_evaluation", {})

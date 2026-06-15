@@ -549,6 +549,101 @@ class TestEvaluatorPracticeFallback(unittest.TestCase):
         self.assertEqual(result["_source"], "record_detail_fallback")
         self.assertIn("Cookies", result["_warning"])
 
+    # ===== v3.9.43 · 禁止"代码丢失"误导性措辞 =====
+    def test_evolution_prompt_no_diff_avoids_misleading_wording(self):
+        """v3.9.43：当 selected_problems 为空（无多次提交）时，prompt 绝不能
+        包含「代码丢失 / 历史代码丢失 / 源码丢失」等让用户以为是 bug 丢数据的措辞。
+
+        注意：警告里**需要**提到这些词（"严禁使用 X"）才能让 AI 知道禁词，
+        所以本测试只验证：警告**只出现 1 次**（作为反例），不会出现 2+ 次
+        （说明 AI 真的在使用）。
+        """
+        from luogu_evaluator import _build_evolution_prompt
+
+        export_data = {
+            "passed_items": [
+                {"problem": {"pid": "P1001", "title": "A+B"}, "record": {"sourceCode": "print(1+1)"}},
+                {"problem": {"pid": "P1002", "title": "Hello"}, "record": {"sourceCode": "print('hi')"}},
+            ],
+            "failed_items": [],
+            "submission_evolution": {"selected_problems": []},  # 关键：空
+        }
+        prompt = _build_evolution_prompt(export_data)
+
+        # 1) 必须明确说"无法做 diff"或同类中性措辞
+        self.assertIn("无法做", prompt,
+                      f"prompt 应该说明「无法做 diff」原因，但实际是：\n{prompt[:500]}")
+        self.assertIn("diff", prompt,
+                      f"prompt 应该提到 diff 分析，但实际是：\n{prompt[:500]}")
+        # 2) 严禁 AI 使用这些词（用「X」书名号形式提及一次）—— 每个词在 prompt 中只能独立出现 1 次
+        # 注意：必须用「X」精确匹配，否则"历史代码丢失"里的"代码丢失"子串会被算进去
+        for forbidden in ("代码丢失", "历史代码丢失", "源码丢失"):
+            precise = f"「{forbidden}」"
+            count = prompt.count(precise)
+            self.assertLessEqual(
+                count, 1,
+                f"「{forbidden}」在 prompt 中独立出现 {count} 次（应 ≤ 1 次）"
+                f"—— 多次出现说明 AI 可能在用这个措辞，而不是只看警告一次"
+            )
+        # 3) prompt 应该明确出现"严禁"字样（告诉 AI 主动禁止）
+        self.assertIn("严禁", prompt,
+                      "prompt 必须包含「严禁」字样，让 AI 知道这是硬性约束")
+
+    def test_evolution_prompt_no_diff_guides_code_style_observation(self):
+        """v3.9.43：无多次提交时，prompt 应引导 AI 写「代码风格观察」子章节。"""
+        from luogu_evaluator import _build_evolution_prompt
+
+        export_data = {
+            "passed_items": [{"problem": {"pid": "P1"}, "record": {"sourceCode": "x"}}],
+            "failed_items": [],
+            "submission_evolution": {"selected_problems": []},
+        }
+        prompt = _build_evolution_prompt(export_data)
+
+        self.assertIn("代码风格", prompt,
+                      "无多次提交时，prompt 应引导 AI 写「代码风格观察」")
+        self.assertIn("严禁", prompt,
+                      "prompt 应明确禁止 AI 使用误导性措辞")
+
+    def test_evolution_prompt_with_data_does_not_inject_no_diff_warn(self):
+        """v3.9.43：有 selected_problems 时不应触发无 diff 警告（保持原行为）。"""
+        from luogu_evaluator import _build_evolution_prompt
+
+        export_data = {
+            "passed_items": [],
+            "failed_items": [],
+            "submission_evolution": {
+                "selected_problems": [
+                    {
+                        "pid": "P1001",
+                        "title": "Demo",
+                        "attempts": 3,
+                        "is_accepted": True,
+                        "status_timeline": "v1:WA → v2:AC",
+                        "code_length_timeline": "100 → 95",
+                        "diffs": [],
+                    }
+                ],
+                "summary": {"total_multi_submit_problems": 1, "selected_count": 1},
+            },
+        }
+        # 用一个 fake 模块替换 submission_evolution（避免真的 import 链）
+        import sys
+        import types
+        fake_mod = types.ModuleType("submission_evolution")
+        fake_mod.evolution_to_prompt_block = lambda d: (
+            f"REAL_EVOLUTION_BLOCK: {len(d.get('selected_problems', []))} problem(s)"
+        )
+        with patch.dict(sys.modules, {"submission_evolution": fake_mod}):
+            prompt = _build_evolution_prompt(export_data)
+
+        self.assertIn("REAL_EVOLUTION_BLOCK", prompt,
+                      "有 selected_problems 时应走真实 evolution_to_prompt_block")
+        self.assertNotIn("严禁", prompt,
+                         "有 selected_problems 时不应混入「无 diff」警告")
+        self.assertNotIn("代码丢失", prompt,
+                         "有 selected_problems 时也不应包含误导措辞（警告块）")
+
 
 if __name__ == "__main__":
     unittest.main()

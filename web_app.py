@@ -817,6 +817,29 @@ def save_cached_source_record(uid: int | str, pid: str, record: dict | None) -> 
     cache_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
+def _build_partial_source_code_warning(
+    source_code_success: int,
+    total_items: int,
+    missing_pids: list[str],
+    cached_hits: int = 0,
+) -> str | None:
+    """v3.9.43：当部分题目的源码抓取失败时，构造一段对用户友好的警告文案。
+
+    返回 None 表示不需要警告（全部成功或没有题目）。返回字符串则写日志+写 task.message。
+    """
+    if total_items <= 0 or source_code_success >= total_items:
+        return None
+    preview = ", ".join(missing_pids[:10])
+    suffix = " 等" if len(missing_pids) > 10 else ""
+    return (
+        f"⚠️ 源码抓取未完成：成功 {source_code_success}/{total_items}。"
+        f"本次已复用缓存 {cached_hits} 题源码。"
+        f"缺失的 {len(missing_pids)} 道题将不参与代码考古与提交行为分析："
+        f"{preview}{suffix}。"
+        f"系统将基于已获取的 {source_code_success} 道题继续生成报告。"
+    )
+
+
 def _parse_admin_time(value: str) -> datetime:
     text = str(value or "").strip()
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
@@ -2385,14 +2408,42 @@ def run_generation(task_id: str, form: dict):
         detail_fetch_stats = summarize_detail_fetch_stats(passed_items, failed_items, detail_fetch_state)
         total_items = int(detail_fetch_stats.get("total_items") or 0)
         source_code_success = int(detail_fetch_stats.get("source_code_success") or 0)
+        # v3.9.43 修复：把"all-or-nothing"硬错误降级为软警告。
+        # 历史行为：哪怕只缺 1 道题源码（常见 1142/1143 = 99.91%），整份报告直接 abort，
+        # 用户重试 12 次都是同样结果（UID 283224 反馈连续失败 12 次就是这个原因）。
+        # 实际上：
+        #   1) 下游 summarize / behavior_analyzer / 知识树对标全部都只依赖"可用"记录，
+        #      缺 1 题的 sourceCode 不影响报告整体可用性。
+        #   2) 失败的 1 道题通常是隐私/受限/已删题目（API 永远 404/403），重试无意义。
+        # 因此只把缺失明细写到任务里，提示用户，并继续生成报告。
+        missing_pids: list[str] = []
         if total_items > 0 and source_code_success < total_items:
-            raise RuntimeError(
-                f"源码抓取未完成：成功 {source_code_success}/{total_items}。"
-                f"本次已复用缓存 {cached_source_hits} 题源码。"
-                f"已放慢抓取速度并提高重试，仍有缺失。"
-                f"请重新获取同一会话下的 __client_id、_uid、C3VK 后重试；"
-                f"必要时降低题量（max_passed/max_failed）以提高稳定性。"
+            for items in (passed_items, failed_items):
+                for item in items:
+                    rec = item.get("record") if isinstance(item, dict) else None
+                    if not _is_source_code_present(rec):
+                        prob = item.get("problem") if isinstance(item, dict) else None
+                        pid = getattr(prob, "pid", None) if prob is not None else None
+                        if not pid and isinstance(prob, dict):
+                            pid = prob.get("pid")
+                        if pid:
+                            missing_pids.append(str(pid))
+            warn_msg = _build_partial_source_code_warning(
+                source_code_success=source_code_success,
+                total_items=total_items,
+                missing_pids=missing_pids,
+                cached_hits=cached_source_hits,
             )
+            if warn_msg:
+                app.logger.warning("[v3.9.43][source_code_partial] uid=%s %s", uid, warn_msg)
+                with TASKS_LOCK:
+                    update_task(
+                        task_id,
+                        message=warn_msg,
+                        stage=current_stage,
+                        source_code_success=source_code_success,
+                        source_code_total=total_items,
+                    )
 
         summary = _summarize(all_passed, tag_by_id=tag_by_id)
 
@@ -9174,6 +9225,7 @@ def _extract_ai_evaluation_from_report(report_md: str) -> dict:
         r"结论[：:].{0,80}?【(.+?)】",                         # 变体
         r"处于【(.+?)】(?:阶段|水平|门槛)",                    # 简写
         # v3.9 · 新格式（无【】）："### 当前对应等级水平\n**CSP‑J 熟练 → CSP‑S 入门**"
+        r"对应等级水平\*\*[:：]\*\*([^*\n]+?)\*\*",             # v3.9.43 · 修 v3.9.41 bug：原正则贪婪/非贪婪冲突，把"**当前对应等级水平**：**VALUE**"误提取为"："；强制要求"对应等级水平"在粗体内（**...**），且冒号在 ** 之外
         r"对应等级水平[：:]?\s*\*\*([^*\n]+?)\*\*",             # 行内粗体（如 "**CSP-S 入门阶段**（..."）
         r"对应等级水平[^\n]*\n+\s*\*\*([^*\n]+?)\*\*",          # 跨行粗体（标题后下一行）
     ]:

@@ -9879,6 +9879,9 @@ def _render_share_card_png(data: dict, qr_url: str) -> bytes:
     else:
         level_text = "尚未生成报告"
         level_fontsize = 28
+        # v3.9.36 · 修 v3.9.34 漏初始化：else 分支必须给 char_count 赋值，
+        # 否则下面 _sub_y = ... if char_count <= 16 ... 抛 UnboundLocalError → 500
+        char_count = len(level_text)
 
     # 大字（label/大字/小标签 三组留白均衡）
     ax.text(0.85, 11.85, level_text, ha="left", va="center",
@@ -10151,6 +10154,10 @@ def share_card_png(luogu_uid: str):
 
     v3.8 · 优先读取报告生成时已预渲染的 PNG（v3.8 异步任务产物），
     缺失时再走现场 matplotlib 渲染（兜底）。
+
+    v3.9.37 · 海报缺失时自动重新生成（兜底渲染），并把产物落盘到
+    `reports/<uid>/share-card.png`，下次访问直接走缓存（不再走 5-15s 渲染）。
+    适用于：(1) deploy.sh 误删 reports/；(2) 老报告未渲染海报。
     """
     # 1) 优先从最新 report 目录读取已预渲染的 PNG
     student = _admin_students.get_student_by_uid(luogu_uid)
@@ -10162,13 +10169,37 @@ def share_card_png(luogu_uid: str):
                 resp = send_file(str(cached), mimetype="image/png", conditional=True)
                 resp.headers["Cache-Control"] = "public, max-age=600"
                 return resp
-    # 2) 兜底：现场渲染（5-15s）
+    # 2) 兜底：现场渲染（5-15s），并把结果落盘到 reports/<uid>/share-card.png
     data = _build_share_card_data(luogu_uid)
     if not data:
         return "UID 未注册", 404
     base = request.host_url.rstrip("/")
     qr_url = f"{base}/r/{luogu_uid}"  # v3.7 · 指向新建的报告预览中转页
-    png_bytes = _render_share_card_png(data, qr_url)
+    try:
+        png_bytes = _render_share_card_png(data, qr_url)
+    except Exception as _e:
+        app.logger.exception(f"v3.9.37 share-card.png 兜底渲染失败: UID={luogu_uid}: {_e}")
+        return f"海报生成失败: {_e}", 500
+    # v3.9.37 · 落盘缓存（让下次访问走 send_file 快速返回）
+    try:
+        # 解析 _find_latest_report_dir 同一份报告目录（如果存在）
+        if student:
+            _dir = _find_latest_report_dir(luogu_uid, student.get("real_name") or "")
+        else:
+            _dir = _find_latest_report_dir(luogu_uid, data.get("name") or "")
+        if _dir:
+            _dir.mkdir(parents=True, exist_ok=True)
+            (_dir / "share-card.png").write_bytes(png_bytes)
+            app.logger.info(f"v3.9.37 share-card.png 兜底渲染并缓存: {_dir / 'share-card.png'} ({len(png_bytes)} bytes)")
+        else:
+            # 没有任何 report 目录：建一个 reports/<uid>/share-card.png 占位
+            _fallback = Path(__file__).parent / "reports" / luogu_uid
+            _fallback.mkdir(parents=True, exist_ok=True)
+            (_fallback / "share-card.png").write_bytes(png_bytes)
+            app.logger.info(f"v3.9.37 share-card.png 兜底渲染并缓存到新目录: {_fallback / 'share-card.png'} ({len(png_bytes)} bytes)")
+    except Exception as _cache_e:
+        # 缓存失败不影响本次返回
+        app.logger.warning(f"v3.9.37 share-card.png 落盘缓存失败（不影响本次返回）: {_cache_e}")
     return Response(png_bytes, mimetype="image/png", headers={
         "Content-Disposition": f'inline; filename="share-card-{luogu_uid}.png"',
         "Cache-Control": "public, max-age=600",

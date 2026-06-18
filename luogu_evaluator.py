@@ -2392,6 +2392,439 @@ def _trim_to_safe_boundary(text: str | None) -> str:
     return text[:cut].rstrip() + "\n"
 
 
+# ============================================================
+# v3.9.64 · GESP 考纲知识结构（CCF GESP C++&Python 1-8 级）
+# 来源：GESP 官方认证标准
+# ============================================================
+GESP_LEVELS: dict[int, dict] = {
+    1: {
+        "name": "GESP 一级 · 编程入门",
+        "themes": ["计算机基础", "IDE 使用", "顺序/分支/循环", "基本数据类型", "基本运算"],
+        "key_points": [
+            "计算机硬件组成（CPU / 内存 / I/O）",
+            "Dev C++ / PyCharm 等 IDE 使用（编辑 / 编译 / 调试）",
+            "cin / cout / scanf / printf 输入输出",
+            "标识符 / 关键字 / 常量 / 变量",
+            "int / long long / float / double / char / bool",
+            "if / if-else / switch / 三目运算",
+            "for / while / do-while + break / continue",
+        ],
+        "max_difficulty": 1,  # 入门
+        "core_tags": ["顺序结构", "分支结构", "循环结构", "基本 I/O", "变量与类型"],
+    },
+    2: {
+        "name": "GESP 二级 · 基础程序设计",
+        "themes": ["存储与网络", "流程图", "ASCII 编码", "类型转换", "多层嵌套", "数学函数"],
+        "key_points": [
+            "ROM / RAM / Cache 区别",
+            "TCP/IP 四层模型 / IP 地址",
+            "流程图绘制方法（顺序/分支/循环）",
+            "ASCII 编码与转换（'0'=48, 'A'=65, 'a'=97, 空格=32）",
+            "强制类型转换 + 隐式类型转换",
+            "多层分支 / 多层循环 嵌套",
+            "abs / sqrt / max / min / 随机数函数",
+        ],
+        "max_difficulty": 2,  # 普及-
+        "core_tags": ["类型转换", "ASCII", "嵌套循环", "数学函数", "流程图"],
+    },
+    3: {
+        "name": "GESP 三级 · 数据编码与基础算法",
+        "themes": ["原码/反码/补码", "进制转换", "位运算", "一维数组", "字符串", "枚举法", "模拟法"],
+        "key_points": [
+            "原码 / 反码 / 补码 概念",
+            "二进制 / 八进制 / 十进制 / 十六进制 互转",
+            "位运算：& | ~ ^ << >>",
+            "C++ 一维数组 / Python 列表/字典/元组/集合",
+            "字符串及其函数（大小写转换 / 搜索 / 分割 / 替换）",
+            "枚举法（暴力穷举）",
+            "模拟法（按题意逐步实现）",
+        ],
+        "max_difficulty": 2,  # 普及-
+        "core_tags": ["位运算", "进制转换", "数组", "字符串", "枚举", "模拟"],
+    },
+    4: {
+        "name": "GESP 四级 · 函数与排序",
+        "themes": ["函数", "指针概念", "结构体", "二维数组", "递推", "排序算法", "文件读写", "异常处理"],
+        "key_points": [
+            "函数定义 / 调用 / 形参实参 / 作用域",
+            "C++ 指针类型基本概念",
+            "C++ 结构体 + Python 复合类型嵌套",
+            "二维 / 多维数组",
+            "递推算法（递推关系式推导）",
+            "排序算法：冒泡 / 插入 / 选择 + 稳定性",
+            "文件读写（重定向 / 文本文件）",
+            "异常处理 try-catch",
+        ],
+        "max_difficulty": 3,  # 普及/提高-
+        "core_tags": ["函数", "指针", "结构体", "二维数组", "递推", "排序", "文件读写"],
+    },
+    5: {
+        "name": "GESP 五级 · 数论与链表",
+        "themes": ["初等数论", "高精度", "链表", "素数筛", "二分", "贪心", "分治", "递归"],
+        "key_points": [
+            "辗转相除法（欧几里得算法）",
+            "素数筛：埃氏筛 / 线性筛",
+            "唯一分解定理",
+            "高精度加 / 减 / 乘 / 除（数组模拟）",
+            "单链表 / 双链表 / 循环链表",
+            "二分查找 / 二分答案",
+            "贪心算法",
+            "分治算法（归并排序 / 快速排序）",
+            "递归",
+        ],
+        "max_difficulty": 4,  # 普及+/提高
+        "core_tags": ["数论", "素数筛", "链表", "高精度", "二分", "贪心", "分治", "递归"],
+    },
+    6: {
+        "name": "GESP 六级 · 树与基础 DP",
+        "themes": ["树结构", "哈夫曼", "DFS/BFS", "基础动态规划", "面向对象", "栈/队列"],
+        "key_points": [
+            "树的定义 / 构造 / 遍历",
+            "哈夫曼树 / 哈夫曼编码",
+            "完全二叉树 / 二叉排序树",
+            "深度优先搜索（DFS）",
+            "广度优先搜索（BFS）",
+            "简单动态规划（一维 DP / 背包问题）",
+            "面向对象：类的创建",
+            "栈 / 队列 / 循环队列",
+        ],
+        "max_difficulty": 4,  # 普及+/提高
+        "core_tags": ["树", "哈夫曼", "DFS", "BFS", "动态规划", "栈", "队列"],
+    },
+    7: {
+        "name": "GESP 七级 · 图与复杂 DP",
+        "themes": ["复杂动态规划", "图遍历", "图论基础", "哈希表", "数学库函数"],
+        "key_points": [
+            "复杂动态规划（二维 DP / 最值优化）",
+            "图的定义与遍历",
+            "图论基本算法（DFS / BFS / 泛洪算法）",
+            "哈希表",
+            "数学库常用函数（三角 / 对数 / 指数）",
+        ],
+        "max_difficulty": 5,  # 提高+/省选-
+        "core_tags": ["动态规划", "图论", "哈希表", "DFS", "BFS", "泛洪"],
+    },
+    8: {
+        "name": "GESP 八级 · 高级算法",
+        "themes": ["计数原理", "排列组合", "杨辉三角", "倍增法", "图论应用", "算法优化"],
+        "key_points": [
+            "计数原理（加法 / 乘法）",
+            "排列与组合",
+            "杨辉三角",
+            "倍增法（二分倍增）",
+            "代数与平面几何（初中数学）",
+            "最小生成树（Kruskal / Prim）",
+            "单源最短路（Dijkstra / SPFA）",
+            "较复杂算法的时空复杂度分析 + 算法优化",
+        ],
+        "max_difficulty": 6,  # 省选/NOI-
+        "core_tags": ["组合数学", "倍增", "最小生成树", "最短路", "算法优化"],
+    },
+}
+
+# 难度名映射（与洛谷官方 7 档对齐）
+DIFFICULTY_DISPLAY = {
+    0: "暂无评定", 1: "入门", 2: "普及-", 3: "普及/提高-",
+    4: "普及+/提高", 5: "提高+/省选-", 6: "省选/NOI-", 7: "NOI/NOI+/CTSC",
+}
+
+
+def _build_gesp_prompt(
+    export_data: dict,
+    luogu_uid: str,
+    target_level: int,
+    profile_block: str,
+    gesp_history_block: str,
+) -> str:
+    """v3.9.64 · 构建 GESP 报告的 prompt（聚焦 8 级知识体系 + 备考路线图）"""
+    import datetime as _dt
+    current_time = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    # 把 GESP 8 级大纲注入 prompt
+    gesp_outline_lines = []
+    for lv in range(1, 9):
+        info = GESP_LEVELS[lv]
+        gesp_outline_lines.append(f"### {info['name']}")
+        gesp_outline_lines.append(f"**主题**：{' / '.join(info['themes'])}")
+        gesp_outline_lines.append(f"**核心 tags**：{' / '.join(info['core_tags'])}")
+        gesp_outline_lines.append(f"**对应洛谷难度上限**：d ≤ {info['max_difficulty']}（{DIFFICULTY_DISPLAY.get(info['max_difficulty'], '?')}）")
+        gesp_outline_lines.append("**关键知识点**：")
+        for kp in info["key_points"]:
+            gesp_outline_lines.append(f"  - {kp}")
+        gesp_outline_lines.append("")
+    gesp_outline_md = "\n".join(gesp_outline_lines)
+
+    # 学员 GESP 历史
+    solved = export_data.get("solved_count", 0)
+    failed = export_data.get("failed_count", 0)
+    summary = export_data.get("summary", {}) or {}
+    diff_hist = summary.get("difficulty_histogram") or {}
+    top_tags = summary.get("top_algorithm_tags") or summary.get("top_tags") or []
+
+    # 学员已通过的级别（从 gesp_history_block 文本里用正则抽）
+    import re as _re
+    passed_levels = []
+    for m in _re.finditer(r"GESP L(\d+).*?✅通过", gesp_history_block):
+        passed_levels.append(int(m.group(1)))
+    current_max = max(passed_levels) if passed_levels else 0
+
+    return f"""你是一位顶级的青少年编程教师与 GESP 认证规划师，专注于帮中小学生系统化备战 CCF GESP 等级认证。
+请你根据我提供的【GESP 8 级官方考纲】和【学员洛谷做题数据】，对学员进行 GESP 维度的深度诊断，并制定**冲刺目标级别**的备考路线图。
+
+**报告生成时间**：{current_time}
+**目标 GESP 级别**：{target_level} 级（{GESP_LEVELS.get(target_level, {}).get('name', '?')}）
+
+### GESP 8 级官方考纲（CCF 2025 版）
+{gesp_outline_md}
+
+### 学员学籍档案
+{profile_block or "（无档案数据）"}
+
+### 学员 GESP 真考历史
+{gesp_history_block or "（暂无 GESP 真考记录，按全新学员处理）"}
+
+### 学员当前洛谷做题统计
+- 本次导出已通过题数：{solved}
+- 本次导出未通过/卡住题数：{failed}
+- 难度分布直方图：{json.dumps(diff_hist, ensure_ascii=False)}
+- 偏好的算法标签 TOP：{json.dumps(top_tags, ensure_ascii=False)}
+
+请你输出一份**专为 GESP 备考**的结构化 Markdown 报告，必须包含以下章节（顺序固定）。风格要求：
+ - **不要复刻 NOI-CSP 报告的"6 维雷达图"**——GESP 报告是按 8 级知识地图展开的；
+ - 难度名称必须使用洛谷官方口径：入门 / 普及- / 普及/提高- / 普及+/提高 / 提高+/省选- / 省选/NOI- / NOI/NOI+/CTSC；
+ - 等级前缀符号使用 🟢已掌握 | 🟡部分掌握 | 🟠薄弱 | 🔴未接触 | ⚪不要求；
+ - 表格优先，少用长段落；每节结尾用 `<p class="text-blue-700 font-semibold">建议：...</p>` 收口。
+
+ 1. **【GESP 进度总览】**
+    用 Markdown 表格输出学员的 GESP 进度：`| 维度 | 状态 | 数据依据 |`
+    **必须包含 6 行**（顺序固定）：
+    1) 学员已通过最高级别  2) 最近一次考试分  3) 距目标级别 {target_level} 还差几级  4) 是否能免 CSP-J 初赛  5) 是否能免 CSP-S 初赛  6) 建议最近一次考试时间
+    状态列用 emoji 徽章（✅/❌/⏳）+ 简短文字。
+
+ 2. **【GESP 8 级知识地图 · 学员覆盖度】**
+    输出 1 张 8 级知识地图表，列固定为：`| 级别 | 名称 | 学员状态 | 核心 tags 覆盖 | 难度覆盖 | 风险 |`
+    8 行（1-8 级）必须全列。学员状态从以下 5 档选：🟢已掌握 / 🟡部分掌握 / 🟠薄弱 / 🔴未接触 / ⚪不要求。
+    - **核心 tags 覆盖**：用学员最近通过题目里是否出现该级核心 tag 来评估，给出覆盖度百分比和典型题号；
+    - **难度覆盖**：学员在 GESP 该级要求难度区间内的 AC 数（如 GESP 5 级要求 d ≤ 4，统计 d=1..4 的 AC 数）；
+    - **风险**：1-2 句指出"该级哪些核心 tag 还缺 / 难度上不去"。
+
+ 3. **【目标级别（{target_level} 级）知识盲区诊断】**
+    针对目标级别 `{target_level}` 的所有 key_points（见上方 GESP 大纲），逐一对照学员洛谷做题数据：
+    - 列出 **3-5 个学员已掌握** 的关键点（写"已掌握"，并给出 1-2 道题号证明）；
+    - 列出 **3-5 个学员未掌握 / 薄弱** 的关键点（写"未掌握/薄弱"，并说明数据证据：从未 AC 过相关 tag / 难度达不到 / 提交卡在某个题型）；
+    - 输出一段 80-150 字的"学员 vs 目标级别差距"诊断文字。
+
+ 4. **【从当前级别到目标级别 · 6 个月备考路线图】**
+    按月分阶段（如果当前级别 0 / 1 / 2，每阶段 2 个月；如果 3+，每阶段 1-2 个月），输出训练计划表：
+    `| 阶段 | 月份 | 主攻级别 | 核心知识点 | 推荐题单（洛谷题号） | 验收标准 |`
+    **至少 3 行**（不能只写 1 阶段敷衍）。每阶段：
+    - **主攻级别**：明确写出 GESP X 级；
+    - **核心知识点**：从 GESP 大纲里挑 3-5 个该阶段必须搞定的 key_points；
+    - **推荐题单**：每阶段给 3-5 道洛谷题号（按 Pxxxx 格式），并简述推荐理由（不超过 20 字）；
+    - **验收标准**：用什么方式判断"该阶段完成"（如：模拟考分数 ≥ 80 / 关键 tag 题量 ≥ 30 / 历年真题通过率 ≥ 60%）。
+
+ 5. **【训练弱项 TOP 5 · 优先突破】**
+    输出 Markdown 表格：`| 排名 | 弱项 | 触发场景 | 训练方法 | 推荐资源 |`
+    **必须 5 行**。弱项从第 3 节的"未掌握"清单里挑，按"提分性价比"排序（S > A > B）。每行训练方法要具体到"每天刷几道、刷多久"。
+
+ 6. **【GESP 报名 & 考试策略建议】**
+    - **下次报名建议**：GESP 一年 4 次（3/6/9/12 月），根据学员当前进度推荐最佳报名月份；
+    - **模拟考建议**：考前 1 个月怎么刷真题（年份 + 套数）；
+    - **跳级策略**：学员是否适合跳级（90+ 分的判定），如果当前已通过级别 ≥ 4，建议尝试跳级 1-2 级；
+    - **考前心理建设**：1-2 句鼓励性文字。
+
+ 7. **【核心建议（家长可执行版）】**
+    列出 5-8 条核心建议，按优先级排序（🔴紧急 / 🟡重要 / 🟢建议）。重点告诉家长"接下来 1 个月 / 3 个月 / 6 个月要做什么"，避免空话。例如：
+    - 🔴 紧急：未来 2 周内完成 5 道 GESP 5 级真题，记录错题
+    - 🟡 重要：每周固定 4 小时算法训练 + 1 小时真题模拟
+    - 🟢 建议：报名 6 月 GESP 5 级，目标 80+
+
+ 8. **【风险提示】**
+    - 列出 2-3 条"学员接下来 3 个月最大的潜在风险"（如：难度断层 / 心理瓶颈 / 时间投入不足）；
+    - 每条风险给出"规避方案"。
+"""
+
+
+def generate_gesp_report(
+    export_data: dict,
+    api_key: str,
+    base_url: str | None,
+    model_name: str,
+    *,
+    output_path: str | None = None,
+    resume_prefix: str | None = None,
+    luogu_uid: str = "",
+    target_level: int = 1,
+) -> str:
+    """v3.9.64 · 生成 GESP 备考报告（参照 GESP 1-8 级官方考纲）
+
+    与 generate_ai_report 的关键区别：
+      1. 报告主体按 GESP 8 级展开，不复用"6 维雷达图 / 风险诊断表"；
+      2. 学员的 GESP 真考历史 + 洛谷做题数据 + 目标级别 三方对照；
+      3. 给出 6 个月备考路线图 + 弱项 TOP 5 + 报名考试策略。
+
+    Args:
+        export_data: 选手数据导出结构（与 generate_ai_report 共享）
+        api_key: OpenAI 兼容 API Key
+        base_url: 可选第三方 Base URL
+        model_name: 模型名
+        output_path: 流式增量写入文件
+        resume_prefix: 续写前缀
+        luogu_uid: 洛谷 UID，用于拉学员档案 + GESP 真考历史
+        target_level: 用户选择的目标 GESP 级别（1-8）
+    """
+    if not str(api_key or "").strip():
+        raise ValueError("未配置 OpenAI API Key")
+
+    # 拉学员档案 + GESP 真考历史
+    profile_block = ""
+    gesp_history_block = ""
+    if luogu_uid:
+        try:
+            from task_store import _get_conn as _ts_get_conn
+            conn = _ts_get_conn()
+            try:
+                stu_row = conn.execute(
+                    "SELECT id, real_name, gender, birth_date, school, city, grade, province "
+                    "FROM students WHERE luogu_uid = ?",
+                    (str(luogu_uid).strip(),),
+                ).fetchone()
+                if stu_row:
+                    sd = dict(stu_row)
+                    sid_int = int(sd.get("id") or 0)
+                    age_str = ""
+                    if sd.get("birth_date"):
+                        try:
+                            from datetime import date as _date
+                            y, m, d = [int(x) for x in str(sd["birth_date"]).split("-")[:3]]
+                            today = _date.today()
+                            age = today.year - y - ((today.month, today.day) < (m, d))
+                            age_str = f"{age}岁"
+                        except Exception:
+                            age_str = str(sd.get("birth_date") or "")
+                    profile_lines = [
+                        f"- 姓名：{sd.get('real_name') or '未填'}",
+                        f"- 性别/年龄：{'男' if (sd.get('gender') or '').upper() == 'M' else '女' if (sd.get('gender') or '').upper() == 'F' else '未填'} / {age_str or '未填'}",
+                        f"- 学校：{sd.get('school') or '未填'}",
+                        f"- 城市/年级：{sd.get('city') or '未填'} / {sd.get('grade') or '未填'}",
+                    ]
+                    profile_block = "\n".join(profile_lines)
+
+                # GESP 真考历史
+                gesp_lines = []
+                try:
+                    for g in conn.execute(
+                        "SELECT g.registered_level, g.actual_score, g.passed, "
+                        "       g.certificate_no, c.name AS exam_name, c.exam_date, c.data_year "
+                        "FROM gesp_exams g LEFT JOIN competitions c ON c.id = g.exam_id "
+                        "WHERE g.student_id = ? ORDER BY COALESCE(c.exam_date, g.award_year || '-12-31') DESC",
+                        (sid_int,),
+                    ).fetchall():
+                        gd = dict(g)
+                        passed = "✅通过" if gd.get("passed") else "❌未通过"
+                        score = f"{gd.get('actual_score')}分" if gd.get("actual_score") else "未记录分数"
+                        gesp_lines.append(
+                            f"  - GESP L{gd.get('registered_level')} · {gd.get('exam_name') or gd.get('data_year') or '?'} · {passed} · {score}"
+                        )
+                except Exception as _ge:
+                    import logging as _lg
+                    _lg.getLogger("luogu_evaluator").error(
+                        f"[v3.9.64 /generate_gesp_report] 查 GESP 失败 sid={sid_int}: {_ge}",
+                        exc_info=True,
+                    )
+                if gesp_lines:
+                    gesp_history_block = "\n".join(gesp_lines)
+                else:
+                    gesp_history_block = "（暂无 GESP 真考记录，按全新学员处理）"
+            finally:
+                conn.close()
+        except Exception as _e:
+            import logging as _lg
+            _lg.getLogger("luogu_evaluator").error(
+                f"[v3.9.64 /generate_gesp_report] 拉档案失败 uid={luogu_uid}: {_e}",
+                exc_info=True,
+            )
+
+    # 构建 prompt
+    prompt = _build_gesp_prompt(
+        export_data, luogu_uid, target_level, profile_block, gesp_history_block
+    )
+
+    # 续写模式追加
+    if resume_prefix:
+        trimmed = _trim_to_safe_boundary(resume_prefix)
+        if trimmed:
+            prompt = prompt + f"""
+
+---
+
+### 续写模式（重要）
+以下是**已经生成的开头**（可能因网络中断/超时而中止），请你**直接从该前缀的下一个字符开始续写剩余部分**：
+- **不要重复输出已有内容**
+- **不要写"以下是..."、"好的"、"我继续"等开场白**
+- 保持与已有内容**完全一致**的 Markdown 风格、章节顺序
+
+[已生成内容开始]
+{trimmed}
+[已生成内容结束]
+"""
+
+    system_prompt = (
+        "你是顶级的青少年编程教师与 GESP 认证规划师，"
+        "熟悉 CCF GESP 1-8 级考纲与 C++/Python 双语言教学，"
+        "擅长把抽象算法知识拆解为中小学生可吸收的训练计划。"
+    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": prompt},
+    ]
+
+    client_kwargs = {
+        "api_key": api_key,
+        "timeout": 1800.0,
+    }
+    if base_url:
+        client_kwargs["base_url"] = base_url
+    client = OpenAI(**client_kwargs)
+
+    if output_path:
+        # 复用流式生成逻辑
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        initial_content = _trim_to_safe_boundary(resume_prefix) if resume_prefix else ""
+        collected: list[str] = []
+        with open(output_path, "w", encoding="utf-8") as f:
+            if initial_content:
+                f.write(initial_content)
+                f.flush()
+            try:
+                stream = client.chat.completions.create(
+                    model=model_name,
+                    messages=messages,
+                    stream=True,
+                    timeout=1800.0,
+                )
+                for chunk in stream:
+                    if not chunk.choices:
+                        continue
+                    content_piece = getattr(chunk.choices[0].delta, "content", None) or ""
+                    if content_piece:
+                        collected.append(content_piece)
+                        f.write(content_piece)
+                        f.flush()
+            except Exception:
+                raise
+        full_content = initial_content + "".join(collected)
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(full_content)
+        return full_content
+
+    # 非流式
+    response = client.chat.completions.create(
+        model=model_name, messages=messages, timeout=1800.0
+    )
+    return response.choices[0].message.content or ""
+
+
 def generate_ai_report(
     export_data: dict,
     api_key: str,

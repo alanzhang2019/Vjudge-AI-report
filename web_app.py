@@ -1738,6 +1738,9 @@ RETRY_FORM_FIELDS = (
     "gesp_score",
     "gesp_year",
     "gesp_certificate_no",
+    # v3.9.64 · 测评类型与目标级别（GESP 报告新增）
+    "exam_type",
+    "target_gesp_level",
     # v3.9.5 · CSP/NOIP/NOI 自录奖项持久化（同样原因）
     "csp_competition_type",
     "csp_award_level",
@@ -2318,7 +2321,7 @@ def _resolve_source_code_progress(export_data: dict | None) -> tuple[int, int]:
     return total_items, total_items
 
 
-def _build_report_paths(task_id: str, student_name: str, luogu_uid: str = "") -> tuple[Path, Path, Path, Path, Path]:
+def _build_report_paths(task_id: str, student_name: str, luogu_uid: str = "", exam_type: str = "noi_csp") -> tuple[Path, Path, Path, Path, Path]:
     safe_name = "".join(c for c in student_name if c.isalnum() or c in "_-").strip() or "unknown"
     folder_name = f"{task_id[:8]}_{safe_name}"
     out_dir = Path("reports") / folder_name
@@ -2332,12 +2335,14 @@ def _build_report_paths(task_id: str, student_name: str, luogu_uid: str = "") ->
             (out_dir / "luogu_uid.txt").write_text(str(luogu_uid).strip(), encoding="utf-8")
         except Exception:
             pass
+    # v3.9.64 · 按报告类型分文件，避免同学员两份报告互相覆盖
+    _suffix = "_gesp" if (exam_type or "noi_csp") == "gesp" else "_noi_csp"
     return (
         out_dir,
         assets_dir,
-        out_dir / "report.md",
-        out_dir / "report.html",
-        out_dir / "report.pdf",
+        out_dir / f"report{_suffix}.md",
+        out_dir / f"report{_suffix}.html",
+        out_dir / f"report{_suffix}.pdf",
     )
 
 
@@ -2364,8 +2369,11 @@ def _generate_ai_report_artifacts(
     grade: str,
     resume_md_prefix: str | None = None,
     luogu_uid: str = "",  # v3.8 · 注入档案 + 奖项 + 政策
+    exam_type: str = "noi_csp",  # v3.9.64 · noi_csp / gesp
+    target_gesp_level: int | str | None = None,  # v3.9.64 · 仅 GESP 用
 ) -> None:
-    current_stage = "生成 AI 报告"
+    current_stage = "生成 GESP 报告" if (exam_type or "noi_csp") == "gesp" else "生成 AI 报告"
+    _is_gesp = (exam_type or "noi_csp") == "gesp"
     with TASKS_LOCK:
         update_task(
             task_id,
@@ -2373,22 +2381,31 @@ def _generate_ai_report_artifacts(
             ai_progress=1,
             ai_elapsed_seconds=0,
             message=(
-                f"正在调用 {model_name} 生成 AI 报告（流式写入，断连可自动续写）..."
+                f"正在调用 {model_name} 生成 {'GESP 备考' if _is_gesp else 'AI'} 报告（流式写入，断连可自动续写）..."
                 if not resume_md_prefix
-                else f"正在续写 AI 报告（已加载 {len(resume_md_prefix)} 字符前置内容）..."
+                else f"正在续写 {'GESP 备考' if _is_gesp else 'AI'} 报告（已加载 {len(resume_md_prefix)} 字符前置内容）..."
             ),
         )
     if not str(api_key or "").strip():
         raise ValueError("未配置 OpenAI API Key：请在页面填写 OpenAI API Key，或在服务端设置环境变量 OPENAI_API_KEY / OPENAI_ADMIN_KEY，并重启服务使其生效。")
+    # v3.9.64 · GESP 时把 target_gesp_level 解析为 int（auto → 让 GESP 模块自己算）
+    _target_level: int | None = None
+    if _is_gesp:
+        if isinstance(target_gesp_level, int):
+            _target_level = target_gesp_level
+        else:
+            _raw = str(target_gesp_level or "").strip()
+            if _raw and _raw.isdigit():
+                _target_level = int(_raw)
     ai_holder: dict[str, object] = {
         "done": False,
         "report_md": None,
         "exc": None,
         "attempt": 1,
         "status_message": (
-            f"正在调用 {model_name} 生成 AI 报告（流式写入，断连可自动续写）..."
+            f"正在调用 {model_name} 生成 {'GESP 备考' if _is_gesp else 'AI'} 报告（流式写入，断连可自动续写）..."
             if not resume_md_prefix
-            else f"正在续写 AI 报告（已加载 {len(resume_md_prefix)} 字符前置内容）..."
+            else f"正在续写 {'GESP 备考' if _is_gesp else 'AI'} 报告（已加载 {len(resume_md_prefix)} 字符前置内容）..."
         ),
     }
 
@@ -2399,19 +2416,32 @@ def _generate_ai_report_artifacts(
         while attempt <= AI_GENERATION_MAX_RETRIES:
             ai_holder["attempt"] = attempt
             ai_holder["status_message"] = (
-                f"正在调用 {model_name} 生成 AI 报告（第 {attempt}/{AI_GENERATION_MAX_RETRIES} 次）"
+                f"正在调用 {model_name} 生成 {'GESP 备考' if _is_gesp else 'AI'} 报告（第 {attempt}/{AI_GENERATION_MAX_RETRIES} 次）"
                 + (f" [续写 {len(current_resume)} 字符]" if current_resume else "")
             )
             try:
-                ai_holder["report_md"] = generate_ai_report(
-                    export_data,
-                    api_key,
-                    base_url,
-                    model_name,
-                    output_path=str(md_path),
-                    resume_prefix=current_resume or None,
-                    luogu_uid=luogu_uid,  # v3.8 · 注入档案 + 奖项 + 政策匹配
-                )
+                if _is_gesp:
+                    # v3.9.64 · GESP 报告生成入口
+                    ai_holder["report_md"] = generate_gesp_report(
+                        export_data,
+                        api_key,
+                        base_url,
+                        model_name,
+                        output_path=str(md_path),
+                        resume_prefix=current_resume or None,
+                        luogu_uid=luogu_uid,
+                        target_level=_target_level if _target_level else 1,
+                    )
+                else:
+                    ai_holder["report_md"] = generate_ai_report(
+                        export_data,
+                        api_key,
+                        base_url,
+                        model_name,
+                        output_path=str(md_path),
+                        resume_prefix=current_resume or None,
+                        luogu_uid=luogu_uid,  # v3.8 · 注入档案 + 奖项 + 政策匹配
+                    )
                 ai_holder["exc"] = None
                 break
             except Exception as exc:
@@ -2704,6 +2734,11 @@ def run_generation(task_id: str, form: dict):
         student_name = form.get("student_name", "未知选手").strip()
         school = form.get("school", "未知学校").strip()
         grade = form.get("grade", "未知年级").strip()
+        # v3.9.64 · 测评类型（noi_csp / gesp） + 目标 GESP 级别
+        _exam_type_raw = str(form.get("exam_type") or "noi_csp").strip().lower()
+        exam_type = _exam_type_raw if _exam_type_raw in ("noi_csp", "gesp") else "noi_csp"
+        _target_gesp_level_raw = str(form.get("target_gesp_level") or "auto").strip()
+        target_gesp_level: int | str = _target_gesp_level_raw if _target_gesp_level_raw else "auto"
         resume_task_id = str(form.get("resume_task_id", "") or "").strip()
         resume_export_data, resume_task = load_resume_export_data(resume_task_id)
         if resume_export_data is not None:
@@ -2714,7 +2749,8 @@ def run_generation(task_id: str, form: dict):
                 grade = str(student_info.get("grade") or grade or "未知年级").strip()
 
         out_dir, assets_dir, md_path, html_path, pdf_path = _build_report_paths(
-            task_id, student_name, luogu_uid=str(form.get("luogu_uid") or form.get("uid") or "").strip()
+            task_id, student_name, luogu_uid=str(form.get("luogu_uid") or form.get("uid") or "").strip(),
+            exam_type=exam_type,  # v3.9.64 · 按测评类型分文件
         )
 
         if resume_export_data is not None:
@@ -2771,6 +2807,8 @@ def run_generation(task_id: str, form: dict):
                 grade=grade,
                 resume_md_prefix=resume_md_prefix or None,
                 luogu_uid=str(form.get("luogu_uid", "") or "").strip(),  # v3.8 · 注入档案
+                exam_type=exam_type,  # v3.9.64 · noi_csp / gesp
+                target_gesp_level=target_gesp_level,  # v3.9.64 · 仅 GESP 用
             )
             return
 
@@ -3189,6 +3227,8 @@ def run_generation(task_id: str, form: dict):
             school=school,
             grade=grade,
             luogu_uid=_form_uid,  # v3.8 · 注入档案（已含 luogu_uid/uid 兜底）
+            exam_type=exam_type,  # v3.9.64 · noi_csp / gesp
+            target_gesp_level=target_gesp_level,  # v3.9.64 · 仅 GESP 用
         )
     except Exception as e:
         # 用 task 表里最新写入的 stage 替换外层缓存的 current_stage，
@@ -3738,6 +3778,16 @@ STATUS_HTML = """
         <div class="app-card text-center">
             <h1 class="app-title">📊 报告生成状态</h1>
             <p class="app-subtitle">AI 正在生成报告，请不要关闭本页面</p>
+            {# v3.9.64 · 报告类型 chip（NOI-CSP / GESP） #}
+            {% if task_type == 'report_gesp' %}
+            <div class="mt-2">
+                <span class="inline-block px-3 py-1 text-xs font-bold rounded-full bg-blue-100 text-blue-800">📘 GESP 备考报告</span>
+            </div>
+            {% else %}
+            <div class="mt-2">
+                <span class="inline-block px-3 py-1 text-xs font-bold rounded-full bg-emerald-100 text-emerald-800">🏆 NOI-CSP 测评</span>
+            </div>
+            {% endif %}
         </div>
         <div class="app-card text-center">
             <div class="mb-4">
@@ -3767,7 +3817,7 @@ STATUS_HTML = """
             </div>
         </div>
         {% endif %}
-        {% if stage == '生成 AI 报告' %}
+        {% if stage == '生成 AI 报告' or stage == '生成 GESP 报告' %}
         <div class="mb-4 text-left">
             <div class="flex items-center justify-between text-sm text-gray-600 mb-1">
                 <span>AI 报告生成进度</span>
@@ -5557,6 +5607,133 @@ STUDENT_REPORT_HTML = """
         </div>
     </div>
 
+    <!-- v3.9.64 · 我的报告（按测评类型 tab 切换：NOI-CSP / GESP） -->
+    <div class="bg-white rounded-2xl card-shadow p-5">
+        <div class="flex items-center justify-between mb-3">
+            <h2 class="text-base font-bold text-gray-800">📊 我的报告</h2>
+            <span class="text-xs text-gray-400">按测评类型分卡片</span>
+        </div>
+        <!-- tab 切换器 -->
+        <div class="flex gap-2 mb-4">
+            <button type="button" onclick="switchReportTab('noi_csp')" id="tabNoiCsp"
+                    class="flex-1 px-3 py-2 rounded-lg text-sm font-bold transition
+                           bg-emerald-500 text-white shadow">
+                🏆 NOI-CSP 测评
+            </button>
+            <button type="button" onclick="switchReportTab('gesp')" id="tabGesp"
+                    class="flex-1 px-3 py-2 rounded-lg text-sm font-bold transition
+                           bg-gray-100 text-gray-600 hover:bg-gray-200">
+                📘 GESP 备考报告
+            </button>
+        </div>
+        <!-- NOI-CSP 报告卡片 -->
+        <div id="cardNoiCsp" class="report-type-card">
+            {% if latest_noi_csp_card.exists %}
+            <div class="border-2 border-emerald-200 bg-emerald-50/40 rounded-xl p-4">
+                <div class="flex items-start justify-between gap-2 mb-2">
+                    <div>
+                        <div class="text-sm font-bold text-emerald-800">🏆 NOI-CSP 测评报告</div>
+                        <div class="text-[11px] text-gray-500 mt-0.5">📅 {{ latest_noi_csp_card.mtime_display }} · {{ latest_noi_csp_card.dir_name }}</div>
+                    </div>
+                    <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold whitespace-nowrap">最新</span>
+                </div>
+                <p class="text-xs text-gray-600 mb-3">6 维能力雷达 + 风险诊断 + 段位评估（基于洛谷做题数据）</p>
+                <div class="flex flex-wrap gap-2">
+                    {% if latest_noi_csp_card.has_html %}
+                    <a href="{{ latest_noi_csp_card.html_url }}" target="_blank"
+                       class="px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold">🔍 查看 HTML 报告</a>
+                    {% endif %}
+                    {% if latest_noi_csp_card.has_pdf %}
+                    <a href="{{ latest_noi_csp_card.pdf_url }}" target="_blank"
+                       class="px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold">📄 下载 PDF</a>
+                    {% endif %}
+                    <a href="{{ latest_noi_csp_card.share_url }}" target="_blank"
+                       class="px-3 py-1.5 rounded-md bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold">📤 生成分享海报</a>
+                </div>
+            </div>
+            {% else %}
+            <div class="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center">
+                <div class="text-4xl mb-2">🏆</div>
+                <p class="text-sm text-gray-500">还没有 NOI-CSP 报告</p>
+                <a href="/generate-form" class="inline-block mt-3 px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold">📝 立即生成</a>
+            </div>
+            {% endif %}
+        </div>
+        <!-- GESP 报告卡片 -->
+        <div id="cardGesp" class="report-type-card" style="display:none;">
+            {% if latest_gesp_card.exists %}
+            <div class="border-2 border-blue-200 bg-blue-50/40 rounded-xl p-4">
+                <div class="flex items-start justify-between gap-2 mb-2">
+                    <div>
+                        <div class="text-sm font-bold text-blue-800">📘 GESP 备考报告</div>
+                        <div class="text-[11px] text-gray-500 mt-0.5">📅 {{ latest_gesp_card.mtime_display }} · {{ latest_gesp_card.dir_name }}</div>
+                    </div>
+                    <span class="text-[10px] px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold whitespace-nowrap">最新</span>
+                </div>
+                <p class="text-xs text-gray-600 mb-3">GESP 1-8 级考纲对照 + 备考路线图 + 弱项诊断</p>
+                <div class="flex flex-wrap gap-2">
+                    {% if latest_gesp_card.has_html %}
+                    <a href="{{ latest_gesp_card.html_url }}" target="_blank"
+                       class="px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold">🔍 查看 GESP 报告</a>
+                    {% endif %}
+                    {% if latest_gesp_card.has_pdf %}
+                    <a href="{{ latest_gesp_card.pdf_url }}" target="_blank"
+                       class="px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold">📄 下载 PDF</a>
+                    {% endif %}
+                    <a href="{{ latest_gesp_card.share_url }}" target="_blank"
+                       class="px-3 py-1.5 rounded-md bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold">📤 生成分享海报</a>
+                </div>
+            </div>
+            {% else %}
+            <div class="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center">
+                <div class="text-4xl mb-2">📘</div>
+                <p class="text-sm text-gray-500">还没有 GESP 备考报告</p>
+                <a href="/generate-form?exam_type=gesp" class="inline-block mt-3 px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold">📝 立即生成 GESP 报告</a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    <script>
+    // v3.9.64 · 报告类型 tab 切换
+    function switchReportTab(type) {
+        try {
+            var noiBtn = document.getElementById('tabNoiCsp');
+            var gespBtn = document.getElementById('tabGesp');
+            var noiCard = document.getElementById('cardNoiCsp');
+            var gespCard = document.getElementById('cardGesp');
+            if (!noiBtn || !gespBtn || !noiCard || !gespCard) return;
+            // 默认激活态：emerald-500 + 白字 + shadow
+            // 未激活：bg-gray-100 + text-gray-600
+            if (type === 'gesp') {
+                gespBtn.className = 'flex-1 px-3 py-2 rounded-lg text-sm font-bold transition bg-blue-500 text-white shadow';
+                noiBtn.className  = 'flex-1 px-3 py-2 rounded-lg text-sm font-bold transition bg-gray-100 text-gray-600 hover:bg-gray-200';
+                gespCard.style.display = 'block';
+                noiCard.style.display  = 'none';
+            } else {
+                noiBtn.className  = 'flex-1 px-3 py-2 rounded-lg text-sm font-bold transition bg-emerald-500 text-white shadow';
+                gespBtn.className = 'flex-1 px-3 py-2 rounded-lg text-sm font-bold transition bg-gray-100 text-gray-600 hover:bg-gray-200';
+                noiCard.style.display  = 'block';
+                gespCard.style.display = 'none';
+            }
+            try { localStorage.setItem('me_report_tab', type); } catch (e) {}
+        } catch (e) { console.error('switchReportTab err:', e); }
+    }
+    // 记住用户上次选的 tab
+    (function() {
+        try {
+            var saved = localStorage.getItem('me_report_tab') || 'noi_csp';
+            // 如果该 tab 对应的报告不存在，自动 fallback
+            if (saved === 'gesp' && !{{ 'true' if latest_gesp_card.exists else 'false' }}) {
+                saved = 'noi_csp';
+            }
+            if (saved === 'noi_csp' && !{{ 'true' if latest_noi_csp_card.exists else 'false' }} && {{ 'true' if latest_gesp_card.exists else 'false' }}) {
+                saved = 'gesp';
+            }
+            switchReportTab(saved);
+        } catch (e) { console.error('tab restore err:', e); }
+    })();
+    </script>
+
     <!-- v3.8 · 历史报告 HTML（直接展示，📤 图标触发分享模态框） -->
     <div class="bg-white rounded-2xl card-shadow p-5">
         <div class="flex items-center justify-between mb-3">
@@ -6714,6 +6891,11 @@ def generate_form():
     """
     form = _load_student_form_from_session()
 
+    # v3.9.64 · 从 URL query ?exam_type=gesp 预选报告类型
+    _url_exam_type = str(request.args.get("exam_type", "")).strip().lower()
+    if _url_exam_type in ("noi_csp", "gesp"):
+        form["exam_type"] = _url_exam_type
+
     # v3.9.52 · 密码登录成功跳过来时，从 session 把 temp_cookies 写到 form
     info = None
     if request.args.get("_pwd_login"):
@@ -7007,7 +7189,12 @@ def generate_form_submit():
     try:
         import json as _json
         task_id = str(uuid.uuid4())
-        # 把 v3.5.2 表单字段映射到 v1 form_data 字段
+        # v3.9.64 · 测评类型：noi_csp（默认）/ gesp
+        _exam_type = (form.get("exam_type") or "noi_csp").strip()
+        if _exam_type not in ("noi_csp", "gesp"):
+            _exam_type = "noi_csp"
+        _target_gesp_level_raw = (form.get("target_gesp_level") or "auto").strip()
+        # v3.9.64 · 把 v3.5.2 表单字段映射到 v1 form_data 字段
         v1_form = {
             "client_id": form.get("client_id", ""),
             "uid": luogu_uid,
@@ -7018,9 +7205,14 @@ def generate_form_submit():
             "student_name": (form.get("real_name") or "").strip(),
             "school": (form.get("school") or "").strip(),
             "grade": (form.get("grade") or "").strip(),
+            # v3.9.64 · 新增：测评类型 + 目标 GESP 级别
+            "exam_type": _exam_type,
+            "target_gesp_level": _target_gesp_level_raw,
         }
         with TASKS_LOCK:
-            insert_task(task_id, status="queued", message="排队中...", luogu_uid=luogu_uid)
+            # v3.9.64 · task_type 区分报告类型（report_noi_csp / report_gesp），方便后续按类型筛选
+            _task_type = "report_gesp" if _exam_type == "gesp" else "report_noi_csp"
+            insert_task(task_id, status="queued", message="排队中...", luogu_uid=luogu_uid, task_type=_task_type)
             update_task(
                 task_id,
                 student_name=v1_form["student_name"] or "未知选手",
@@ -7524,6 +7716,52 @@ GENERATE_FORM_HTML = """
             </div>
         </details>
 
+        <!-- v3.9.64 · 4.5 测评类型 + 目标 GESP 级别 -->
+        <div class="border-t border-gray-200 pt-4">
+            <h3 class="text-sm font-bold text-gray-800 mb-2 flex items-center gap-2">
+                <span class="text-base">🎯</span>
+                <span>测评类型与目标</span>
+            </h3>
+            {% set _cur_exam_type = (form.get('exam_type') if form.get('exam_type') in ('noi_csp', 'gesp') else 'noi_csp') %}
+            <div class="grid grid-cols-2 gap-2 mb-3" id="examTypeGroup">
+                <label class="cursor-pointer">
+                    <input type="radio" name="exam_type" value="noi_csp"
+                           {% if _cur_exam_type == 'noi_csp' %}checked{% endif %}
+                           class="peer hidden" onchange="onExamTypeChange()">
+                    <div class="border-2 border-gray-200 peer-checked:border-emerald-500 peer-checked:bg-emerald-50
+                                rounded-lg p-3 text-center transition hover:border-gray-300">
+                        <div class="text-2xl">🏆</div>
+                        <div class="text-sm font-bold text-gray-800 mt-1">NOI-CSP 测评</div>
+                        <div class="text-[10px] text-gray-500 mt-0.5">基于洛谷做题数据，6 维能力雷达 + 风险诊断</div>
+                    </div>
+                </label>
+                <label class="cursor-pointer">
+                    <input type="radio" name="exam_type" value="gesp"
+                           {% if _cur_exam_type == 'gesp' %}checked{% endif %}
+                           class="peer hidden" onchange="onExamTypeChange()">
+                    <div class="border-2 border-gray-200 peer-checked:border-blue-500 peer-checked:bg-blue-50
+                                rounded-lg p-3 text-center transition hover:border-gray-300">
+                        <div class="text-2xl">📘</div>
+                        <div class="text-sm font-bold text-gray-800 mt-1">GESP 备考报告</div>
+                        <div class="text-[10px] text-gray-500 mt-0.5">参照 GESP 1-8 级考纲，备考路线图 + 弱项诊断</div>
+                    </div>
+                </label>
+            </div>
+            <div id="targetGespLevelBlock" style="display:none;">
+                <label class="app-label">目标 GESP 级别（默认 = 系统自动算）</label>
+                {% set _cur_tgl = form.get('target_gesp_level') or 'auto' %}
+                <select name="target_gesp_level" class="app-select mt-1">
+                    <option value="auto" {% if _cur_tgl == 'auto' %}selected{% endif %}>🤖 系统自动算（推荐）</option>
+                    {% for n in range(1, 9) %}
+                    <option value="{{ n }}" {% if _cur_tgl == n|string %}selected{% endif %}>
+                        GESP {{ n }} 级
+                    </option>
+                    {% endfor %}
+                </select>
+                <p class="text-[10px] text-gray-500 mt-1">💡 系统会从你的 GESP 真考历史算出"下一可考级别"作为推荐</p>
+            </div>
+        </div>
+
         <!-- 5. PIPL 同意 -->
         <div class="border-t border-gray-200 pt-4">
             <label class="flex items-start gap-2 cursor-pointer">
@@ -7546,6 +7784,24 @@ GENERATE_FORM_HTML = """
 </div>
 
 <script>
+    // v3.9.64 · 测评类型切换：选中 GESP 时显示"目标级别"下拉
+    function onExamTypeChange() {
+        try {
+            var gespRadio = document.querySelector('input[name="exam_type"][value="gesp"]');
+            var block = document.getElementById('targetGespLevelBlock');
+            if (!block) return;
+            block.style.display = (gespRadio && gespRadio.checked) ? 'block' : 'none';
+        } catch (e) { console.error('onExamTypeChange err:', e); }
+    }
+    // 页面加载时初始化一次（防止刷新后状态丢失）
+    (function() {
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', onExamTypeChange);
+        } else {
+            onExamTypeChange();
+        }
+    })();
+
     (function () {
         function v(id) {
             var el = document.querySelector('input[name="' + id + '"]');
@@ -10082,6 +10338,18 @@ def student_me(luogu_uid: str):
     # v3.9.3 · 把 name 传给 _find_latest_report_dir，让"目录名以 _姓名 结尾"兜底分支生效
     try:
         latest = _find_latest_report_dir(luogu_uid, (student.get("real_name") or "") if student else "")
+        # v3.9.64 · 按测评类型各找一份最新报告，分别提取 6 维/错题/AI 分
+        latest_noi_csp_dir = _find_latest_report_dir_by_type(luogu_uid, (student.get("real_name") or "") if student else "", "noi_csp")
+        latest_gesp_dir = _find_latest_report_dir_by_type(luogu_uid, (student.get("real_name") or "") if student else "", "gesp")
+        achievements["latest_noi_csp_dir"] = latest_noi_csp_dir.name if latest_noi_csp_dir else None
+        achievements["latest_gesp_dir"] = latest_gesp_dir.name if latest_gesp_dir else None
+        # v3.9.64 · 优先用 NOI-CSP 作为主报告（沿用旧行为），如果只有 GESP 则用 GESP
+        if latest:
+            pass
+        elif latest_gesp_dir and not latest_noi_csp_dir:
+            latest = latest_gesp_dir
+        elif latest_noi_csp_dir and not latest:
+            latest = latest_noi_csp_dir
         if latest and (latest / "report.md").exists():
             report_md = (latest / "report.md").read_text(encoding="utf-8", errors="replace")
             if len(report_md.strip()) > 100:  # v3.9.17 · 报告非空
@@ -10159,6 +10427,43 @@ def student_me(luogu_uid: str):
     except Exception as _e_rank:
         app.logger.debug(f"[student_me] my_rank 计算失败: {_e_rank}")
 
+    # v3.9.64 · 把按类型最新一份报告打包成模板卡片
+    def _pack_report_card(_d, _type: str) -> dict:
+        if not _d:
+            return {"exists": False, "type": _type}
+        _suffix = "_gesp" if _type == "gesp" else "_noi_csp"
+        _html = _d / f"report{_suffix}.html"
+        _pdf = _d / f"report{_suffix}.pdf"
+        _md = _d / f"report{_suffix}.md"
+        if not _html.exists():
+            _html = _d / "report.html"
+        if not _md.exists():
+            _md = _d / "report.md"
+        if not _pdf.exists():
+            _pdf = _d / "report.pdf"
+        try:
+            import datetime as _dt
+            _BJ = _dt.timezone(_dt.timedelta(hours=8))
+            _m = _dt.datetime.fromtimestamp(_d.stat().st_mtime, tz=_BJ)
+            _mtime_str = _m.strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            _mtime_str = ""
+        return {
+            "exists": True,
+            "type": _type,
+            "dir_name": _d.name,
+            "mtime_display": _mtime_str,
+            "html_url": f"/reports/{_d.name}/{_html.name}" if _html.exists() else "",
+            "pdf_url": f"/reports/{_d.name}/{_pdf.name}" if _pdf.exists() else "",
+            "md_url": f"/reports/{_d.name}/{_md.name}" if _md.exists() else "",
+            "has_html": _html.exists(),
+            "has_pdf": _pdf.exists(),
+            "share_url": f"/me/{luogu_uid}/share-card.png",
+            "has_poster": (_d / "share-card.png").exists(),
+        }
+    latest_noi_csp_card = _pack_report_card(latest_noi_csp_dir, "noi_csp")
+    latest_gesp_card = _pack_report_card(latest_gesp_dir, "gesp")
+
     return render_template_string(
         STUDENT_ME_HTML,
         student=student_dict,
@@ -10178,6 +10483,9 @@ def student_me(luogu_uid: str):
         report_htmls=_list_student_report_htmls(luogu_uid, (student.get("real_name") or "") if student else "", limit=8),
         # v3.9.46 · 我的排名（C 形态卡片用）
         my_rank=my_rank,
+        # v3.9.64 · 按报告类型分别的"最新报告"卡片（NOI-CSP / GESP）
+        latest_noi_csp_card=latest_noi_csp_card,
+        latest_gesp_card=latest_gesp_card,
     )
 
 
@@ -10425,6 +10733,20 @@ def _render_student_me_lite(luogu_uid: str):
         _report_htmls = _list_student_report_htmls(luogu_uid, _lite_name, limit=8)
     except Exception:
         _report_htmls = []
+    # v3.9.64 · lite 路径也按类型找最新一份（lite 模板暂不展示 tab，只占位传参避免 KeyError）
+    try:
+        _lite_noi_dir = _find_latest_report_dir_by_type(luogu_uid, _lite_name, "noi_csp")
+        _lite_gesp_dir = _find_latest_report_dir_by_type(luogu_uid, _lite_name, "gesp")
+    except Exception:
+        _lite_noi_dir = _lite_gesp_dir = None
+    def _lite_pack(_d, _type: str) -> dict:
+        if not _d:
+            return {"exists": False, "type": _type}
+        _suffix = "_gesp" if _type == "gesp" else "_noi_csp"
+        return {
+            "exists": True, "type": _type, "dir_name": _d.name,
+            "has_html": (_d / f"report{_suffix}.html").exists() or (_d / "report.html").exists(),
+        }
     return render_template_string(
         STUDENT_ME_LITE_HTML,
         student=student_dict,
@@ -10432,6 +10754,8 @@ def _render_student_me_lite(luogu_uid: str):
         achievements=achievements,
         mistake_count=len(achievements.get("mistakes") or []),
         report_htmls=_report_htmls,
+        latest_noi_csp_card=_lite_pack(_lite_noi_dir, "noi_csp"),
+        latest_gesp_card=_lite_pack(_lite_gesp_dir, "gesp"),
     )
 
 
@@ -13202,6 +13526,74 @@ def _find_latest_report_dir(luogu_uid: str, student_name: str = "") -> "Path | N
         return None
     pool.sort(key=lambda x: x.stat().st_mtime, reverse=True)
     return pool[0]
+
+
+def _find_latest_report_dir_by_type(luogu_uid: str, student_name: str, exam_type: str) -> "Path | None":
+    """v3.9.64 · 按报告类型分别找最新一份（noi_csp / gesp）。
+
+    判定规则（按优先级降序）：
+      1. 目录内存在 report_gesp.md / report_noi_csp.md → 类型明确
+      2. 兼容旧报告：存在 report.md 且无 _noi_csp/_gesp 后缀文件 → 视为 NOI-CSP（默认类型）
+    """
+    reports_root = Path(__file__).parent / "reports"
+    if not reports_root.exists():
+        return None
+    target_uid = str(luogu_uid or "").strip()
+    safe_name = "".join(c for c in (student_name or "") if c.isalnum() or c in "_-").strip()
+    want_gesp = (exam_type or "noi_csp") == "gesp"
+
+    exact: list = []
+    legacy: list = []
+    by_name: list = []
+    for d in reports_root.iterdir():
+        if not d.is_dir():
+            continue
+        # 1) 该目录"是否属于目标类型"
+        has_gesp = (d / "report_gesp.md").exists() or (d / "report_gesp.html").exists()
+        has_noi = (d / "report_noi_csp.md").exists() or (d / "report_noi_csp.html").exists()
+        # 兼容旧报告（只有 report.md / export_data.json，视为 noi_csp）
+        if not (has_gesp or has_noi):
+            has_old = (d / "report.md").exists() or (d / "export_data.json").exists()
+            if not has_old:
+                continue
+            is_target = (not want_gesp)  # 旧报告默认算 noi_csp
+        else:
+            is_target = (has_gesp if want_gesp else has_noi)
+        if not is_target:
+            continue
+        # 2) 该目录"是否属于该学员"
+        matched = False
+        if target_uid:
+            try:
+                if (d / "luogu_uid.txt").read_text(encoding="utf-8", errors="replace").strip() == target_uid:
+                    matched = True
+            except Exception:
+                pass
+        if not matched and target_uid and target_uid in d.name:
+            matched = True
+        if not matched and safe_name and d.name.endswith(f"_{safe_name}"):
+            matched = True
+        if matched:
+            # 用目录 mtime 排序，命中其中一类即可
+            if target_uid and (d / "luogu_uid.txt").exists():
+                exact.append(d)
+            elif target_uid and target_uid in d.name:
+                legacy.append(d)
+            else:
+                by_name.append(d)
+    pool = exact or legacy or by_name
+    if not pool:
+        return None
+    pool.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+    return pool[0]
+
+
+def _list_user_reports(luogu_uid: str, student_name: str = "") -> list[dict]:
+    """v3.9.64 · 列出该学员全部报告（按 mtime desc）
+
+    返回 [{dir, mtime, type, has_html, has_pdf, has_md, html_url, pdf_url, md_url, dir_name}, ...]
+    type: 'gesp' | 'noi_csp' | 'unknown'
+    """
 
 
 def _list_reports_for_uid(luogu_uid: str) -> list:

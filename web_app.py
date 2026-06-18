@@ -5,6 +5,7 @@ import uuid
 import threading
 import time
 import hmac
+import hashlib
 from pathlib import Path
 from datetime import datetime, date, timedelta, timezone
 
@@ -18,9 +19,9 @@ def _NOW_BJ():
 from urllib.parse import urlsplit, urlunsplit
 from openai import APIConnectionError, APITimeoutError, APIError, RateLimitError as OpenAIRateLimitError
 try:
-    from flask import Flask, render_template_string, request, redirect, url_for, send_from_directory, send_file, session, flash, Response, make_response
+    from flask import Flask, render_template_string, request, redirect, url_for, send_from_directory, send_file, session, flash, Response, make_response, jsonify
 except ImportError:
-    from flask import Flask, render_template_string, request, redirect, url_for, send_from_directory, send_file, session, flash, Response, make_response
+    from flask import Flask, render_template_string, request, redirect, url_for, send_from_directory, send_file, session, flash, Response, make_response, jsonify
     session = {}
 
 from env_loader import load_dotenv
@@ -123,6 +124,8 @@ from luogu_evaluator import (
 from behavior_analyzer import (
     compute_six_dimension_scores,
     format_behavior_summary,
+    compute_comprehensive_score,        # v3.9.44 · 综合分（6 维 + 反刷题 3 维）
+    compute_anti_grind_dimensions,       # v3.9.44
 )
 from syllabus_matcher import (
     evaluate_all_topics,
@@ -246,6 +249,59 @@ app.secret_key = (
 app.permanent_session_lifetime = timedelta(days=180)
 
 
+# v3.9.62 · /me/<uid> 链接签名 token —— 防 UID 枚举爬取个人中心
+# 排行榜 / 海报 / admin 面板上的 /me/<uid> 链接必须带 ?t=<token>，否则 404
+# token = HMAC-SHA256(ME_TOKEN_SECRET, str(uid))[:24]  (24 hex = 96 bit)
+# secret 默认值只在 dev 用，prod 必须从 .env 注入（deploy.sh 启动时会读）
+_ME_TOKEN_SECRET = (
+    os.environ.get("ME_TOKEN_SECRET")
+    or "luogu-ai-me-token-CHANGE-ME-IN-PROD-9b4e7d2a"
+)
+
+
+def _sign_me_token(luogu_uid: str) -> str:
+    """v3.9.62 · 给 /me/<uid> 链接签发短 token（24 hex 字符）
+
+    返回 "" 表示 uid 无效（前端应跳过生成链接）。
+    """
+    uid_str = str(luogu_uid or "").strip()
+    if not uid_str:
+        return ""
+    msg = uid_str.encode("utf-8")
+    secret = _ME_TOKEN_SECRET.encode("utf-8")
+    return hmac.new(secret, msg, hashlib.sha256).hexdigest()[:24]
+
+
+def _verify_me_token(luogu_uid: str, token: str) -> bool:
+    """v3.9.62 · 验证 /me/<uid>?t=<token> 中的 token 是否有效（constant-time）"""
+    if not luogu_uid or not token:
+        return False
+    expected = _sign_me_token(luogu_uid)
+    if not expected:
+        return False
+    # constant-time 比较防止时序攻击
+    return hmac.compare_digest(expected, str(token).strip())
+
+
+def _me_url(luogu_uid: str) -> str:
+    """v3.9.62 · 返回带签名的 /me/<uid> URL（用于排行榜 / 海报 / admin）"""
+    uid_str = str(luogu_uid or "").strip()
+    if not uid_str:
+        return ""
+    return f"/me/{uid_str}?t={_sign_me_token(uid_str)}"
+
+
+def _uid_tail(luogu_uid: str) -> str:
+    """v3.9.62 · 排行榜展示用的 UID 脱敏：U+末 4 位（如 U1375）
+
+    与 _mask_student_name 的「U+尾号」规则保持一致，避免被爬虫关联。
+    """
+    uid_str = str(luogu_uid or "").strip()
+    if not uid_str:
+        return ""
+    return f"U{uid_str[-4:]}" if len(uid_str) >= 4 else f"U{uid_str}"
+
+
 # v3.9.6 · 版本探针（给云端部署的健康检查用，每次部署完必看）
 # 用法：curl -fsS http://server/api/version  →  {"version":"v3.9.6", "build":"...", "git":"abc1234", "ts":"..."}
 @app.route("/api/version")
@@ -330,6 +386,9 @@ def _get_region_options() -> dict:
 # 注入到 Jinja 模板全局（一次注册，所有 render_template_string 自动可用）
 try:
     app.jinja_env.globals["region_options"] = _get_region_options()
+    # v3.9.62 · 后台模板需要用 _sign_me_token 生成 /me/<uid>?t=... 链接
+    app.jinja_env.globals["_sign_me_token"] = _sign_me_token
+    app.jinja_env.globals["_me_url"] = _me_url
 except Exception as _je:
     app.logger.warning(f"region_options 注入失败: {_je}")
 
@@ -953,11 +1012,12 @@ def describe_generation_error(exc: Exception, stage: str) -> str:
         return stage_prefix + str(exc)
     if isinstance(exc, AuthenticationError):
         if stage == "预检提交记录权限" or stage == "抓取提交记录与代码":
-            return stage_prefix + "Cookies 无效或已失效，无法读取提交记录，请重新获取同一会话下的 __client_id、_uid 和 C3VK。"
+            # v3.9.60 fix · C3VK 不再需要
+            return stage_prefix + "Cookies 无效或已失效，无法读取提交记录，请重新获取同一会话下的 __client_id 和 _uid。"
         if stage == "预检做题记录权限" or stage == "获取标签与练习数据":
-            return stage_prefix + "Cookies 无效或已失效，无法读取练习数据，请重新获取 __client_id、_uid 和 C3VK。"
+            return stage_prefix + "Cookies 无效或已失效，无法读取练习数据，请重新获取 __client_id 和 _uid。"
         if stage == "获取标签与练习数据":
-            return stage_prefix + "Cookies 无效或已失效，无法读取练习数据，请重新获取 __client_id、_uid 和 C3VK。"
+            return stage_prefix + "Cookies 无效或已失效，无法读取练习数据，请重新获取 __client_id 和 _uid。"
         return stage_prefix + "Cookies 无效或已失效，请重新登录洛谷并更新 Cookies。"
     if isinstance(exc, ForbiddenError):
         return stage_prefix + f"访问被拒绝：{exc}"
@@ -1410,8 +1470,9 @@ INDEX_HTML = """
         <!-- 老用户 UID 快速进入（嵌入主 CTA 内，更显眼） -->
         <div class="mt-5 pt-5 border-t border-dashed border-[var(--line-2)]">
             <div class="font-mono text-[10.5px] text-[var(--ink-3)] mb-2">// 已注册用户 · 直接进个人中心</div>
-            <form id="me-entry" action="/me/0" method="get" class="flex gap-2" onsubmit="event.preventDefault(); var u=document.getElementById('meUid').value.trim(); if(u && /^\d{6,10}$/.test(u)) window.location.href='/me/'+u; else alert('请输入 6-10 位洛谷 UID');">
-                <input id="meUid" type="text" inputmode="numeric" pattern="\\d{6,10}" placeholder="洛谷 UID（6-10 位数字）" class="field flex-1">
+            <!-- v3.9.62 fix · 改用 POST /me-entry，由服务端签发签名 token 后再跳转 /me/<uid>?t=... -->
+            <form id="me-entry" action="/me-entry" method="post" class="flex gap-2" onsubmit="var u=document.getElementById('meUid').value.trim(); if(u && /^\d{6,10}$/.test(u)) return true; alert('请输入 6-10 位洛谷 UID'); return false;">
+                <input id="meUid" name="luogu_uid" type="text" inputmode="numeric" pattern="\\d{6,10}" placeholder="洛谷 UID（6-10 位数字）" class="field flex-1" required>
                 <button type="submit" class="btn-secondary whitespace-nowrap font-mono">进入 ›</button>
             </form>
         </div>
@@ -1533,6 +1594,41 @@ INDEX_HTML = """
     </section>
     {% endif %}
 
+    <!-- v3.9.44 · AI 测评排行榜 Top 3 横幅（已生成报告的学员） -->
+    {% if leaderboard_top3 %}
+    <section class="glass p-5 sm:p-6 rise d5">
+        <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-2">
+                <span class="text-[11px] font-mono text-[var(--ink-3)]">// RANKING_TOP3</span>
+                <h3 class="font-display text-lg font-extrabold text-white">🏆 AI 测评排行榜</h3>
+                {% if leaderboard_total %}
+                <span class="font-mono text-[11px] text-[var(--ink-2)]">共 {{ leaderboard_total }} 位学员参评</span>
+                {% endif %}
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-400/30 text-[10px] font-mono text-emerald-300" title="姓名展示格式：姓氏·UID尾号（如 童·U1375）；学校通过 hash 匿称为 学校#NNNN">🔒 本榜单已脱敏</span>
+            </div>
+            <a href="/leaderboard" class="text-[12px] text-[var(--accent)] hover:underline font-mono whitespace-nowrap">查看完整榜单 →</a>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {% for entry in leaderboard_top3 %}
+            <div class="rounded-xl p-3.5 border {% if loop.index == 1 %}border-[var(--amber)]/40 bg-gradient-to-br from-amber-500/10 to-transparent{% elif loop.index == 2 %}border-slate-300/30 bg-gradient-to-br from-slate-400/10 to-transparent{% else %}border-orange-700/30 bg-gradient-to-br from-orange-700/10 to-transparent{% endif %}">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="font-mono text-[10px] text-[var(--ink-3)]">#{{ entry.rank }}</span>
+                    <span class="text-[18px]">{% if loop.index == 1 %}🥇{% elif loop.index == 2 %}🥈{% else %}🥉{% endif %}</span>
+                </div>
+                <div class="font-display text-[15px] font-bold text-white truncate">{{ entry.display_name }}</div>
+                <div class="text-[11px] text-[var(--ink-2)] mt-0.5 truncate">{{ entry.grade }} · {{ entry.province or '—' }} · {{ entry.school }}</div>
+                <div class="flex items-baseline gap-1.5 mt-2">
+                    <span class="font-mono font-extrabold text-2xl {% if entry.score >= 800 %}text-[var(--accent)]{% elif entry.score >= 700 %}text-[var(--amber)]{% else %}text-[var(--ink-2)]{% endif %}">{{ entry.score }}</span>
+                    <span class="font-mono text-[10px] text-[var(--ink-3)]">/1000</span>
+                </div>
+                <div class="text-[10.5px] text-[var(--ink-3)] font-mono mt-0.5 truncate">{{ entry.score_label }}</div>
+            </div>
+            {% endfor %}
+        </div>
+        <p class="text-[10.5px] text-[var(--ink-3)] font-mono mt-3 text-center">// 分数 = 6 维能力均值 × 0.6 + 难度深度 × 0.2 + 知识广度 × 0.1 + 提交效率 × 0.1（v3.9.44 反刷题加权）</p>
+    </section>
+    {% endif %}
+
     <!-- 底栏 -->
     <footer class="text-center text-[11px] text-[var(--ink-3)] font-mono pt-2 rise d6">
         <span>© 2026 信竞 AI 报告 · Luogu-AI-Report</span>
@@ -1603,14 +1699,16 @@ INDEX_HTML = """
 def build_cookie_dict(form: dict) -> dict[str, str]:
     client_id = str(form.get("client_id", "")).strip()
     uid = str(form.get("uid", "")).strip()
-    c3vk = str(form.get("c3vk", "")).strip()
+    # v3.9.60 fix · C3VK 不再需要
+    # c3vk = str(form.get("c3vk", "")).strip()
+    c3vk = ""  # 留空兼容
     missing = []
     if not client_id:
         missing.append("__client_id")
     if not uid:
         missing.append("_uid")
-    if not c3vk:
-        missing.append("C3VK")
+    # if not c3vk:
+    #     missing.append("C3VK")
     if missing:
         raise ValueError(f"Cookies 参数为必填项，请完整填写：{', '.join(missing)}")
     return {
@@ -1623,6 +1721,7 @@ def build_cookie_dict(form: dict) -> dict[str, str]:
 RETRY_FORM_FIELDS = (
     "client_id",
     "uid",
+    # v3.9.60 fix · c3vk 不再需要, 但保留在 RETRY_FORM_FIELDS 中以兼容历史数据回填
     "c3vk",
     "api_key",
     "base_url",
@@ -1761,7 +1860,392 @@ def _get_server_key_hint() -> str:
     return "未检测到服务端 OpenAI Key（可在服务端设置 OPENAI_API_KEY / OPENAI_ADMIN_KEY）。"
 
 
-def render_index(form: dict | None = None, validation_result: dict | None = None):
+# ========== v3.9.44 · AI 测评排行榜（按学段分组 · 取最近一次有效报告）==========
+# 设计原则：
+#   1) 数据源 = tasks 表 status='done' 的报告；每个 luogu_uid 只取最新一份
+#   2) 分数 = ai_score_thousand（已用 v3.9.44 综合分公式，含反刷题加权）
+#   3) 学段过滤 = _grade_to_stage() 映射 primary/junior/senior/univ
+#      （v3.9.47 · 学段 enum: primary / junior / senior / univ — NOI 改为 大学）
+#   4) 隐私 = 全员匿称 U${uid后4} + 学校 hash 匿称 学校#NNNN（v3.9.45）
+#   5) 缓存 = 5 分钟内存（避免每次访问遍历全量 export_data.json）
+#   6) v3.9.46 · 时间窗过滤 = period ∈ {all, month, week}
+#      - all   = 不限时间（历史最高，可能被远古高分霸榜）
+#      - month = 默认：近 30 天内最新报告（防历史霸榜）
+#      - week  = 近 7 天内最新报告（更激烈的近期对抗）
+#   7) v3.9.47 · 省份列 = students.province 字段，匿名化只到省名
+_LEADERBOARD_CACHE: dict = {"ts": 0.0, "data": []}
+_LEADERBOARD_TTL_SECONDS = 5 * 60
+_LEADERBOARD_VALID_STAGES = ("all", "primary", "junior", "senior", "univ")
+_LEADERBOARD_VALID_PERIODS = ("all", "month", "week")
+# 时间窗对应的天数（用于 created_at 过滤；None = 不过滤）
+_LEADERBOARD_PERIOD_DAYS = {
+    "all": None,
+    "month": 30,
+    "week": 7,
+}
+
+
+def _mask_student_name(luogu_uid: str, is_minor: bool, real_name: str | None) -> str:
+    """v3.9.48 · 排行榜姓名脱敏：保留**姓氏**（姓）+ UID 尾号。
+
+    设计：
+      1) 同姓→ 同一匿称，外部用户能看出"老张家三孩子都在榜上"
+      2) 不同输入→ UID 尾号保证唯一性，不撞码
+      3) 复姓（欧阳/司马/诸葛…）→ 取整个复姓
+      4) 英文名 → 取第一个空白分隔的词（first name）
+      5) 空值 → "U+UID尾号"（兜底）
+
+    返回样例：
+      _mask_student_name("801375", is_minor=True,  real_name="童家瑞") → "童·U1375"
+      _mask_student_name("801375", is_minor=False, real_name="欧阳明") → "欧阳·U1375"
+      _mask_student_name("801375", is_minor=True,  real_name="John Smith") → "John·U1375"
+      _mask_student_name("801375", is_minor=True,  real_name=None)      → "U1375"
+
+    隐私边界：
+      · 姓 + UID 尾号 → 12 bit 信息（同姓 4 bit + UID 4 bit），定位难度 >> 真名
+      · 仍无法拼出"姓 + 名"，学员想看自己真名请到 /me/<uid> 个人中心
+    """
+    uid_str = str(luogu_uid or "")
+    tail = uid_str[-4:] if len(uid_str) >= 4 else uid_str
+    uid_label = f"U{tail}"
+
+    if not real_name:
+        return uid_label
+    name = str(real_name).strip()
+    if not name:
+        return uid_label
+
+    # 常见复姓（优先级最高，匹配"欧阳"必须在"欧"之前）
+    compound_surnames = (
+        "欧阳", "司马", "诸葛", "上官", "夏侯", "尉迟", "皇甫",
+        "东方", "令狐", "宇文", "长孙", "慕容", "司徒", "司空",
+        "鲜于", "闾丘", "万俟", "单于", "公冶", "亓官",
+    )
+    surname = ""
+    for cs in compound_surnames:
+        if name.startswith(cs):
+            surname = cs
+            break
+    if not surname:
+        # 1) 空白分隔的英文名（"John Smith"）→ 取第一个词作姓
+        if " " in name or "\t" in name:
+            surname = name.split()[0]
+        # 2) 全 CJK（中文）名字 → 取第一个字符作姓
+        elif all('\u4e00' <= ch <= '\u9fff' for ch in name):
+            surname = name[0] if name else ""
+        # 3) 单个拉丁词（"Alice"）→ 整个词作姓（没有"名"可分）
+        else:
+            surname = name
+
+    if surname:
+        return f"{surname}·{uid_label}"
+    return uid_label
+
+
+def _mask_school(school: str | None) -> str:
+    """v3.9.45 · 学校脱敏：hash 生成稳定匿称「学校#NNNN」
+
+    设计：
+      1) 同校 → 同一匿称（学员看自己知道是哪个学校，外部用户看不出）
+      2) 不同输入 → 4 位编号空间 [0000, 9999]，撞码概率 ~1/10000，可接受
+      3) 空值 → 固定返回 "—"（避免被空字符串误判为不同学校）
+
+    返回样例：
+      _mask_school("采荷中学")     → "学校#1234"
+      _mask_school("采荷中学")     → "学校#1234"  # 稳定
+      _mask_school("上海中学")     → "学校#5678"
+      _mask_school("") / None     → "—"
+    """
+    if not school or not str(school).strip():
+        return "—"
+    s = str(school).strip()
+    # 简单 DJB2-like hash → 4 位编号
+    h = 5381
+    for ch in s:
+        h = ((h << 5) + h + ord(ch)) & 0xFFFFFFFF
+    code = h % 10000
+    return f"学校#{code:04d}"
+
+
+def _mask_province(province: str | None) -> str:
+    """v3.9.47 · 省份脱敏：保留省份名（"浙江"、"上海"等），不暴露城市/学校
+
+    设计：
+      1) 省份是中国行政区划的一级粒度，34 个选项暴露后无法精确定位学员
+         （同省学员可能有几万人），因此省份名**直接保留**
+      2) 与学校 / 城市 / 街道等更细粒度的位置信息**严格不混用**，
+         本脱敏函数不接收 city/area 等字段，避免误用
+      3) 外部用户看榜单能区分"浙江 vs 河南"做地区概览，**无法**锁定到人
+      4) 空值 → "—"（统一占位）
+
+    返回样例：
+      _mask_province("浙江")    → "浙江"
+      _mask_province("上海市")  → "上海市"  # 直辖市也保留
+      _mask_province("") / None → "—"
+    """
+    if not province or not str(province).strip():
+        return "—"
+    s = str(province).strip()
+    # 防止极端值（如一整段富文本）进榜：截断到 16 个字符
+    if len(s) > 16:
+        s = s[:16]
+    return s
+
+
+def _compute_score_from_export(export_data: dict, behavior_data: dict | None) -> tuple[int, str, str]:
+    """从 export_data.json 抽出千分制分数。优先用 v3.9.44 综合分，兜底走 6 维均值。"""
+    try:
+        comp = compute_comprehensive_score(export_data, behavior_data or {})
+        return (
+            int(comp.get("ai_score_thousand") or 0),
+            str(comp.get("ai_score_label") or ""),
+            "comprehensive_v3944",
+        )
+    except Exception:
+        # 兜底：6 维均值 × 10
+        six = export_data.get("six_dimension_scores") or {}
+        if six:
+            mean = sum(int(v) for v in six.values()) / max(1, len(six))
+            score = int(round(mean * 10))
+        else:
+            score = 0
+        return (score, f"预估 {score}/1000（兜底）", "fallback_6dim_mean")
+
+
+def compute_leaderboard(stage: str = "all", limit: int = 20, period: str = "month") -> list[dict]:
+    """v3.9.44 · 计算 AI 测评排行榜（v3.9.46 增加 period 时间窗）。
+
+    Args:
+        stage:  "all" | "primary" | "junior" | "senior" | "noi"
+        limit:  返回前 N 名（默认 20，最大 100）
+        period: "all" | "month" | "week"  (默认 "month" 防历史霸榜)
+
+    Returns:
+        list[dict]，每条包含：
+          - rank:          int  排名（1-indexed）
+          - luogu_uid:     str
+          - display_name:  str  掩码后的展示名
+          - school:        str  学校（hash 匿称）
+          - grade:         str  年级（grade 中文 label）
+          - stage:         str  学段（primary/junior/senior/noi）
+          - score:         int  ai_score_thousand
+          - score_label:   str  档位标签（🏆 顶尖 / ⭐ 优秀 …）
+          - score_source:  str  评分来源（comprehensive_v3944 / fallback_6dim_mean）
+          - is_minor:      bool
+          - report_time:   str  该报告生成时间（ISO）
+          - task_id:       str
+    """
+    global _LEADERBOARD_CACHE
+    now_ts = time.time()
+
+    # 1) 缓存命中（缓存的是"全量 + 不带 period"的结果，下面再按 period 二次过滤）
+    if _LEADERBOARD_CACHE["data"] and (now_ts - _LEADERBOARD_CACHE["ts"]) < _LEADERBOARD_TTL_SECONDS:
+        full = _LEADERBOARD_CACHE["data"]
+    else:
+        full = _compute_leaderboard_full()
+        _LEADERBOARD_CACHE = {"ts": now_ts, "data": full}
+
+    # 2) 学段过滤
+    if stage not in _LEADERBOARD_VALID_STAGES:
+        stage = "all"
+    if stage != "all":
+        full = [e for e in full if e.get("stage") == stage]
+
+    # 3) v3.9.46 · 时间窗过滤（防历史高分霸榜）
+    if period not in _LEADERBOARD_VALID_PERIODS:
+        period = "month"
+    days = _LEADERBOARD_PERIOD_DAYS.get(period)
+    if days is not None:
+        from datetime import datetime as _dt, timedelta as _td
+        cutoff = _dt.now() - _td(days=days)
+        cutoff_str = cutoff.strftime("%Y-%m-%d %H:%M:%S")
+        full = [e for e in full if str(e.get("report_time") or "") >= cutoff_str]
+
+    # 4) 截取前 limit
+    return full[: max(1, min(int(limit or 20), 100))]
+
+
+def _compute_leaderboard_full() -> list[dict]:
+    """v3.9.44 · 全量排行榜计算（不缓存读盘结果）。"""
+    rows: list[dict] = []
+    try:
+        # 1) 从 tasks 表取每个 luogu_uid 最新一次 done 报告
+        from admin_students import _grade_to_stage
+        conn = _get_conn()
+        # 兼容老库（luogu_uid 列可能不存在）
+        try:
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()]
+        except Exception:
+            cols = []
+        if "luogu_uid" not in cols:
+            return []
+        task_rows = conn.execute(
+            """
+            SELECT t.task_id, t.luogu_uid, t.created_at, t.student_name
+              FROM tasks t
+             WHERE t.status = 'done'
+               AND (t.luogu_uid IS NOT NULL AND t.luogu_uid != '')
+             ORDER BY t.created_at DESC
+            """,
+        ).fetchall()
+
+        # 2) 每个 luogu_uid 只保留最新一份
+        latest_per_uid: dict[str, tuple] = {}
+        for task_id, luogu_uid, created_at, student_name in task_rows:
+            uid = str(luogu_uid).strip()
+            if not uid or uid in latest_per_uid:
+                continue
+            latest_per_uid[uid] = (str(task_id), uid, str(created_at or ""), str(student_name or ""))
+
+        if not latest_per_uid:
+            return []
+
+        # 3) 批量查 students 表（按 luogu_uid）
+        uids = list(latest_per_uid.keys())
+        placeholders = ",".join("?" * len(uids))
+        # v3.9.47 · 拉取 province 字段（兼容老 schema）
+        try:
+            _student_cols = [r[1] for r in conn.execute("PRAGMA table_info(students)").fetchall()]
+        except Exception:
+            _student_cols = []
+        _has_province = "province" in _student_cols
+        if _has_province:
+            try:
+                student_rows = conn.execute(
+                    f"SELECT luogu_uid, real_name, school, grade, is_minor, province FROM students WHERE luogu_uid IN ({placeholders})",
+                    uids,
+                ).fetchall()
+            except Exception:
+                student_rows = []
+        else:
+            try:
+                student_rows = conn.execute(
+                    f"SELECT luogu_uid, real_name, school, grade, is_minor FROM students WHERE luogu_uid IN ({placeholders})",
+                    uids,
+                ).fetchall()
+            except Exception:
+                student_rows = []
+        student_map: dict[str, dict] = {}
+        if _has_province:
+            for luogu_uid, real_name, school, grade, is_minor, province in student_rows:
+                student_map[str(luogu_uid)] = {
+                    "real_name": str(real_name or "") or None,
+                    "school": str(school or "") or None,
+                    "grade": str(grade or "") or None,
+                    "is_minor": int(is_minor or 0) == 1,
+                    "province": str(province or "").strip() or None,
+                }
+        else:
+            for luogu_uid, real_name, school, grade, is_minor in student_rows:
+                student_map[str(luogu_uid)] = {
+                    "real_name": str(real_name or "") or None,
+                    "school": str(school or "") or None,
+                    "grade": str(grade or "") or None,
+                    "is_minor": int(is_minor or 0) == 1,
+                    "province": None,  # 老 schema 没有 province
+                }
+
+        # 4) 遍历每个 UID，定位 export_data.json 并算分
+        for uid, (task_id, _, created_at, student_name_fb) in latest_per_uid.items():
+            student = student_map.get(uid, {})
+            try:
+                report_dir = _resolve_task_report_dir({"task_id": task_id, "html": "", "md": "", "pdf": ""})
+                export_path = report_dir / "export_data.json"
+                if not export_path.exists():
+                    continue
+                with open(export_path, "r", encoding="utf-8") as fp:
+                    export_data = json.loads(fp.read())
+            except Exception as _e:
+                app.logger.debug(f"[leaderboard] skip uid={uid} task={task_id}: {_e}")
+                continue
+
+            behavior_data = export_data.get("behavior_analysis") or {}
+            score, score_label, score_source = _compute_score_from_export(export_data, behavior_data)
+
+            stage = _grade_to_stage(student.get("grade"))
+            rows.append({
+                "luogu_uid": uid,
+                # v3.9.62 · 排行榜脱敏：UID 不再完整展示，只显示 U+末4位
+                "luogu_uid_tail": _uid_tail(uid),
+                "me_url": _me_url(uid),
+                "display_name": _mask_student_name(
+                    uid,
+                    student.get("is_minor", False),
+                    student.get("real_name"),
+                ),
+                "school": _mask_school(student.get("school")),
+                "grade": _grade_to_label(student.get("grade")) or student.get("grade") or "—",
+                "stage": stage,
+                "province": _mask_province(student.get("province")),  # v3.9.47 · 省份脱敏
+                "score": int(score),
+                "score_label": score_label,
+                "score_source": score_source,
+                "is_minor": bool(student.get("is_minor", False)),
+                "report_time": created_at,
+                "task_id": task_id,
+            })
+    except Exception as _e:
+        app.logger.warning(f"[leaderboard] 计算失败: {_e}")
+
+    # 5) 排序：分数降序，时间降序（最近测评优先）
+    rows.sort(key=lambda x: (-int(x.get("score") or 0), -(int(time.mktime(time.strptime(x["report_time"], "%Y-%m-%d %H:%M:%S"))) if x.get("report_time") else 0)))
+    # 6) 写入 rank
+    for i, r in enumerate(rows, start=1):
+        r["rank"] = i
+    return rows
+
+
+def find_my_rank(luogu_uid: str, stage: str = "all", period: str = "month") -> dict | None:
+    """v3.9.46 · 查询某个学员在排行榜中的当前排名（用于学员中心「我的排名」卡片）。
+
+    Args:
+        luogu_uid: 洛谷 UID（字符串）
+        stage:     "all" | "primary" | "junior" | "senior" | "noi"
+        period:    "all" | "month" | "week"
+
+    Returns:
+        None  如果该 UID 不在榜上
+        dict {
+            "rank":          int,  # 1-indexed
+            "total":         int,  # 当前榜单总人数
+            "percentile":    int,  # 排名前百分比（保留整数，0 表示 top 1）
+            "score":         int,
+            "score_label":   str,
+            "stage":         str,
+            "display_name":  str,
+            "report_time":   str,
+        }
+    """
+    if not luogu_uid:
+        return None
+    uid = str(luogu_uid).strip()
+    rows = compute_leaderboard(stage=stage, limit=100, period=period)
+    for r in rows:
+        if str(r.get("luogu_uid") or "").strip() == uid:
+            total = len(rows)
+            rank = int(r.get("rank") or 0)
+            # 百分位 = (rank-1) / total × 100  → 取整（top 1% 内返回 0）
+            pct = int((rank - 1) * 100 / max(1, total)) if total > 0 else 0
+            return {
+                "rank": rank,
+                "total": total,
+                "percentile": pct,
+                "score": int(r.get("score") or 0),
+                "score_label": r.get("score_label") or "—",
+                "stage": r.get("stage") or "all",
+                "display_name": r.get("display_name") or "",
+                "report_time": r.get("report_time") or "",
+            }
+    return None
+
+
+def render_index(
+    form: dict | None = None,
+    validation_result: dict | None = None,
+    pwd_login_2fa: dict | None = None,
+    info: str | None = None,
+    error: str | None = None,
+):
     _, key_source = resolve_openai_api_key(form or {})
     if key_source.startswith("env:"):
         server_key_hint = f"已检测到服务端 {key_source.split(':', 1)[1]}，可留空使用服务端默认。"
@@ -1783,6 +2267,22 @@ def render_index(form: dict | None = None, validation_result: dict | None = None
             )
     except Exception:
         pass
+    # v3.9.44 · 排行榜 Top 3 横幅（仅在有数据时计算，避免空库压首页）
+    leaderboard_top3: list[dict] = []
+    leaderboard_total = 0
+    try:
+        _lb_full = compute_leaderboard(stage="all", limit=3)
+        leaderboard_total = len(_lb_full) if _lb_full else 0
+        if _lb_full:
+            # 缓存里有完整列表，直接用缓存值算总人数
+            leaderboard_top3 = _lb_full[:3]
+            try:
+                _all = _LEADERBOARD_CACHE.get("data") or []
+                leaderboard_total = len(_all)
+            except Exception:
+                pass
+    except Exception:
+        pass
     return render_template_string(
         INDEX_HTML,
         form_values=build_form_values(form),
@@ -1790,6 +2290,11 @@ def render_index(form: dict | None = None, validation_result: dict | None = None
         server_key_hint=server_key_hint,
         commerce_hidden=_HIDE_COMMERCE,
         logged_in_banner=logged_in_banner,
+        leaderboard_top3=leaderboard_top3,
+        leaderboard_total=leaderboard_total,
+        # v3.9.52 · 传递 info/error 给首页模板（密码登录成功提示等）
+        info=info,
+        error=error,
     )
 
 
@@ -2076,6 +2581,100 @@ def validate_cookies(form: dict) -> dict[str, object]:
             luogu.close()
 
 
+# v3.9.52 · 账号密码登录（替代手工填 Cookies，简化家长操作）
+# 设计：
+#   1) 用户输入洛谷用户名/UID + 密码
+#   2) 后端用 Playwright + ddddocr 自动登录 → 拿 __client_id / _uid / C3VK
+#   3) 若需 2FA → 保持浏览器会话, 等用户输 6 位验证码
+#   4) 成功后把 cookies 写进 session['temp_cookies']，重定向到 /generate
+# 隐私：密码只在本次请求内存中用，**不写日志、不持久化**
+def login_with_password(
+    username: str,
+    password: str,
+    totp_code: str | None = None,
+    session_id: str | None = None,
+) -> dict[str, object]:
+    """启动/继续 Playwright 登录 → 返回状态/cookies。
+
+    Returns
+    -------
+    dict:
+        - state='started', session_id='xxx', message='...' — 已启动, 需轮询 status
+        - state='need_2fa', session_id='xxx' — 需要 2FA, 需前端提示
+        - state='done', cookies={__client_id, _uid, C3VK}, luogu_uid=1472806
+        - state='failed', error='...' — 登录失败
+        - state='expired' — session_id 找不到/已过期
+    """
+    from pw_login import get_manager  # 延迟导入, 避免 web_app 启动失败时牵连
+
+    if session_id:
+        # 续 2FA
+        mgr = get_manager()
+        sess = mgr.get(session_id)
+        if not sess or sess.is_expired():
+            return {"state": "expired", "ok": False, "error": "登录会话已过期, 请重新开始"}
+        if not totp_code:
+            # 只是查询状态
+            d = sess.to_dict()
+            d["ok"] = False
+            return d
+        # 提交 2FA (后端线程会改 state)
+        if not sess.submit_2fa(totp_code):
+            return {"state": "failed", "ok": False, "error": "2FA 提交失败: 会话不在 need_2fa 状态"}
+        # 等最多 15 秒
+        for _ in range(60):
+            time.sleep(0.25)
+            if sess.state in ("done", "failed"):
+                break
+        if sess.state == "done":
+            return {
+                "state": "done",
+                "ok": True,
+                "cookies": sess.cookies,
+                "luogu_uid": int(sess.cookies.get("_uid", 0)) if sess.cookies.get("_uid") else None,
+            }
+        if sess.state == "failed":
+            return {"state": "failed", "ok": False, "error": sess.error or "2FA 验证失败"}
+        # 还没出结果 → 还在转
+        return {"state": "submitted_2fa", "ok": False, "message": "2FA 已提交, 验证中…"}
+
+    # 启动新会话
+    if not username or not password:
+        return {"state": "failed", "ok": False, "error": "用户名和密码不能为空"}
+    username = str(username).strip()
+    password = str(password)  # 不 strip
+
+    mgr = get_manager()
+    sess = mgr.create(username, password)
+    sess.start()
+    return {
+        "state": "started",
+        "ok": False,  # 异步, 调用方应轮询 status
+        "session_id": sess.session_id,
+        "message": "登录中…",
+    }
+
+
+def get_login_status(session_id: str) -> dict[str, object]:
+    """查询 LoginSession 当前状态 (供前端轮询)"""
+    from pw_login import get_manager
+    mgr = get_manager()
+    sess = mgr.get(session_id)
+    if not sess:
+        return {"state": "expired", "error": "会话不存在或已过期"}
+    if sess.is_expired():
+        mgr.remove(session_id)
+        return {"state": "expired", "error": "会话已过期"}
+    out = sess.to_dict()
+    # 关键: 完成时把 cookies 一并返回, 由前端触发 /login-with-password/done 写入 flask session
+    if sess.state == "done":
+        out["cookies"] = sess.cookies
+        out["luogu_uid"] = (
+            int(sess.cookies.get("_uid", 0)) if sess.cookies.get("_uid") else None
+        )
+    return out
+
+
 def run_generation(task_id: str, form: dict):
     current_stage = "初始化"
     try:
@@ -2266,7 +2865,23 @@ def run_generation(task_id: str, form: dict):
                     tag_fetch_success=0,
                     tag_fetch_total=tag_missing,
                 )
-            enrich_problem_tags(luogu, all_passed, progress_callback=_on_tag_progress)
+            enriched_count = enrich_problem_tags(luogu, all_passed, progress_callback=_on_tag_progress)
+            # v3.9.47 · **关键修复**：enrich_problem_tags 的 _on_tag_progress 回调
+            # 受 0.4s 限流影响，最后几次 enriched++ 的回调可能因为节流被丢弃，
+            # 导致 tag_fetch_success 卡在 90% / 92% / 95% 之类的不完整值。
+            # 显式同步一次 final 状态，让进度条 100% 收尾，避免用户看到"AI 报告 45% 运行时，
+            # 标签补全卡在 92/250"的诡异 UI（让用户误以为 AI 报告用不完整数据生成）。
+            with TASKS_LOCK:
+                update_task(
+                    task_id,
+                    message=(
+                        f"✅ 题目标签补全完成：{enriched_count}/{tag_missing} 题 "
+                        f"（共写入 {len(all_passed)} 题）"
+                    ),
+                    stage=current_stage,
+                    tag_fetch_success=tag_missing,
+                    tag_fetch_total=tag_missing,
+                )
         else:
             with TASKS_LOCK:
                 update_task(
@@ -2536,6 +3151,29 @@ def run_generation(task_id: str, form: dict):
         }
 
         _write_export_data_json(out_dir, export_data)
+        # v3.9.47 · **数据完整性自检**：进入 AI 报告阶段前，再读一次 task 表确认
+        # 标签补全 100% 完成。如果发现 < 100%，说明上游有 bug（顺序错了 / 跳过
+        # 了 / 节流丢帧），这时 *绝不* 调用 AI 报告，因为 6 维评分将基于不完整
+        # 的标签数据 — 直接 abort 给用户明确提示。
+        try:
+            _precheck_task = get_task(task_id) or {}
+            _pre_total = int(_precheck_task.get("tag_fetch_total") or 0)
+            _pre_success = int(_precheck_task.get("tag_fetch_success") or 0)
+            if _pre_total > 0 and _pre_success < _pre_total:
+                app.logger.error(
+                    f"[v3.9.47][DATA_INCOMPLETE] uid={uid} tag补全仅 {_pre_success}/{_pre_total}，"
+                    f"拒绝调 AI 报告，6 维评分将基于不完整数据"
+                )
+                raise RuntimeError(
+                    f"数据不完整：题目标签仅补全 {_pre_success}/{_pre_total}（{_pre_success * 100 // _pre_total}%），"
+                    f"AI 报告可能基于错误数据生成。已中止本次生成，请刷新后重试。"
+                )
+        except RuntimeError:
+            raise
+        except Exception as _pre_e:
+            # 自检失败 ≠ 数据错误，仅 warning 不阻塞
+            app.logger.debug(f"[v3.9.47] data integrity precheck skipped: {_pre_e}")
+
         _generate_ai_report_artifacts(
             task_id=task_id,
             export_data=export_data,
@@ -2576,7 +3214,33 @@ def index():
     raw_ref = request.args.get("ref")
     sanitized_ref = _sanitize_ref(raw_ref) if raw_ref else ""
 
-    response = make_response(render_index())
+    # v3.9.52 · 密码登录成功后回填 cookies 到表单（一次性，读取后清掉 session 避免泄露）
+    pwd_login_form: dict = {}
+    pwd_login_success_msg = ""
+    _pwd_login_flag = request.args.get("_pwd_login")
+    if _pwd_login_flag:
+        temp_cookies = session.pop("temp_cookies", None)
+        temp_uid = session.pop("temp_luogu_uid", "")
+        if isinstance(temp_cookies, dict) and temp_cookies:
+            pwd_login_form = {
+                "client_id": temp_cookies.get("__client_id", ""),
+                "uid": temp_cookies.get("_uid", ""),
+                "c3vk": temp_cookies.get("C3VK", ""),
+                "luogu_uid": str(temp_uid or temp_cookies.get("_uid", "")),
+            }
+            pwd_login_success_msg = f"✅ 账号密码登录成功（UID {pwd_login_form['luogu_uid']}），Cookies 已自动填好，可直接点下方「生成 AI 报告」"
+
+    # v3.9.52 fix · 真正会显示成功提示 / 失败提示的页面是 /generate-form（GENERATE_FORM_HTML），
+    # 首页 INDEX_HTML 没有 info/error 渲染块，残留的 _pwd_login=1 仍走首页会让提示丢失。
+    # 旧逻辑保留 redirect(url_for("index", _pwd_login=1)) 是 v3.9.52 初版的兜底；现在统一跳到 /generate-form。
+    if _pwd_login_flag and pwd_login_form:
+        return redirect(url_for("generate_form", _pwd_login=1))
+
+    response = make_response(render_index(
+        form=pwd_login_form,
+        validation_result=None,
+        info=pwd_login_success_msg or None,
+    ))
     if sanitized_ref:
         response.set_cookie(
             "ref_uid", sanitized_ref,
@@ -2587,16 +3251,458 @@ def index():
     return response
 
 
+# ========== v3.9.44 · AI 测评排行榜 路由 ==========
+
+@app.route("/api/leaderboard")
+def api_leaderboard():
+    """v3.9.44 · 返回 JSON 排行榜（供前端 fetch / 第三方调用）
+
+    Query:
+      stage:  all | primary | junior | senior | noi
+      period: all | month | week    （v3.9.46 新增，默认 month 防历史霸榜）
+      limit:  int (1-100, 默认 20)
+    """
+    stage = str(request.args.get("stage", "all") or "all").strip().lower()
+    period = str(request.args.get("period", "month") or "month").strip().lower()
+    try:
+        limit = int(request.args.get("limit", "20") or "20")
+    except (TypeError, ValueError):
+        limit = 20
+    rows = compute_leaderboard(stage=stage, limit=limit, period=period)
+    return jsonify({
+        "stage": stage,
+        "period": period,
+        "limit": limit,
+        "count": len(rows),
+        "cached_at": _LEADERBOARD_CACHE.get("ts", 0),
+        "ttl_seconds": _LEADERBOARD_TTL_SECONDS,
+        "rows": rows,
+    })
+
+
+@app.route("/leaderboard")
+def leaderboard_page():
+    """v3.9.46 · 排行榜完整页（学段 Tab + 时间窗 Tab）"""
+    stage = str(request.args.get("stage", "all") or "all").strip().lower()
+    period = str(request.args.get("period", "month") or "month").strip().lower()
+    try:
+        limit = int(request.args.get("limit", "50") or "50")
+    except (TypeError, ValueError):
+        limit = 50
+    rows = compute_leaderboard(stage=stage, limit=limit, period=period)
+    # 学段统计（用于顶部 Tab 显示每段人数；按当前 period 过滤后统计）
+    stage_count = {s: 0 for s in _LEADERBOARD_VALID_STAGES}
+    for entry in rows:
+        s = entry.get("stage")
+        if s in stage_count:
+            stage_count[s] += 1
+    return render_template_string(
+        LEADERBOARD_HTML,
+        rows=rows,
+        stage=stage,
+        period=period,
+        limit=limit,
+        valid_stages=[
+            ("all", "全部"), ("primary", "小学"), ("junior", "初中"),
+            ("senior", "高中"), ("univ", "大学"),  # v3.9.47 · NOI 改为 大学
+        ],
+        valid_periods=[
+            ("month", "月榜"), ("week", "周榜"), ("all", "总榜"),
+        ],
+        stage_count=stage_count,
+        total=len(rows),
+        cached_at=_LEADERBOARD_CACHE.get("ts", 0),
+        ttl_seconds=_LEADERBOARD_TTL_SECONDS,
+    )
+
+
 @app.route("/validate-cookies", methods=["POST"])
 def validate_cookies_page():
     form = request.form.to_dict()
-    return render_index(form=form, validation_result=validate_cookies(form))
+    # v3.9.52 fix · 错误页要渲染到 /generate-form（GENERATE_FORM_HTML 才有 validation_result 块），
+    # 不要再走首页 INDEX_HTML，否则错误被首页吞掉
+    return render_template_string(
+        GENERATE_FORM_HTML,
+        form=form,
+        pwd_login_2fa=None,
+        server_key_hint=_get_server_key_hint(),
+        gesp_default_year=date.today().year,
+        validation_result=validate_cookies(form),
+    )
+
+
+# v3.9.52 · 账号密码登录（Playwright 自动登录 + ddddocr 自动 OCR 验证码）
+# 流程:
+#   POST /login-with-password {username, password}
+#     → 创建 LoginSession, 后台启动 Playwright
+#     → 重定向到 /login-with-password/progress?sid=xxx (前端轮询)
+#   GET  /login-with-password/status?sid=xxx  → JSON {state, message, ...}
+#   POST /login-with-password/2fa {sid, totp_code}  → 提交 2FA
+#   POST /login-with-password/done  → cookies 写入 flask session, 跳 /generate-form
+#   POST /login-with-password/cancel → 清理 session
+_PWD_LOGIN_PROGRESS_HTML = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>正在登录洛谷…</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  .spin { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .pulse-dot { animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 1; }
+  }
+</style>
+</head>
+<body class="bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 min-h-screen flex items-center justify-center p-4">
+<div class="bg-white rounded-2xl shadow-xl p-6 max-w-md w-full space-y-4">
+  <div class="text-center">
+    <div class="inline-block">
+      <svg id="spinner" class="spin w-12 h-12 text-emerald-600" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z"></path>
+      </svg>
+      <div id="okIcon" class="hidden w-12 h-12 mx-auto text-5xl text-emerald-600">✅</div>
+      <div id="errIcon" class="hidden w-12 h-12 mx-auto text-5xl text-rose-600">❌</div>
+      <div id="keyIcon" class="hidden w-12 h-12 mx-auto text-5xl text-amber-600">🔐</div>
+    </div>
+    <h2 id="title" class="text-xl font-bold text-gray-800 mt-3">正在登录洛谷…</h2>
+    <p id="msg" class="text-sm text-gray-600 mt-1">请稍候, 浏览器正在自动操作</p>
+  </div>
+
+  <div id="progressBar" class="space-y-1">
+    <div class="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+      <div id="bar" class="bg-gradient-to-r from-emerald-500 to-teal-500 h-2 rounded-full transition-all duration-500" style="width: 5%"></div>
+    </div>
+    <p id="step" class="text-xs text-center text-gray-500">启动浏览器…</p>
+  </div>
+
+  <!-- 2FA 输入区 (默认隐藏) -->
+  <form id="twofaForm" method="post" action="/login-with-password/2fa" class="hidden space-y-3">
+    <input type="hidden" name="sid" value="{{ sid }}">
+    <div class="bg-amber-50 border-2 border-amber-300 rounded-lg p-3 text-center">
+      <p class="text-sm text-amber-800 font-semibold">🔐 该账号开启了二次验证</p>
+      <p class="text-xs text-amber-700 mt-1">请输入 6 位验证码 (Google Authenticator / 邮箱)</p>
+    </div>
+    <input id="totpInput" type="text" name="totp_code" required maxlength="6" minlength="6"
+           pattern="\\d{6}" inputmode="numeric" autocomplete="one-time-code"
+           class="w-full text-center text-2xl tracking-widest font-mono px-4 py-3 border-2 border-amber-300 rounded-lg focus:border-amber-500 focus:outline-none"
+           placeholder="• • • • • •">
+    <button type="submit" id="totpBtn"
+            class="w-full bg-gradient-to-r from-amber-500 to-orange-500 text-white font-bold py-2.5 px-4 rounded-lg hover:from-amber-600 hover:to-orange-600 transition">
+      提交验证码
+    </button>
+  </form>
+
+  <!-- 错误时显示重试 -->
+  <div id="retryBox" class="hidden space-y-2">
+    <a href="/" class="block w-full text-center bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold py-2.5 px-4 rounded-lg">
+      ↩ 重新填写账号密码
+    </a>
+  </div>
+
+  <!-- 取消链接 -->
+  <div class="text-center pt-2">
+    <button id="cancelBtn" onclick="cancelLogin()" class="text-xs text-gray-500 hover:text-gray-700 underline">
+      取消登录
+    </button>
+  </div>
+</div>
+
+<script>
+const SID = {{ sid|tojson }};
+let pollTimer = null;
+let submitted2FA = false;
+
+async function poll() {
+  try {
+    const r = await fetch(`/login-with-password/status?sid=${encodeURIComponent(SID)}`);
+    const data = await r.json();
+    handleState(data);
+  } catch (e) {
+    document.getElementById('msg').textContent = '网络错误, 重试中…';
+  }
+}
+
+function handleState(d) {
+  const title = document.getElementById('title');
+  const msg   = document.getElementById('msg');
+  const step  = document.getElementById('step');
+  const bar   = document.getElementById('bar');
+  const spinner = document.getElementById('spinner');
+  const okIcon  = document.getElementById('okIcon');
+  const errIcon = document.getElementById('errIcon');
+  const keyIcon = document.getElementById('keyIcon');
+  const twofa   = document.getElementById('twofaForm');
+  const retry   = document.getElementById('retryBox');
+
+  document.querySelectorAll('#okIcon, #errIcon, #keyIcon').forEach(e => e.classList.add('hidden'));
+  spinner.classList.remove('hidden');
+  twofa.classList.add('hidden');
+  retry.classList.add('hidden');
+  document.getElementById('progressBar').classList.remove('hidden');
+
+  switch (d.state) {
+    case 'starting':
+      title.textContent = '正在启动浏览器…';
+      msg.textContent = d.message || 'Playwright 启动中';
+      step.textContent = '1/5 启动浏览器';
+      bar.style.width = '15%';
+      break;
+    case 'starting':
+    case 'captcha':
+      title.textContent = '正在自动登录…';
+      msg.textContent = d.message || '正在自动识别图形验证码…';
+      step.textContent = `2/5 图形验证码 (第 ${d.captcha_attempts || 1} 次)`;
+      bar.style.width = '35%';
+      break;
+    case 'need_2fa':
+      spinner.classList.add('hidden');
+      keyIcon.classList.remove('hidden');
+      title.textContent = '需要二次验证';
+      msg.textContent = '请在下方输入 6 位验证码';
+      step.textContent = '3/5 二次验证';
+      bar.style.width = '60%';
+      document.getElementById('progressBar').classList.add('hidden');
+      twofa.classList.remove('hidden');
+      document.getElementById('totpInput').focus();
+      break;
+    case 'submitted_2fa':
+      title.textContent = '正在验证 2FA…';
+      msg.textContent = d.message || '验证中…';
+      step.textContent = '4/5 验证 2FA';
+      bar.style.width = '80%';
+      break;
+    case 'done':
+      spinner.classList.add('hidden');
+      okIcon.classList.remove('hidden');
+      title.textContent = '登录成功！';
+      msg.textContent = `已提取 uid=${d.luogu_uid || d.cookies?._uid || '?'} 的 Cookies, 跳转中…`;
+      step.textContent = '5/5 完成';
+      bar.style.width = '100%';
+      bar.classList.remove('from-emerald-500', 'to-teal-500');
+      bar.classList.add('from-green-500', 'to-emerald-500');
+      // 通知后端把 cookies 写进 flask session, 然后跳 /generate-form
+      finishLogin();
+      break;
+    case 'failed':
+    case 'expired':
+      spinner.classList.add('hidden');
+      errIcon.classList.remove('hidden');
+      title.textContent = d.state === 'expired' ? '会话已过期' : '登录失败';
+      msg.textContent = d.error || '未知错误';
+      document.getElementById('progressBar').classList.add('hidden');
+      retry.classList.remove('hidden');
+      clearInterval(pollTimer);
+      break;
+    default:
+      msg.textContent = d.message || d.state;
+  }
+}
+
+async function finishLogin() {
+  clearInterval(pollTimer);
+  try {
+    const r = await fetch('/login-with-password/done', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: 'sid=' + encodeURIComponent(SID)
+    });
+    if (r.redirected) {
+      window.location.href = r.url;
+    } else {
+      window.location.href = '/generate-form?_pwd_login=1';
+    }
+  } catch (e) {
+    window.location.href = '/generate-form?_pwd_login=1';
+  }
+}
+
+async function cancelLogin() {
+  clearInterval(pollTimer);
+  try {
+    await fetch('/login-with-password/cancel', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: 'sid=' + encodeURIComponent(SID)
+    });
+  } catch (e) {}
+  window.location.href = '/';
+}
+
+// 2FA 输入满 6 位自动提交
+const totpInput = document.getElementById('totpInput');
+totpInput.addEventListener('input', () => {
+  totpInput.value = totpInput.value.replace(/\\D/g, '').slice(0, 6);
+  if (totpInput.value.length === 6 && !submitted2FA) {
+    submitted2FA = true;
+    document.getElementById('totpBtn').click();
+  }
+});
+
+// 启动轮询
+poll();
+pollTimer = setInterval(poll, 600);
+</script>
+</body>
+</html>
+"""
+
+
+@app.route("/login-with-password", methods=["POST"])
+def login_with_password_route():
+    """启动 Playwright 自动登录 (后台) → AJAX 返回 JSON, 老浏览器回退到跳转 progress 页"""
+    username = str(request.form.get("luogu_username", "")).strip()
+    password = str(request.form.get("luogu_password", ""))
+
+    # v3.9.52 fix · AJAX 优先: 识别 fetch 调用的两种常见信号
+    is_ajax = (
+        "application/json" in (request.headers.get("Accept") or "")
+        or (request.headers.get("X-Requested-With") or "").lower() == "xmlhttprequest"
+        or request.args.get("_ajax") == "1"
+    )
+
+    if not username or not password:
+        if is_ajax:
+            return {"error": "请填写洛谷账号（UID / 用户名）和密码"}, 400
+        return render_template_string(
+            _render_index_with_error("请填写洛谷账号（UID / 用户名）和密码")
+        ), 400
+
+    result = login_with_password(username, password)
+    state = result.get("state")
+
+    if state == "started":
+        session["pwd_login_sid"] = result["session_id"]
+        if is_ajax:
+            return {"session_id": result["session_id"], "state": "starting"}, 200
+        return render_template_string(
+            _PWD_LOGIN_PROGRESS_HTML, sid=result["session_id"]
+        )
+
+    # 失败 (启动阶段就出错, 极少见)
+    err_msg = result.get("error", "启动登录失败")
+    if is_ajax:
+        return {"error": err_msg}, 400
+    return render_template_string(
+        _render_index_with_error(err_msg)
+    ), 400
+
+
+@app.route("/login-with-password/status")
+def login_with_password_status_route():
+    """前端轮询用, 返回 JSON"""
+    sid = str(request.args.get("sid", "")).strip()
+    if not sid:
+        return {"state": "expired", "error": "缺少 sid"}, 400
+    return get_login_status(sid)
+
+
+@app.route("/login-with-password/2fa", methods=["POST"])
+def login_with_password_2fa_route():
+    """用户提交 6 位 2FA 码 → 转到 LoginSession"""
+    sid = str(request.form.get("sid", "")).strip()
+    code = str(request.form.get("totp_code", "")).strip()
+    if not sid or not code:
+        return render_template_string(
+            _PWD_LOGIN_PROGRESS_HTML, sid=sid or ""
+        ), 400
+    # 把 2FA 推给 session
+    result = login_with_password(
+        username="", password="", totp_code=code, session_id=sid
+    )
+    if result.get("state") in ("done", "submitted_2fa", "need_2fa", "failed", "expired"):
+        # 回到 progress 页, 前端继续轮询
+        return render_template_string(_PWD_LOGIN_PROGRESS_HTML, sid=sid)
+    return render_template_string(_PWD_LOGIN_PROGRESS_HTML, sid=sid)
+
+
+@app.route("/login-with-password/done", methods=["POST"])
+def login_with_password_done_route():
+    """登录完成: 把 cookies 写入 flask session, 跳 /generate-form"""
+    sid = str(request.form.get("sid", "")).strip()
+    # 安全: sid 必须匹配 session 里存的
+    if not sid or session.get("pwd_login_sid") != sid:
+        return {"error": "sid 不匹配"}, 400
+    status = get_login_status(sid)
+    if status.get("state") != "done":
+        return {"error": status.get("error", "登录未完成")}, 400
+    cookies = status.get("cookies") or {}
+    # v3.9.60 fix · C3VK 不再需要
+    if not (cookies.get("__client_id") and cookies.get("_uid")):
+        return {"error": "cookies 不完整"}, 400
+    session["temp_cookies"] = cookies
+    session["temp_luogu_uid"] = cookies.get("_uid", "")
+    session.pop("pwd_login_sid", None)
+    app.logger.info(f"v3.9.52 自动登录成功: uid={session.get('temp_luogu_uid')}")
+    return redirect(url_for("generate_form", _pwd_login=1))
+
+
+@app.route("/login-with-password/cancel", methods=["POST"])
+def login_with_password_cancel_route():
+    """用户取消: 清理 session + 关掉 LoginSession"""
+    sid = str(request.form.get("sid", "")).strip()
+    if sid:
+        try:
+            from pw_login import get_manager
+            get_manager().remove(sid)
+        except Exception:
+            pass
+    if session.get("pwd_login_sid") == sid:
+        session.pop("pwd_login_sid", None)
+    return {"ok": True}
+
+
+def _render_index_with_error(msg: str) -> str:
+    """用首页模板渲染错误信息 (v3.9.52 helper)"""
+    return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>登录失败</title>
+    <script>alert({msg!r}); location.href='/';</script></head><body></body></html>"""
+
+
+@app.route("/clear-temp-cookies", methods=["POST"])
+def clear_temp_cookies_route():
+    """v3.9.52 · 用户放弃密码登录时清理 session 里的临时 cookies"""
+    session.pop("temp_cookies", None)
+    session.pop("temp_luogu_uid", None)
+    session.pop("pending_2fa_user", None)
+    session.pop("pending_2fa_pass", None)
+    session.pop("pwd_login_sid", None)
+    return redirect(url_for("index"))
+
+
+# v3.9.52 debug · 测试入口：注入假 temp_cookies，跳到 /generate-form?_pwd_login=1
+# 用途：让用户/测试同学在浏览器里直接看到回填效果（不需要真去打 luogu.com.cn）
+# 安全：URL 路径明显带 _debug 前缀；且只注入临时 session，不持久化
+@app.route("/_debug/inject-temp-cookies")
+def _debug_inject_temp_cookies():
+    session["temp_cookies"] = {
+        "__client_id": "DEMO_CLIENT_xxxxxxxxxxxxxxxxxxxx",
+        "_uid": "12345678",
+        "C3VK": "DEMO_C3VK_yyyyyyyyyyyyyyyyyyyy",
+    }
+    session["temp_luogu_uid"] = "12345678"
+    return redirect(url_for("generate_form", _pwd_login=1))
 
 
 @app.route("/generate", methods=["POST"])
 def generate():
     form_data = request.form.to_dict()
     task_id = str(uuid.uuid4())
+
+    # v3.9.52 · 若 session 里有临时 cookies（密码登录存的），合并进 form_data
+    # 这样 run_generation 阶段可以直接 build_cookie_dict() 用
+    temp_cookies = session.pop("temp_cookies", None)
+    temp_luogu_uid = session.pop("temp_luogu_uid", None)
+    if isinstance(temp_cookies, dict) and temp_cookies:
+        form_data["client_id"] = temp_cookies.get("__client_id", "")
+        form_data["uid"] = temp_cookies.get("_uid", "")
+        form_data["c3vk"] = temp_cookies.get("C3VK", "")
+        if temp_luogu_uid and not form_data.get("luogu_uid"):
+            form_data["luogu_uid"] = str(temp_luogu_uid)
+
     # v3.8 · 取 UID（兜底 luogu_uid/uid 两种字段名）供 tasks.luogu_uid 写入
     _g_uid = str(form_data.get("luogu_uid") or form_data.get("uid") or "").strip()
     with TASKS_LOCK:
@@ -2712,10 +3818,16 @@ STATUS_HTML = """
             </div>
             {% if me_url %}
             {# v3.9.6 · 智能门控：已生成过家长订阅版 → 直接显示"查看"，不再每次让家长重输邀请码 #}
-            {% if has_parent_sub_html %}
+            {# v3.9.41 · 扩展：DB 里有任何已激活的 parent_invite/parent_sub 记录，也跳过表单（即使 HTML 未生成成功） #}
+            {% if has_parent_sub_html or has_parent_sub_db %}
                 <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                    {% if has_parent_sub_html %}
                     <p class="text-sm text-emerald-800">✅ 您家孩子的家长订阅版已生成</p>
                     <a href="{{ ps_html_url }}" target="_blank" class="app-btn app-btn-amber mt-2 block text-center">📨 查看家长订阅版（AI 决策支持）</a>
+                    {% else %}
+                    <p class="text-sm text-emerald-800">✅ 您家孩子的家长订阅已激活</p>
+                    <p class="text-[11px] text-emerald-600 mt-1">订阅版报告正在生成或上次生成未完成，点击下方按钮重新触发</p>
+                    {% endif %}
                     <a href="/me/{{ me_url.split('/')[-1] }}/parent-subscribe" class="app-btn app-btn-secondary mt-2 block text-center">↩ 进入家长订阅版中心</a>
                 </div>
             {% else %}
@@ -2901,8 +4013,12 @@ def status_page(task_id):
 
     # v3.9.6 · 智能门控：检查该 UID 是否已生成过 parent_subscribe.html
     # 如果已生成 → 状态页直接显示"查看家长订阅版"，不再每次让家长重输邀请码
+    # v3.9.41 · 扩展：DB 里只要有任意已激活的 parent_invite / parent_sub 记录（即使 HTML 还没生成成功），
+    #              也应直接跳过邀请码表单。否则用户明明已兑换（admin 显示已用），却仍要再输码，
+    #              一旦大小写不一致就报"邀请码无效"，体验断层。
     has_parent_sub_html = False
     ps_html_url = ""
+    has_parent_sub_db = False
     if luogu_uid and luogu_uid.isdigit():
         try:
             _stu = _admin_students.get_student_by_uid(luogu_uid)
@@ -2912,7 +4028,13 @@ def status_page(task_id):
                 has_parent_sub_html = True
                 ps_html_url = f"/reports/{_latest.name}/parent_subscribe.html"
         except Exception as _e:
-            app.logger.debug(f"[status_page] has_parent_sub check failed: {_e}")
+            app.logger.debug(f"[status_page] has_parent_sub_html check failed: {_e}")
+        # v3.9.41 · DB 层订阅判断（独立于 HTML 是否生成成功）
+        try:
+            has_parent_sub_db = _is_parent_subscribed(luogu_uid)
+        except Exception as _e:
+            app.logger.debug(f"[status_page] _is_parent_subscribed check failed: {_e}")
+            has_parent_sub_db = False
 
     return render_template_string(
         STATUS_HTML,
@@ -2939,6 +4061,8 @@ def status_page(task_id):
         # v3.9.6 · 新增：智能门控用
         has_parent_sub_html=has_parent_sub_html,
         ps_html_url=ps_html_url,
+        # v3.9.41 · 新增：DB 层订阅判断（HTML 未生成也能识别已兑换）
+        has_parent_sub_db=has_parent_sub_db,
     )
 
 
@@ -3013,6 +4137,7 @@ def retry_task(task_id):
     return render_template_string(
         GENERATE_FORM_HTML,
         form=snapshot,
+        pwd_login_2fa=None,
         server_key_hint=_get_server_key_hint(),
         gesp_default_year=date.today().year,
         validation_result=None,
@@ -5231,7 +6356,16 @@ ADMIN_STUDENTS_LIST_HTML = """
                     {% for s in students %}
                         <tr class="border-t border-gray-100 hover:bg-gray-50">
                             <td class="px-6 py-3 text-gray-500">#{{ s.id }}</td>
-                            <td class="px-6 py-3 font-mono text-xs">{{ s.luogu_uid }}</td>
+                            <td class="px-6 py-3 font-mono text-xs">
+                                <span>{{ s.luogu_uid }}</span>
+                                <!-- v3.9.62 · 后台可一键跳学员个人中心（带签名 token） -->
+                                {% if s.luogu_uid %}
+                                <a href="/me/{{ s.luogu_uid }}?t={{ _sign_me_token(s.luogu_uid) }}"
+                                   target="_blank"
+                                   class="ml-1 text-blue-600 hover:text-emerald-600 hover:underline"
+                                   title="在后台打开学员个人中心（带签名 token）">→ 个人中心</a>
+                                {% endif %}
+                            </td>
                             <td class="px-6 py-3">{{ s.real_name or ('UID-' + s.luogu_uid) }}{% if s.is_minor %} <span class="text-xs text-orange-500">(未成年)</span>{% endif %}</td>
                             <td class="px-6 py-3 text-gray-600">{{ s.school or '—' }}</td>
                             <td class="px-6 py-3 text-gray-600">
@@ -5576,14 +6710,34 @@ def generate_form():
     选手信息（性别/出生日期/手机）+ OpenAI 配置 + PIPL 同意
 
     v3.8 · 已登录学员：自动从 session 回填 form（无需重新输入 UID/姓名等）
+    v3.9.52 · 密码登录成功后回填 cookies 到表单（一次性，读取后清掉 session 避免泄露）
     """
     form = _load_student_form_from_session()
+
+    # v3.9.52 · 密码登录成功跳过来时，从 session 把 temp_cookies 写到 form
+    info = None
+    if request.args.get("_pwd_login"):
+        temp_cookies = session.pop("temp_cookies", None)
+        temp_uid = session.pop("temp_luogu_uid", "")
+        if isinstance(temp_cookies, dict) and temp_cookies:
+            form["client_id"] = temp_cookies.get("__client_id", "")
+            form["uid"] = temp_cookies.get("_uid", "")
+            form["c3vk"] = temp_cookies.get("C3VK", "")
+            if temp_uid and not form.get("luogu_uid"):
+                form["luogu_uid"] = str(temp_uid)
+            info = (
+                f"账号密码登录成功（洛谷 UID {form.get('luogu_uid','')}），"
+                f"__client_id / _uid / C3VK 已自动填好。"
+            )
+
     return render_template_string(
         GENERATE_FORM_HTML,
         form=form,
+        pwd_login_2fa=None,
         server_key_hint=_get_server_key_hint(),
         gesp_default_year=date.today().year,
         validation_result=request.args.get("validation_result"),
+        info=info,
     )
 
 
@@ -5609,6 +6763,7 @@ def validate_cookies_v352():
     return render_template_string(
         GENERATE_FORM_HTML,
         form=form,
+        pwd_login_2fa=None,
         server_key_hint=_get_server_key_hint(),
         gesp_default_year=date.today().year,
         validation_result=validate_cookies(form),
@@ -5622,12 +6777,14 @@ def generate_form_submit():
     form = request.form.to_dict()
 
     # 必填校验
-    required = ["client_id", "uid", "c3vk", "real_name", "city", "grade"]
+    # v3.9.60 fix · C3VK 不再需要
+    required = ["client_id", "uid", "real_name", "city", "grade"]  # 移除了 c3vk
     missing = [k for k in required if not (form.get(k) or "").strip()]
     if missing:
         return render_template_string(
             GENERATE_FORM_HTML,
             form=form,
+        pwd_login_2fa=None,
             server_key_hint=_get_server_key_hint(),
             gesp_default_year=date.today().year,
             error=f"请填写必填项：{', '.join(missing)}",
@@ -5639,6 +6796,7 @@ def generate_form_submit():
         return render_template_string(
             GENERATE_FORM_HTML,
             form=form,
+        pwd_login_2fa=None,
             server_key_hint=_get_server_key_hint(),
             gesp_default_year=date.today().year,
             error="UID 必须是 6-10 位数字",
@@ -5664,6 +6822,7 @@ def generate_form_submit():
             return render_template_string(
                 GENERATE_FORM_HTML,
                 form=form,
+        pwd_login_2fa=None,
                 server_key_hint=_get_server_key_hint(),
                 gesp_default_year=date.today().year,
                 error=None,
@@ -5681,6 +6840,7 @@ def generate_form_submit():
         return render_template_string(
             GENERATE_FORM_HTML,
             form=form,
+        pwd_login_2fa=None,
             server_key_hint=_get_server_key_hint(),
             gesp_default_year=date.today().year,
             error="请先同意《个人信息处理规则》（PIPL）",
@@ -5752,6 +6912,7 @@ def generate_form_submit():
         return render_template_string(
             GENERATE_FORM_HTML,
             form=form,
+        pwd_login_2fa=None,
             server_key_hint=_get_server_key_hint(),
             gesp_default_year=date.today().year,
             error=f"注册失败：{e}",
@@ -5947,10 +7108,19 @@ GENERATE_FORM_HTML = """
     {% endif %}
 
     {% if info %}
-    <div class="bg-amber-50 border border-amber-300 rounded-lg p-4 text-sm text-amber-800">
-        <p class="font-semibold mb-2">⏰ {{ info }}</p>
+    <!-- v3.9.62 · 成功提示改成绿色高亮 + 引导用户继续填写报告信息 -->
+    <div class="bg-emerald-50 border-2 border-emerald-400 rounded-lg p-4 text-sm text-emerald-900 shadow-sm">
+        <p class="font-bold text-base flex items-center gap-2">
+            <span class="text-2xl">✅</span>
+            <span>登录成功！</span>
+        </p>
+        <p class="mt-2 leading-relaxed">{{ info }}</p>
+        <p class="mt-2 text-xs text-emerald-700 font-medium">
+            👉 请继续往下填写 <span class="font-bold underline">报告信息</span>（真实姓名 / 学校 / 年级 / 城市 / 性别 / 出生日期 / 家长手机 / OpenAI 配置 / PIPL 同意），
+            然后点最下方 <span class="font-bold">「生成 AI 报告」</span> 即可。
+        </p>
         {% if info_me_url %}
-        <a href="{{ info_me_url }}" class="inline-block mt-1 px-4 py-2 rounded-md bg-amber-600 text-white text-xs font-bold hover:bg-amber-700">
+        <a href="{{ info_me_url }}" class="inline-block mt-3 px-4 py-2 rounded-md bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700">
             👉 查看已生成的报告
         </a>
         {% endif %}
@@ -5972,79 +7142,177 @@ GENERATE_FORM_HTML = """
 
     <form action="/generate-form" method="post" class="bg-white rounded-2xl card-shadow p-6 space-y-5">
 
-        <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 space-y-2">
-            <p class="font-semibold text-sm">如何获取洛谷 Cookies：</p>
-            <ol class="list-decimal list-inside space-y-1 text-amber-700">
-                <li>打开 <code>https://www.luogu.com.cn</code> 并登录</li>
-                <li>在洛谷页面 <kbd class="px-1 bg-amber-100 rounded">右键</kbd> → <kbd class="px-1 bg-amber-100 rounded">检查</kbd> → <kbd class="px-1 bg-amber-100 rounded">Application(应用)</kbd> → <kbd class="px-1 bg-amber-100 rounded">Storage(存储)</kbd> → <kbd class="px-1 bg-amber-100 rounded">Cookies</kbd> → <code>https://www.luogu.com.cn</code></li>
-                <li>复制以下三个参数的 Name/Value 填入下方：</li>
-            </ol>
-            <details class="mt-1">
-                <summary class="cursor-pointer select-none text-amber-800 hover:text-amber-900 font-medium">
-                    📷 查看指引图（点击展开 / 折叠）
-                </summary>
-                <div class="mt-2 p-2 bg-white border border-amber-200 rounded-md">
-                    <img src="{{ url_for('static', filename='cookie_guide.png') }}"
-                         alt="如何获取洛谷 Cookies 指引图"
-                         class="block w-full h-auto rounded-sm shadow-sm" />
-                    <p class="mt-2 text-amber-700 leading-relaxed">
-                        <span class="font-semibold">高亮的三行</span>就是需要复制的字段：
-                        <code>__client_id</code> / <code>_uid</code> / <code>C3VK</code>。
-                        点击右侧"复制"按钮可一键复制 Value。
-                    </p>
-                </div>
-            </details>
-        </div>
-
-        <!-- 1. 洛谷账号 -->
-        <div class="field-section">
-            <h3>📡 1. 洛谷账号（必填 · 用于抓取做题数据）</h3>
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                    <label class="app-label">__client_id</label>
-                    <input type="text" name="client_id" required value="{{ form.get('client_id','') }}" class="app-input mt-1" placeholder="32 位">
-                </div>
-                <div>
-                    <label class="app-label">_uid</label>
-                    <input type="text" name="uid" required pattern="\\d{6,10}" value="{{ form.get('uid','') }}" class="app-input mt-1" placeholder="6-10 位">
-                </div>
-                <div>
-                    <label class="app-label">C3VK</label>
-                    <input type="text" name="c3vk" required value="{{ form.get('c3vk','') }}" class="app-input mt-1" placeholder="token">
+        {# v3.9.62 · 1. 授权登录洛谷（首要登录方式）#}
+        <div class="bg-gradient-to-br from-emerald-50 to-teal-50 border-2 border-emerald-300 rounded-xl p-4 space-y-3 shadow-sm">
+            <div class="flex items-start gap-2">
+                <span class="text-2xl">🚀</span>
+                <div class="flex-1">
+                    <p class="font-bold text-emerald-900 text-sm">🚀 授权登录洛谷（推荐 · 自动获取 Cookies）</p>
+                    <p class="text-xs text-emerald-700 mt-1">输入洛谷账号（UID / 用户名）+ 密码，授权后自动获取 __client_id / _uid，无需手动复制粘贴。</p>
                 </div>
             </div>
-
-            <!-- 先校验 Cookies（推荐）— 与旧表单一致 -->
-            <div class="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
-                <div class="flex items-start justify-between gap-3">
+            <!-- v3.9.55 fix · 加 novalidate 阻止浏览器 HTML5 验证 (因为内部嵌套了 pw2faForm 里的 totp_code required 字段, 浏览器自动拆 form 后会污染外层 form) -->
+            <!-- v3.9.58 fix · 关键修复: 改用 <div> 而不是 <form>!
+                 HTML5 解析规则: form 不能嵌套, 浏览器看到内层 <form> 会自动关闭外层 <form>
+                 这导致 校验/生成 按钮 掉到 form 外面 → formaction 失效, 按钮无反应 -->
+            <div id="pwLoginForm" data-form="login" class="space-y-2">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div>
-                        <p class="font-semibold text-blue-800">先校验 Cookies（推荐）</p>
-                        <p class="text-xs text-blue-700 mt-1">填写完上面三个参数后点一次，立刻检查 me / practice / record/list 是否可用。</p>
+                        <label class="app-label">洛谷账号</label>
+                        <input id="pwUser" type="text" name="luogu_username" required
+                               value="{{ form.get('luogu_username','') }}"
+                               class="app-input mt-1"
+                               placeholder="UID 或用户名（数字）"
+                               autocomplete="username">
+                    </div>
+                    <div>
+                        <label class="app-label">密码</label>
+                        <input id="pwPass" type="password" name="luogu_password" required
+                               class="app-input mt-1"
+                               placeholder="洛谷账号密码"
+                               autocomplete="current-password">
                     </div>
                 </div>
-                <div class="mt-3">
-                    <button id="v352ValidateBtn" type="submit"
-                            formaction="/validate-cookies-v352"
-                            formnovalidate
-                            class="w-full bg-white text-blue-700 font-semibold py-2 px-4 rounded-md border border-blue-300 hover:bg-blue-50 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                        校验 Cookies
-                    </button>
-                </div>
-                <p id="v352ValidateHint" class="text-xs text-blue-700 mt-2">
-                    请先填写 __client_id、_uid、C3VK 后再校验。
-                </p>
-                {% if validation_result %}
-                <div class="mt-2 rounded-md p-2 text-sm {% if validation_result.ok %}bg-green-50 border border-green-200 text-green-800{% else %}bg-red-50 border border-red-200 text-red-800{% endif %}">
-                    <p class="font-semibold">{{ validation_result.title }}</p>
-                    <p>{{ validation_result.message }}</p>
+                {% if pwd_login_2fa %}
+                <div class="bg-amber-50 border border-amber-300 rounded-md p-2 space-y-2">
+                    <p class="text-xs text-amber-800 font-semibold">🔐 {{ pwd_login_2fa.get('message','该账号开启了二次验证') }}</p>
+                    <input type="hidden" name="luogu_username" value="{{ pwd_login_2fa.get('username','') }}">
+                    <input id="pwTotp" type="text" name="totp_code" required maxlength="6" minlength="6"
+                           pattern="\d{6}"
+                           class="app-input"
+                           placeholder="6 位验证码"
+                           inputmode="numeric"
+                           autocomplete="one-time-code">
                 </div>
                 {% endif %}
+                <div class="flex gap-2">
+                    <!-- v3.9.57 fix · type="button" 阻止 form submit, 由 JS click handler 接管 -->
+                    <button id="pwLoginBtn" type="button"
+                            class="flex-1 bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold py-2.5 px-4 rounded-lg hover:from-emerald-700 hover:to-teal-700 transition text-sm">
+                        {% if pwd_login_2fa %}🔐 提交验证码{% else %}🔑 授权登录洛谷{% endif %}
+                    </button>
+                    {% if pwd_login_2fa %}
+                    <a href="/" class="px-3 py-2.5 bg-white border border-gray-300 text-gray-600 text-xs rounded-lg hover:bg-gray-50">取消</a>
+                    {% endif %}
+                </div>
+                <!-- v3.9.52 fix · AJAX 同页进度框 (避免跳转刷新让用户误以为表单丢失) -->
+                <div id="pwProgress" class="hidden mt-2 bg-emerald-50 border border-emerald-300 rounded-lg p-3 space-y-2">
+                    <div class="flex items-center gap-2">
+                        <svg id="pwSpin" class="animate-spin w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z"></path>
+                        </svg>
+                        <span id="pwTitle" class="text-sm font-semibold text-emerald-800">正在启动…</span>
+                    </div>
+                    <div class="w-full bg-emerald-200 rounded-full h-1.5">
+                        <div id="pwBar" class="bg-emerald-500 h-1.5 rounded-full transition-all" style="width:5%"></div>
+                    </div>
+                    <p id="pwMsg" class="text-xs text-emerald-700">请稍候, 浏览器正在自动操作</p>
+                    <button id="pwCancelBtn" type="button" onclick="pwCancelLogin()" class="text-xs text-gray-500 hover:text-gray-700 underline">取消登录</button>
+                </div>
+                <div id="pwError" class="hidden mt-2 bg-red-50 border border-red-300 rounded-lg p-2 text-xs text-red-700"></div>
             </div>
+            <!-- v3.9.56 fix · pw2faForm 也必须放在任何 form 外面
+                 HTML 解析时会拆嵌套 form, 浏览器把内层 form 的 submit button
+                 关联到内层 form, 实际 POST 打到了内层 form (默认 action=当前 URL) -->
+            <!-- v3.9.58 fix · 改成 div, 避免 form 嵌套破坏外层 form 结构 -->
+            <div id="pw2faForm" class="hidden mt-2 bg-amber-50 border border-amber-300 rounded-lg p-3 space-y-2">
+                <p class="text-xs text-amber-800 font-semibold">🔐 该账号开启了二次验证, 请输入 6 位验证码:</p>
+                <input type="hidden" name="sid" id="pw2faSid">
+                <input id="pw2faInput" type="text" name="totp_code" maxlength="6" minlength="6"
+                       pattern="\d{6}" inputmode="numeric" autocomplete="one-time-code"
+                       class="w-full text-center text-xl tracking-widest font-mono px-3 py-2 border-2 border-amber-300 rounded-md focus:border-amber-500 focus:outline-none"
+                       placeholder="• • • • • •">
+                <button id="pw2faBtn" type="button" class="w-full bg-amber-500 text-white font-bold py-2 rounded-md hover:bg-amber-600 text-sm">提交验证码</button>
+            </div>
+            <p class="text-[10px] text-emerald-600 leading-relaxed">
+                🔒 密码仅在本次请求中使用，不写入日志或数据库 · 洛谷官方登录协议
+            </p>
         </div>
 
-        <!-- 2. 报告核心信息（融合注册字段） -->
+        {# v3.9.62 · 2. 手动获取 Cookie（折叠在授权登录之后 · 授权失败时备用）#}
+        <details class="bg-amber-50 border border-amber-200 rounded-xl overflow-hidden group">
+            <summary class="cursor-pointer select-none px-4 py-3 font-bold text-sm text-amber-800 hover:bg-amber-100/40 flex items-center gap-2 list-none">
+                <span class="text-lg">⚠️</span>
+                <span>授权登录失败？手动复制 Cookie（备用方案）</span>
+                <span class="ml-auto text-xs text-amber-600 font-normal group-open:hidden">点击展开 ▾</span>
+                <span class="ml-auto text-xs text-amber-600 font-normal hidden group-open:inline">点击折叠 ▴</span>
+            </summary>
+            <div class="p-4 space-y-4 border-t border-amber-200 bg-white/60">
+                {# 2a. 如何获取洛谷 Cookies（图说明）#}
+                <div>
+                    <p class="font-semibold text-sm text-amber-900">📖 如何获取洛谷 Cookies：</p>
+                    <ol class="list-decimal list-inside space-y-1 text-amber-700 text-xs mt-2">
+                        <li>打开 <code>https://www.luogu.com.cn</code> 并登录</li>
+                        <li>在洛谷页面 <kbd class="px-1 bg-amber-100 rounded">右键</kbd> → <kbd class="px-1 bg-amber-100 rounded">检查</kbd> → <kbd class="px-1 bg-amber-100 rounded">Application(应用)</kbd> → <kbd class="px-1 bg-amber-100 rounded">Storage(存储)</kbd> → <kbd class="px-1 bg-amber-100 rounded">Cookies</kbd> → <code>https://www.luogu.com.cn</code></li>
+                        <!-- v3.9.61 fix · C3VK 不再需要, 改成"两个" -->
+                        <li>复制以下两个参数的 Name/Value 填入下方：</li>
+                    </ol>
+                    <details class="mt-2">
+                        <summary class="cursor-pointer select-none text-amber-800 hover:text-amber-900 font-medium text-xs">
+                            📷 查看指引图（点击展开 / 折叠）
+                        </summary>
+                        <div class="mt-2 p-2 bg-white border border-amber-200 rounded-md">
+                            <img src="{{ url_for('static', filename='cookie_guide.png') }}"
+                                 alt="如何获取洛谷 Cookies 指引图"
+                                 class="block w-full h-auto rounded-sm shadow-sm" />
+                            <p class="mt-2 text-amber-700 leading-relaxed text-xs">
+                                <!-- v3.9.60 fix · C3VK 不再需要 -->
+                                <span class="font-semibold">高亮的两行</span>就是需要复制的字段：
+                                <code>__client_id</code> 和 <code>_uid</code>。
+                                点击右侧"复制"按钮可一键复制 Value。
+                            </p>
+                        </div>
+                    </details>
+                </div>
+
+                {# 2b. __client_id + _uid 输入 #}
+                <div>
+                    <p class="font-semibold text-sm text-amber-900">📡 填写 Cookies：</p>
+                    <!-- v3.9.60 fix · 改成 2 列布局, C3VK 不再需要 -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+                        <div>
+                            <label class="app-label">__client_id</label>
+                            <input type="text" name="client_id" required value="{{ form.get('client_id','') }}" class="app-input mt-1" placeholder="32 位">
+                        </div>
+                        <div>
+                            <label class="app-label">_uid</label>
+                            <input type="text" name="uid" required pattern="\\d{6,10}" value="{{ form.get('uid','') }}" class="app-input mt-1" placeholder="6-10 位">
+                        </div>
+                    </div>
+                </div>
+
+                {# 2c. 校验 Cookies #}
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                    <div>
+                        <p class="font-semibold text-blue-800 text-sm">先校验 Cookies（推荐）</p>
+                        <!-- v3.9.61 fix · C3VK 不再需要 -->
+                        <p class="text-xs text-blue-700 mt-1">填写完上面两个参数后点一次，立刻检查 me / practice / record/list 是否可用。</p>
+                    </div>
+                    <div class="mt-3">
+                        <button id="v352ValidateBtn" type="submit"
+                                formaction="/validate-cookies-v352"
+                                formnovalidate
+                                class="w-full bg-white text-blue-700 font-semibold py-2 px-4 rounded-md border border-blue-300 hover:bg-blue-50 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                            校验 Cookies
+                        </button>
+                    </div>
+                    <p id="v352ValidateHint" class="text-xs text-blue-700 mt-2">
+                        请先填写 __client_id 和 _uid 后再校验。
+                    </p>
+                    {% if validation_result %}
+                    <div class="mt-2 rounded-md p-2 text-sm {% if validation_result.ok %}bg-green-50 border border-green-200 text-green-800{% else %}bg-red-50 border border-red-200 text-red-800{% endif %}">
+                        <p class="font-semibold">{{ validation_result.title }}</p>
+                        <p>{{ validation_result.message }}</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </details>
+
+        <!-- 1. 报告核心信息（融合注册字段） -->
         <div class="field-section">
-            <h3>👤 2. 报告信息（必填 · 报告核心数据 + 注册字段）</h3>
+            <h3>👤 1. 报告信息（必填 · 报告核心数据 + 注册字段）</h3>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                     <label class="app-label">真实姓名 <span class="text-red-500">*</span></label>
@@ -6266,7 +7534,8 @@ GENERATE_FORM_HTML = """
             </label>
         </div>
 
-        <button type="submit" class="app-btn app-btn-primary">🚀 立即生成我的学习报告</button>
+        <!-- v3.9.59 fix · formnovalidate 跳过 HTML5 验证, 让后端做必填校验 (避免 required 字段没填时 click 无反应) -->
+        <button type="submit" formnovalidate class="app-btn app-btn-primary">🚀 立即生成我的学习报告</button>
 
         <p class="text-center text-xs text-gray-400">生成后可在 <a href="/me" class="text-emerald-600 hover:underline">/me/&lt;你的 UID&gt;</a> 查看 3 版本报告（学员·家长·教练）</p>
     </form>
@@ -6285,16 +7554,23 @@ GENERATE_FORM_HTML = """
         var btn  = document.getElementById('v352ValidateBtn');
         var hint = document.getElementById('v352ValidateHint');
         function refresh() {
-            var ok = !!v('client_id') && !!v('uid') && !!v('c3vk');
+            // v3.9.60 fix · C3VK 不再需要, 只校验 client_id 和 uid
+            var ok = !!v('client_id') && !!v('uid');
             if (btn)  btn.disabled  = !ok;
             if (hint) hint.textContent = ok
-                ? '已填写三个参数，建议先点一次校验。'
-                : '请先填写 __client_id、_uid、C3VK 后再校验。';
+                ? '已填写两个参数，建议先点一次校验。'
+                : '请先填写 __client_id 和 _uid 后再校验。';
         }
-        ['client_id', 'uid', 'c3vk'].forEach(function (name) {
+        // v3.9.61 fix · 多重触发器 (input/change/paste/keyup/focus), 兼容 autofill
+        ['client_id', 'uid'].forEach(function (name) {
             var el = document.querySelector('input[name="' + name + '"]');
-            if (el) el.addEventListener('input', refresh);
+            if (!el) return;
+            ['input', 'change', 'paste', 'keyup', 'focus'].forEach(function(evt) {
+                el.addEventListener(evt, refresh);
+            });
         });
+        // 兜底: 每 500ms 检查一次, 防止 autofill / 浏览器扩展填充未触发事件
+        setInterval(refresh, 500);
         refresh();
     })();
 
@@ -6328,6 +7604,261 @@ GENERATE_FORM_HTML = """
             syncCities(initProvince, initCity);
         }
     })();
+</script>
+
+<!-- v3.9.52 fix · 密码登录同页 AJAX 脚本 (解决「点完登录页面跳走, 表单看起来丢了」) -->
+<!-- v3.9.53 fix · 必须放在 GENERATE_FORM_HTML 内部末尾 (不是 SELECT_MODE_HTML),  /generate-form 路由才能拿到 -->
+<script>
+(function() {
+  let PW_SID = null;
+  let PW_TIMER = null;
+  const $ = (id) => document.getElementById(id);
+
+  // 让按钮在 done 之后被回填, 让 input 也有视觉反馈
+  function flashFilled(name) {
+    const el = document.querySelector(`[name="${name}"]`);
+    if (!el) return;
+    el.classList.add('ring-2', 'ring-emerald-400');
+    setTimeout(() => el.classList.remove('ring-2', 'ring-emerald-400'), 2500);
+  }
+
+  function fillCookies(cookies) {
+    if (!cookies) return;
+    if (cookies.__client_id) {
+      const e = document.querySelector('[name="client_id"]');
+      if (e) e.value = cookies.__client_id;
+      flashFilled('client_id');
+    }
+    if (cookies._uid) {
+      const e = document.querySelector('[name="uid"]');
+      if (e) e.value = cookies._uid;
+      flashFilled('uid');
+    }
+    // v3.9.60 fix · C3VK 不再需要
+    /*
+    if (cookies.C3VK) {
+      const e = document.querySelector('[name="c3vk"]');
+      if (e) e.value = cookies.C3VK;
+      flashFilled('c3vk');
+    }
+    */
+    // 滚到 cookies 区, 让用户看到
+    const cidEl = document.querySelector('[name="client_id"]');
+    if (cidEl) cidEl.scrollIntoView({behavior: 'smooth', block: 'center'});
+  }
+
+  function showProgress() {
+    $('pwProgress').classList.remove('hidden');
+    $('pwError').classList.add('hidden');
+  }
+  function hideProgress() {
+    $('pwProgress').classList.add('hidden');
+  }
+  function showError(msg) {
+    const e = $('pwError');
+    e.textContent = msg;
+    e.classList.remove('hidden');
+  }
+  function setStage(title, msg, pct) {
+    $('pwTitle').textContent = title;
+    $('pwMsg').textContent = msg;
+    $('pwBar').style.width = (pct || 5) + '%';
+  }
+  function setLoginBtnDisabled(disabled) {
+    const b = $('pwLoginBtn');
+    if (b) {
+      b.disabled = disabled;
+      b.classList.toggle('opacity-50', disabled);
+      b.classList.toggle('cursor-not-allowed', disabled);
+    }
+  }
+
+  async function pollStatus() {
+    if (!PW_SID) return;
+    try {
+      const r = await fetch('/login-with-password/status?sid=' + encodeURIComponent(PW_SID),
+                            {headers: {'Accept': 'application/json'}});
+      const d = await r.json();
+      handleState(d);
+    } catch (e) {
+      $('pwMsg').textContent = '网络错误, 重试中…';
+    }
+  }
+
+  function handleState(d) {
+    const twofa = $('pw2faForm');
+    const cancel = $('pwCancelBtn');
+    if (twofa) twofa.classList.add('hidden');
+    if (cancel) cancel.classList.remove('hidden');
+
+    switch (d.state) {
+      case 'starting':
+        setStage('正在启动浏览器…', d.message || 'Playwright 启动中', 15);
+        break;
+      case 'captcha':
+        setStage('正在自动登录…', d.message || '正在自动识别图形验证码…', 35);
+        break;
+      case 'need_2fa':
+        setStage('需要二次验证', '请输入 6 位验证码', 60);
+        if (twofa) {
+          twofa.classList.remove('hidden');
+          $('pw2faSid').value = PW_SID;
+          $('pw2faInput').value = '';
+          $('pw2faInput').focus();
+        }
+        break;
+      case 'submitted_2fa':
+        setStage('正在验证 2FA…', d.message || '验证中…', 80);
+        break;
+      case 'done':
+        clearInterval(PW_TIMER);
+        setStage('登录成功!', '已提取 Cookies, 正在回填表单…', 100);
+        finishLogin();
+        break;
+      case 'failed':
+      case 'expired':
+        clearInterval(PW_TIMER);
+        hideProgress();
+        setLoginBtnDisabled(false);
+        showError((d.state === 'failed' ? '登录失败: ' : '会话已过期: ') + (d.error || d.message || '未知错误'));
+        break;
+      default:
+        $('pwMsg').textContent = d.message || d.state || '';
+    }
+  }
+
+  async function finishLogin() {
+    try {
+      const r = await fetch('/login-with-password/done', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json'},
+        body: 'sid=' + encodeURIComponent(PW_SID),
+      });
+      if (r.ok) {
+        try {
+          const statusR = await fetch('/login-with-password/status?sid=' + encodeURIComponent(PW_SID),
+                                      {headers: {'Accept': 'application/json'}});
+          const statusD = await statusR.json();
+          if (statusD.cookies) {
+            fillCookies(statusD.cookies);
+            setStage('完成', 'Cookies 已自动填好, 可直接点「生成 AI 报告」', 100);
+            setTimeout(() => hideProgress(), 1800);
+            setLoginBtnDisabled(false);
+            return;
+          }
+        } catch (e) {}
+        window.location.reload();
+      } else {
+        setLoginBtnDisabled(false);
+        showError('完成登录失败, 请重试');
+      }
+    } catch (e) {
+      setLoginBtnDisabled(false);
+      showError('网络错误, 请重试');
+    }
+  }
+
+  // v3.9.54 fix · 关键: onsubmit handler 是 async 会让 return 值变成 undefined,
+  // 这样 onsubmit="return pwLoginSubmit(event)" 拿不到 false, 表单会默认提交 → 页面刷新
+  // 改成同步函数: 同步 preventDefault, 把 async 逻辑包到 IIFE 里
+  window.pwLoginSubmit = function(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    (async () => {
+      const user = $('pwUser').value.trim();
+      const pass = $('pwPass').value;
+      if (!user || !pass) {
+        showError('请填写洛谷账号和密码');
+        return;
+      }
+      showProgress();
+      setStage('正在启动…', '准备浏览器环境', 5);
+      setLoginBtnDisabled(true);
+      try {
+        const r = await fetch('/login-with-password', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json'},
+          body: 'luogu_username=' + encodeURIComponent(user) + '&luogu_password=' + encodeURIComponent(pass),
+        });
+        const d = await r.json();
+        if (d && d.session_id) {
+          PW_SID = d.session_id;
+          setStage('正在启动浏览器…', 'Playwright 启动中', 10);
+          PW_TIMER = setInterval(pollStatus, 800);
+          pollStatus();
+        } else if (d && d.error) {
+          hideProgress();
+          setLoginBtnDisabled(false);
+          showError(d.error);
+        } else {
+          hideProgress();
+          setLoginBtnDisabled(false);
+          showError('启动登录失败, 请重试');
+        }
+      } catch (err) {
+        hideProgress();
+        setLoginBtnDisabled(false);
+        showError('网络错误: ' + err.message);
+      }
+    })();
+    return false;  // 同步返回 false → onsubmit 阻止默认提交 → 页面不刷新
+  };
+
+  // v3.9.54 fix · 同上, 改成同步函数防止 onsubmit 拿不到 false
+  window.pw2faSubmit = function(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    (async () => {
+      const code = $('pw2faInput').value.trim();
+      const sid = $('pw2faSid').value;
+      if (!code || !sid) return;
+      setStage('正在验证 2FA…', '提交验证码…', 75);
+      $('pw2faForm').classList.add('hidden');
+      try {
+        await fetch('/login-with-password/2fa', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json'},
+          body: 'sid=' + encodeURIComponent(sid) + '&totp_code=' + encodeURIComponent(code),
+        });
+      } catch (err) {}
+    })();
+    return false;
+  };
+
+  window.pwCancelLogin = async function() {
+    if (PW_TIMER) clearInterval(PW_TIMER);
+    if (PW_SID) {
+      try {
+        await fetch('/login-with-password/cancel', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json'},
+          body: 'sid=' + encodeURIComponent(PW_SID),
+        });
+      } catch (e) {}
+    }
+    PW_SID = null;
+    hideProgress();
+    setLoginBtnDisabled(false);
+  };
+
+  // v3.9.57 fix · 直接给 button 绑定 click handler, 完全绕过 form submit 机制
+  // (外层 form action="/generate-form" 会拦截 form submit, 而 button 在嵌套 form 中归属很迷)
+  const _pwBtn = $('pwLoginBtn');
+  if (_pwBtn) {
+    _pwBtn.addEventListener('click', function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      window.pwLoginSubmit();
+    });
+  }
+  // v3.9.58 fix · 2FA button 也绑定 click handler (之前是 form submit, 现在 div 没 form)
+  const _pw2faBtn = $('pw2faBtn');
+  if (_pw2faBtn) {
+    _pw2faBtn.addEventListener('click', function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      window.pw2faSubmit();
+    });
+  }
+})();
 </script>
 </body>
 </html>
@@ -7929,19 +9460,19 @@ GRADES_REGISTRATION = [
     ("PRIMARY_4", "小学四年级"),
     ("PRIMARY_5", "小学五年级"),
     ("PRIMARY_6", "小学六年级"),
-    # 初中
-    ("JUNIOR_1", "初一（初中一年级）"),
-    ("JUNIOR_2", "初二（初中二年级）"),
-    ("JUNIOR_3", "初三（初中三年级）"),
-    # 高中
-    ("SENIOR_1", "高一（高中一年级）"),
-    ("SENIOR_2", "高二（高中二年级）"),
-    ("SENIOR_3", "高三（高中三年级）"),
-    # 大学
-    ("UNIV_1", "大一（大学一年级）"),
-    ("UNIV_2", "大二（大学二年级）"),
-    ("UNIV_3", "大三（大学三年级）"),
-    ("UNIV_4", "大四（大学四年级）"),
+    # 初中（v3.9.46 · 简洁化：去掉"（初中 X 年级）"后缀，初一/初二/初三 已能表意）
+    ("JUNIOR_1", "初一"),
+    ("JUNIOR_2", "初二"),
+    ("JUNIOR_3", "初三"),
+    # 高中（同上：高一/高二/高三 已能表意）
+    ("SENIOR_1", "高一"),
+    ("SENIOR_2", "高二"),
+    ("SENIOR_3", "高三"),
+    # 大学（保持简洁：大一/.../大四）
+    ("UNIV_1", "大一"),
+    ("UNIV_2", "大二"),
+    ("UNIV_3", "大三"),
+    ("UNIV_4", "大四"),
     # 其他
     ("GRADUATED", "已毕业"),
 ]
@@ -8119,13 +9650,13 @@ _ME_PICKER_HTML = """
       <p class="app-subtitle">输入你的洛谷 UID，查看 3 版本学习报告（学员·家长·教练）</p>
     </div>
 
-    <form id="meForm" action="/me/0" method="get" class="space-y-3"
-          onsubmit="event.preventDefault();
-                    var u=document.getElementById('meUid').value.trim();
-                    if(!/^\\d{6,10}$/.test(u)){alert('请输入 6-10 位洛谷 UID');return;}
-                    window.location.href='/me/'+u;">
+    <!-- v3.9.62 fix · 改用 POST /me-entry，由服务端签发签名 token 后再跳转 /me/<uid>?t=... -->
+    <form id="meForm" action="/me-entry" method="post" class="space-y-3"
+          onsubmit="var u=document.getElementById('meUid').value.trim();
+                    if(!/^\\d{6,10}$/.test(u)){alert('请输入 6-10 位洛谷 UID');return false;}
+                    return true;">
       <label class="app-label">洛谷 UID</label>
-      <input id="meUid" type="text" inputmode="numeric" pattern="\\d{6,10}"
+      <input id="meUid" name="luogu_uid" type="text" inputmode="numeric" pattern="\\d{6,10}"
              placeholder="如：582694（6-10 位数字）"
              class="app-input" autofocus required>
       <button type="submit" class="app-btn app-btn-primary">
@@ -8370,9 +9901,29 @@ def me_picker():
     return _ME_PICKER_HTML
 
 
+@app.route("/me-entry", methods=["GET", "POST"])
+def me_entry():
+    """v3.9.62 · 首页 UID 入口：输 UID → 后端签发签名 token → 重定向 /me/<uid>?t=...
+
+    之前直接 GET /me/<uid> 是不安全的（任何人拿到 UID 就能访问个人中心），
+    现在统一走这个入口，由服务端签发 HMAC 签名 token 后 302 跳转到受保护的 /me/<uid>。
+    """
+    # GET 也支持（外部链接 / 浏览器书签）
+    if request.method == "GET":
+        luogu_uid = (request.args.get("luogu_uid") or "").strip()
+    else:
+        luogu_uid = (request.form.get("luogu_uid") or "").strip()
+
+    if not (luogu_uid.isdigit() and 6 <= len(luogu_uid) <= 10):
+        return render_template_string(REGISTER_INVALID_HTML,
+            message="UID 格式错误（必须是 6-10 位数字）"), 400
+
+    return redirect(_me_url(luogu_uid), code=302)
+
+
 @app.route("/me/<luogu_uid>")
 def student_me(luogu_uid: str):
-    """v3.5.2 学员 Pro 自助面板（无密码，仅凭 luogu_uid 进入）
+    """v3.5.2 学员 Pro 自助面板
 
     简化模式：v3.5.2 暂用 luogu_uid 直链（家长端 token 同款模式）。
     未来 v3.5.3 接微信扫码/手机 OTP 后改为带签名 token。
@@ -8390,9 +9941,24 @@ def student_me(luogu_uid: str):
       3) GESP 兜底加第三层（gesp_exams 表查询），视图层完成避免模板复杂
       4) data_only 状态的历史报告增加「📊 数据预览」入口（/me/<uid>/report-data/<dir>）
       5) lite 版个人中心也展示历史报告（不再仅依赖主路径）
+
+    v3.9.62 · 安全加固：必须带 ?t=<HMAC-SHA256 签名 token>，否则 404
+      防止排行榜上公开展示的完整 UID 被爬虫枚举访问个人中心。
+      例外：session["student_uid"] == luogu_uid 时（已登录学员可直访）。
     """
     import sys
     print(f"[DEBUG student_me] uid={luogu_uid!r}", file=sys.stderr, flush=True)
+
+    # v3.9.62 · token 校验：必须带有效签名 token；已登录学员（session 匹配）可免 token
+    token = request.args.get("t", "")
+    session_uid = str(session.get("student_uid") or "").strip()
+    is_logged_in = (session_uid and session_uid == str(luogu_uid).strip())
+    if not is_logged_in and not _verify_me_token(luogu_uid, token):
+        # 无 token 或 token 错误 → 404（不暴露"链接是否有效"信息）
+        app.logger.info(f"[v3.9.62 /me] reject uid={luogu_uid!r}: invalid/missing token")
+        return render_template_string(REGISTER_INVALID_HTML,
+            message=f"链接已失效或无权访问该学员页面"), 404
+
     student = _admin_students.get_student_by_uid(luogu_uid)
     print(f"[DEBUG student_me] get_student_by_uid result: {student is not None}, keys={list(student.keys()) if student else None}", file=sys.stderr, flush=True)
 
@@ -8579,6 +10145,20 @@ def student_me(luogu_uid: str):
     except Exception as _e:
         achievements["_err"] = str(_e)[:200]
 
+    # v3.9.46 · 我的排名（同时算"全学段"和"本学段"两个口径，分别给"全部"和"本段" Tab）
+    # 三个 period 各自算一份（month / week / all），给模板直接渲染即可
+    my_rank = {
+        "all_stage": {"month": None, "week": None, "all": None},
+        "own_stage": {"month": None, "week": None, "all": None},
+    }
+    try:
+        own_stage = _admin_students._grade_to_stage(student.get("grade"))  # noqa
+        for p in ("month", "week", "all"):
+            my_rank["all_stage"][p] = find_my_rank(luogu_uid, stage="all", period=p)
+            my_rank["own_stage"][p] = find_my_rank(luogu_uid, stage=own_stage, period=p)
+    except Exception as _e_rank:
+        app.logger.debug(f"[student_me] my_rank 计算失败: {_e_rank}")
+
     return render_template_string(
         STUDENT_ME_HTML,
         student=student_dict,
@@ -8588,11 +10168,16 @@ def student_me(luogu_uid: str):
         award_summary=_admin_students.get_student_award_summary(int(student["id"])) or {},
         csp_award_types=_admin_students.CSP_AWARD_TYPES,
         csp_award_levels=_admin_students.CSP_AWARD_LEVELS,
+        # v3.9.63 · 信息学奖项卡片要展示具体奖项名，转 dict 方便模板查
+        csp_award_types_dict=dict(_admin_students.CSP_AWARD_TYPES),
+        csp_award_levels_dict=dict(_admin_students.CSP_AWARD_LEVELS),
         commerce_hidden=_HIDE_COMMERCE,
         achievements=achievements,
         mistake_count=len(achievements.get("mistakes") or []),
         # v3.9.7 · 历史报告列表（从原 /report/student 页面合并过来）
         report_htmls=_list_student_report_htmls(luogu_uid, (student.get("real_name") or "") if student else "", limit=8),
+        # v3.9.46 · 我的排名（C 形态卡片用）
+        my_rank=my_rank,
     )
 
 
@@ -9177,6 +10762,25 @@ def _extract_top_suggestions(report_md: str) -> list[str]:
     return cleaned
 
 
+def _is_valid_ai_level(s: str) -> bool:
+    """v3.9.62 · 后置过滤：判断字符串是否像"AI 定级"（CSP-J 入门级 / 提高级 / 普及- 至 普及/提高- 等）
+
+    解决 section 5 后面 `**精通/熟练项为0**` 这种"伪 level"被误抓的 bug。
+    必须至少包含一个等级关键词，且不是纯标点/HTML 残留。
+    """
+    if not s or len(s) < 2 or len(s) > 80:
+        return False
+    # 纯标点 / 装饰
+    if all(c in "：:，,。. \t*#-—_/\\<>\"'`" for c in s):
+        return False
+    # 必须包含至少一个等级关键词
+    keywords = [
+        "CSP", "入门", "熟练", "精通", "提高", "省选", "省一",
+        "NOI", "NOIP", "普及", "门槛", "过渡", "基础", "零基础",
+    ]
+    return any(kw in s for kw in keywords)
+
+
 def _extract_ai_evaluation_from_report(report_md: str) -> dict:
     """从 report.md 抽取 AI 测评内容（v3.6 · 关键修复）
 
@@ -9196,7 +10800,11 @@ def _extract_ai_evaluation_from_report(report_md: str) -> dict:
         ### 9. 【核心建议（优先级排序）】
         * 🟢 **建议: ...**
 
-      【变体 3】极简版（早期报告）：
+      【变体 3】HTML <span> 包裹值（v3.9.62 报告新模板）：
+        ### 当前对应等级水平
+        <p class="text-blue-700 font-semibold">定级结论：该选手处于 <span style="...">CSP-J 入门级</span> 的中后段...</p>
+
+      【变体 4】极简版（早期报告）：
         <p>你的真实水平处于【xxx】阶段</p>
 
     返回 dict：
@@ -9215,9 +10823,18 @@ def _extract_ai_evaluation_from_report(report_md: str) -> dict:
     if not report_md:
         return out
 
+    # v3.9.62 · 优先在"## 5. 【考纲精准定级"小节内匹配，避免被前面表格里的
+    # `<span>入门</span>：15题`、bullet 列表里的 `**精通/熟练项为0**` 等"伪 level"误导
+    sec5_start = report_md.find("## 5. 【考纲精准定级")
+    sec6_start = report_md.find("## 6.", sec5_start + 1) if sec5_start != -1 else -1
+    if sec5_start != -1:
+        section5_md = report_md[sec5_start: sec6_start if sec6_start != -1 else len(report_md)]
+    else:
+        section5_md = ""
+
     # ─── 1) AI 定级 ────────────────────────────────────
     # 优先：粗体括号 【xxx】（格式 1）
-    for pat in [
+    patterns = [
         r"你的真实水平为：\*\*【(.+?)】\*\*",                # 格式 1
         r"你目前的真实水平[，,。：:].{0,50}?【(.+?)】",       # 格式 2
         r"定级[：:].{0,80}?【(.+?)】",                         # 格式 2 alt
@@ -9225,14 +10842,86 @@ def _extract_ai_evaluation_from_report(report_md: str) -> dict:
         r"结论[：:].{0,80}?【(.+?)】",                         # 变体
         r"处于【(.+?)】(?:阶段|水平|门槛)",                    # 简写
         # v3.9 · 新格式（无【】）："### 当前对应等级水平\n**CSP‑J 熟练 → CSP‑S 入门**"
-        r"对应等级水平\*\*[:：]\*\*([^*\n]+?)\*\*",             # v3.9.43 · 修 v3.9.41 bug：原正则贪婪/非贪婪冲突，把"**当前对应等级水平**：**VALUE**"误提取为"："；强制要求"对应等级水平"在粗体内（**...**），且冒号在 ** 之外
-        r"对应等级水平[：:]?\s*\*\*([^*\n]+?)\*\*",             # 行内粗体（如 "**CSP-S 入门阶段**（..."）
-        r"对应等级水平[^\n]*\n+\s*\*\*([^*\n]+?)\*\*",          # 跨行粗体（标题后下一行）
-    ]:
-        m = re.search(pat, report_md)
-        if m:
-            out["ai_level"] = m.group(1).strip()
+        r"对应等级水平\*\*[:：]\*\*([^*\n]{2,80}?)\*\*",        # v3.9.49 · VALUE 至少 2 字符（避免匹配 "**:**" 这种空内容）
+        r"对应等级水平[：:]?\s*\*\*([^*\n]{2,80}?)\*\*",        # v3.9.49 · 同上，加最小长度
+        r"对应等级水平[^\n]*\n+\s*\*\*([^*\n]{2,80}?)\*\*",     # v3.9.49 · 同上
+        # v3.9.49 · 新模板（已替换"对应等级水平"为"当前对应等级"）：
+        # 形如 `**当前对应等级**：**CSP-J（入门级）能力达标，...**`
+        # 之前 v3.9.43 的正则只匹配"对应等级水平"，漏掉最新一批报告 → 海报"AI 定级"显示"尚未生成报告"
+        r"当前对应等级\*\*[:：]\s*\*\*([^*\n]{2,80}?)\*\*",      # v3.9.49 · "**当前对应等级**：**VALUE**"（VALUE ≥ 2 字符）
+        r"当前对应等级[：:]?\s*\*\*([^*\n]{2,80}?)\*\*",        # v3.9.49 · "当前对应等级：**VALUE**"
+        # v3.9.62 · HTML <span> 包裹值（新模板）：
+        # "### 当前对应等级水平\n\n<p class="...">定级结论：该选手处于 <span ...>CSP-J 入门级</span> 的中后段...</p>"
+        r"定级结论[：:][\s\S]{0,300}?<span[^>]*>([^<]{2,40}?)</span>",          # 定级结论: ...<span>VALUE</span>
+        r"处于\s*<span[^>]*>([^<]{2,40}?)</span>\s*的",                            # 处于<span>VALUE</span>的
+        r"当前对应等级[^\n]*\n+[\s\S]{0,500}?<span[^>]*>([^<]{2,40}?)</span>",  # 当前对应等级+\n+...<span>VALUE</span>
+    ]
+    # v3.9.62 · 先在 section 5 内搜，搜不到再兜底全报告
+    for search_target in ([section5_md, report_md] if section5_md else [report_md]):
+        for pat in patterns:
+            m = re.search(pat, search_target)
+            if m:
+                val = m.group(1).strip()
+                # v3.9.62 · 用 _is_valid_ai_level 严格过滤：避免 "**精通/熟练项为0**" 这种伪 level
+                if _is_valid_ai_level(val):
+                    out["ai_level"] = val
+                    break
+        if out["ai_level"]:
             break
+
+    # v3.9.49 · 兜底：上面 8 条精确正则都没匹配时，用更宽松的"取关键词后面一段话"策略
+    # 解决以下场景：
+    #   A) `**当前对应等级水平：** ** **CSP-J 优秀水平，CSP-S 入門水平**`——多了 `** ` 前缀
+    #   B) `当前对应等级水平\n\n- **CSP-J**：xxx`——关键词后是换行 + bullet 列表，无直接 VALUE
+    #   C) 早期模板在 LEVEL 关键词后无任何定级字符串
+    if not out["ai_level"]:
+        for kw_pat, boundary in [
+            (r"当前对应等级(?:水平)?", r"[。\n]"),  # 关键词：当前对应等级（可选 水平）
+            (r"对应等级水平", r"[。\n]"),          # 关键词：对应等级水平
+            (r"你目前的真实水平", r"[。\n]"),        # 关键词：你目前的真实水平
+            (r"处于.{0,10}?【(.+?)】", r"】"),  # 关键词：处于【xxx】
+        ]:
+            m = re.search(kw_pat, report_md)
+            if not m:
+                continue
+            # 从关键词结束处往后取 300 字符
+            tail = report_md[m.end():m.end() + 300]
+            # 1) 优先取"最靠近关键词"的 `**VALUE**` 粗体（避免找到后面 bullet 列表的标题）
+            #    策略：找关键词后第一个 `**`（opening），再找同一行/同一段内的下一个 `**`（closing）
+            #    拿这个最近的 `**...**` 对作为候选；若它太短或纯标点，再 fallback 到下面的策略
+            first_open = tail.find("**")
+            if first_open != -1:
+                # 从 first_open+2 之后找下一个 `**`
+                second = tail.find("**", first_open + 2)
+                if second != -1:
+                    cand = tail[first_open + 2:second].strip()
+                    # v3.9.49 修正：cand 里可能还含 `* ` 装饰（如 `** **` 留了空），
+                    # 用 lstrip/rstrip 再清一遍
+                    cand = cand.lstrip(" *").rstrip(" *").strip()
+                    # v3.9.62 · 加 _is_valid_ai_level 严格过滤：避免 `精通/熟练项为0` 这种伪 level
+                    if (
+                        cand
+                        and "当前对应等级" not in cand
+                        and "对应等级" not in cand
+                        and _is_valid_ai_level(cand)
+                    ):
+                        out["ai_level"] = cand
+                        break
+            # 2) 退而求其次：取冒号后到第一个句号/换行前的内容
+            cm = re.search(r"[：:]\s*(.+?)(?:[。\n]|$)", tail)
+            if cm:
+                cand = cm.group(1).strip().lstrip(" *")
+                cand = cand.rstrip(" *").strip()
+                # v3.9.62 · 加 _is_valid_ai_level 严格过滤：避免 "**精通/熟练项为0**" 这种伪 level
+                if (
+                    cand
+                    and "当前对应等级" not in cand
+                    and "对应等级" not in cand
+                    and not cand.startswith("**")
+                    and _is_valid_ai_level(cand)
+                ):
+                    out["ai_level"] = cand
+                    break
 
     # ─── 2) 核心解读 / 综合评价 ──────────────────────
     # 优先：<p class="text-blue-700 font-semibold">核心解读：xxx</p>
@@ -9426,21 +11115,69 @@ def _extract_achievements_from_report(report_md: str) -> dict:
     #   | **基础算法** | **72** | 🟡 熟练 | ...   （分数有 **）
     #   | **基础算法** | 90 | 🟢 精通 | ...      （分数无 **）
     dim_keys = ["基础算法", "数据结构", "图论", "动态规划", "字符串", "数学"]
+    # v3.9.63 · 5 档等级 × 评分对应表（防"假高分"硬约束）
+    # AI 经常给"入门"维度 91 分（违反规则），抽取时按"当前等级"列强制封顶
+    _LEVEL_SCORE_CAP = {
+        "🟢精通": (85, 100),
+        "🟡熟练": (70, 84),
+        "🟠入门": (50, 69),
+        "🔵初窥": (30, 49),
+        "🔴空白": (0, 29),
+    }
+    _LEVEL_RE = (
+        r"(🟢\s*精通|🟡\s*熟练|🟠\s*入门|🔵\s*初窥|🔴\s*空白"
+        r"|精通|熟练|入门|初窥|空白)"
+    )
     six = {}
+    six_level = {}  # 同步抽 level（用于 poster 显式展示 + 反向校验）
+    six_clamped = {}  # 记录哪些维度被强制压低（debug 用）
     for k in dim_keys:
-        # 宽匹配：行首 | ... 关键字 ... | ... 数字 ... |
-        m = re.search(
-            r"^\s*\|[\s*]*?" + re.escape(k) + r"[\s*]*?\|[\s*]*?(\d{1,3})[\s*]*?\|",
-            report_md, re.M,
+        # 宽匹配：行首 | ... 关键字 ... | ... 数字 ... | ... 等级 ... | ... 证据 ...
+        # 同一行抓到 score 和 level（level 在第 3 列）
+        row_pat = (
+            r"^\s*\|[\s*]*?" + re.escape(k) + r"[\s*]*?\|"
+            r"[\s*]*?(\d{1,3})[\s*]*?\|"
+            r"\s*([^\|]*?)\s*\|"  # 第 3 列（当前等级）
         )
+        m = re.search(row_pat, report_md, re.M)
         if m:
             try:
                 v = int(m.group(1))
-                if 0 <= v <= 100:
-                    six[k] = v
+                if not (0 <= v <= 100):
+                    continue
+                level_raw = m.group(2).strip()
+                # 归一化等级文本
+                level_norm = ""
+                for emoji_key, lo_hi in _LEVEL_SCORE_CAP.items():
+                    emoji_short = emoji_key.replace("🟢", "").replace("🟡", "").replace("🟠", "").replace("🔵", "").replace("🔴", "")
+                    if emoji_key in level_raw or level_raw == emoji_short or f"{emoji_short}" in level_raw:
+                        level_norm = emoji_short
+                        break
+                six_level[k] = level_norm or level_raw  # 拿不到标准 level 就保留原文
+                # ★ 关键：按等级封顶
+                if level_norm and level_norm in {"精通", "熟练", "入门", "初窥", "空白"}:
+                    for emoji_key, (lo, hi) in _LEVEL_SCORE_CAP.items():
+                        if emoji_key.endswith(level_norm):
+                            if v > hi:
+                                six_clamped[k] = (v, hi, level_norm)
+                                app.logger.warning(
+                                    f"[v3.9.63 /me six_dim 假高分] {k} 等级={level_norm} 评分={v} → 封顶到 {hi}"
+                                )
+                                v = hi
+                            elif v < lo:
+                                # 给低了也修正（向该档下沿对齐）
+                                six_clamped[k] = (v, lo, level_norm)
+                                app.logger.info(
+                                    f"[v3.9.63 /me six_dim 偏低] {k} 等级={level_norm} 评分={v} → 提到 {lo}"
+                                )
+                                v = lo
+                            break
+                six[k] = v
             except Exception:
                 pass
     out["six_dim"] = six
+    out["six_dim_level"] = six_level
+    out["six_dim_clamped"] = six_clamped  # 调试/统计用，前端可见
 
     # ─── 2) 千分制总分 = mean × 10 ───────────────────
     if six:
@@ -9642,28 +11379,54 @@ def _build_share_card_data(luogu_uid: str) -> dict | None:
 
     today = _date.today()
     events = []
-    # v3.9 · 按 (date, prefix) 去重：同一天 + 同类型（如 GESP 1-4 / 5-6）的多场考试合并成一条
-    # 因为 _shorten_comp_name 已经把 "1-4 级 / 5-6 级" 都映射成 "GESP 考级（夏考）"，
-    # 同一组考试会出现多次（数据库是分级别存的），需要按 display name 合并
-    seen: dict = {}  # key=(date, display_prefix) -> event
+    # v3.9.6 · 按 (date, group_key) 去重：同一天 + 同类型合并
+    #   · GESP 1-4/5-6/7-8 同日多场 → "GESP 考级（夏考/秋考/冬考）"
+    #   · CSP-J 初赛 + CSP-S 初赛 同日 → "CSP-J/S 初赛"（同天没必要分两行）
+    #   · CSP-J 复赛 + CSP-S 复赛 同日 → "CSP-J/S 复赛"
+    def _group_key(name: str, display: str) -> str:
+        if display.startswith("CSP-J") or display.startswith("CSP-S"):
+            tail = display.split(" ", 1)[1] if " " in display else ""
+            return f"CSP_{tail}"  # "CSP_初赛" / "CSP_复赛"
+        return display.split()[0] if display else ""
+
+    # 先扫一遍：按 (date, group_key) 聚合，决定每组的最终 display 名
+    grouped: dict = {}  # key -> {"display": str, "has_j": bool, "has_s": bool}
+    for ename, edate in rows:
+        try:
+            _date.fromisoformat(edate)
+        except Exception:
+            continue
+        display = _shorten_comp_name(ename)
+        key = (edate, _group_key(ename, display))
+        slot = grouped.setdefault(key, {"display": display, "has_j": False, "has_s": False})
+        if "CSP-J" in ename:
+            slot["has_j"] = True
+        if "CSP-S" in ename:
+            slot["has_s"] = True
+    # 决定最终 display：同日同类型同时有 J+S → "CSP-J/S {tail}"
+    for key, slot in grouped.items():
+        _, gk = key
+        if gk.startswith("CSP_") and slot["has_j"] and slot["has_s"]:
+            slot["display"] = f"CSP-J/S {gk.split('_', 1)[1]}"
+
+    # 再扫一遍：按 SQL 顺序输出，跳过已聚合的 key
+    seen: dict = {}
     for ename, edate in rows:
         try:
             d = _date.fromisoformat(edate)
-            display = _shorten_comp_name(ename)
-            # 提取前缀 (GESP / CSP-J / CSP-S / NOIP / NOI 等)
-            prefix = display.split()[0] if display else ""
-            key = (edate, prefix)
-            if key in seen:
-                continue  # 同一天同一类考试已记录，跳过
-            seen[key] = True
-            events.append({
-                "name": ename,
-                "display": display,
-                "date": edate,
-                "days": max(0, (d - today).days),
-            })
         except Exception:
-            pass
+            continue
+        display = _shorten_comp_name(ename)
+        key = (edate, _group_key(ename, display))
+        if key in seen:
+            continue
+        seen[key] = True
+        events.append({
+            "name": ename,
+            "display": grouped[key]["display"],
+            "date": edate,
+            "days": max(0, (d - today).days),
+        })
 
     exemptions = compute_exemptions(gesp_level, gesp_score) if gesp_level else []
     can_j = "csp_j" in exemptions
@@ -9728,6 +11491,29 @@ def _build_share_card_data(luogu_uid: str) -> dict | None:
                     report_assets[key] = str(p)
     except Exception:
         pass
+
+    # v3.9.48 · AI 定级兜底：report.md 正则没抓到时，从 export_data.json 的
+    # ai_score_thousand + six_dim 推算档位（CSP-J 入门 / 熟练 / CSP-S 入门 等）
+    # 目的：避免海报"AI 定级"卡片显示"尚未生成报告"（实际数据齐了只是正则没匹配）
+    if not ai_eval.get("ai_level") and report_dir_path:
+        try:
+            _exp_path = report_dir_path / "export_data.json"
+            if _exp_path.exists():
+                _exp = json.loads(_exp_path.read_text(encoding="utf-8", errors="replace"))
+                _score = int(_exp.get("ai_score_thousand") or 0)
+                _six = _exp.get("six_dimension_scores") or {}
+                ai_eval["ai_level"] = _fallback_ai_level(_score, _six, gesp_level, gesp_score)
+                if not ai_eval.get("core_reading") and _six:
+                    # 用 6 维中最弱维度+最强维度 拼一句 1 行评语
+                    _sorted = sorted(_six.items(), key=lambda kv: kv[1])
+                    _weak_k, _weak_v = _sorted[0]
+                    _strong_k, _strong_v = _sorted[-1]
+                    ai_eval["core_reading"] = (
+                        f"6 维评分 {_strong_v}（{_strong_k}）最强、{_weak_v}（{_weak_k}）最弱，"
+                        f"建议针对性补齐短板"
+                    )
+        except Exception as _fbe:
+            app.logger.debug(f"[v3.9.48 /share-card] AI 定级兜底失败: {_fbe}")
 
     # 报告生成时间若存在则覆盖 asof
     asof = today.strftime("%Y-%m-%d")
@@ -9801,6 +11587,53 @@ def _ai_evaluation(data: dict) -> tuple[str, str]:
             return (f"AI 评估：通过 {sc} 分，距免初赛只差 1 级，6 月可冲 8 级 60+", "中")
         return (f"AI 评估：通过 {sc} 分，建议巩固 {lv} 级 → 下一目标 {lv+1} 级 80+", "中")
     return (f"AI 评估：{sc} 分未达 60，建议重考 {lv} 级巩固基础", "弱")
+
+
+def _fallback_ai_level(ai_score_thousand: int, six_dim: dict, gesp_level: int, gesp_score: int) -> str:
+    """v3.9.48 · AI 定级兜底：report.md 正则没匹配到时，从 export_data.json 的
+    ai_score_thousand + six_dim + gesp 推算档位字符串。
+
+    设计：分级 → 4 档（CSP-J 入门/熟练、CSP-S 入门/熟练），与"学生应该处于哪一档"心智匹配。
+    不区分太细（如不写"省选级"），避免兜底值误导用户认为这就是 AI 评估结果。
+
+    阈值（参考 v3.9.47 NOI 大纲与 _ai_evaluation 的档位推断）：
+      - GESP 已过 8 级 80+ 分 或 ai_score >= 850 → CSP-S 熟练级
+      - GESP 7-8 级 或 ai_score >= 700 → CSP-S 入门级
+      - GESP 4-6 级 或 ai_score >= 500 → CSP-J 熟练级
+      - GESP 1-3 级 或 ai_score >= 250 → CSP-J 入门级
+      - 其它 / 数据不足 → CSP-J 入门级（兜底）
+
+    返回示例：
+      _fallback_ai_level(820, {...}, 6, 90)  → "CSP-J 熟练级（兜底）"
+      _fallback_ai_level(0,   {},     0,  0) → "起步级（兜底）"
+    """
+    score = int(ai_score_thousand or 0)
+    six_mean = (
+        sum(int(v) for v in (six_dim or {}).values() if v) / max(1, len([v for v in (six_dim or {}).values() if v]))
+        if six_dim else 0.0
+    )
+    # 综合"6 维均分 × 10"（即千分制）+ GESP 等级
+    effective = max(score, int(six_mean * 10))
+
+    # GESP 加权：8 级 80+ 直接 CSP-S 熟练
+    if gesp_level >= 8 and gesp_score >= 80:
+        return "CSP-S 熟练级（兜底）"
+    if gesp_level >= 8:
+        return "CSP-S 入门级（兜底）"
+    if gesp_level >= 7 and gesp_score >= 80:
+        return "CSP-S 入门级（兜底）"
+
+    # 6 维 / 千分制
+    if effective >= 850:
+        return "CSP-S 熟练级（兜底）"
+    if effective >= 700:
+        return "CSP-S 入门级（兜底）"
+    if effective >= 500:
+        return "CSP-J 熟练级（兜底）"
+    if effective >= 250:
+        return "CSP-J 入门级（兜底）"
+    # 数据极弱 / 空 → 起步
+    return "起步级（兜底）"
 
 
 def _render_share_card_png(data: dict, qr_url: str) -> bytes:
@@ -10148,13 +11981,16 @@ def _render_share_card_png(data: dict, qr_url: str) -> bytes:
                     fontsize=9, color=badge_color, fontweight="bold")
 
     # ── 关键赛事倒计时 ──────────────
+    # v3.9.6 · 关键赛事默认显示前 5 个，避免 CSP-J/S 被 GESP/NOI 截断
+    # zorder=5 让 row 5（y=2.35）在右侧不会被 QR 白底（y=0.40-2.50）覆盖
     y = 3.95
     # 用紫色方块代替 emoji
     ax.add_patch(_rounded(4.5 - 1.10, 3.85, 0.16, 0.20, COLOR_PRIMARY_DK, r=0.05))
     ax.text(4.5 + 0.20, 3.95, "2026 关键赛事倒计时", ha="center", va="center",
             fontsize=12, color=COLOR_PRIMARY_DK, fontweight="bold")
     y -= 0.40
-    visible_events = (data.get("events") or [])[:3]
+    visible_events = (data.get("events") or [])[:5]
+    row_h = 0.30  # 5 行紧凑布局（0.40 会与下方 QR 顶 2.50 重叠）
     for ev in visible_events:
         days = ev["days"]
         if days <= 0:
@@ -10174,23 +12010,27 @@ def _render_share_card_png(data: dict, qr_url: str) -> bytes:
             tag_color = COLOR_TEXT_LT
             tag_bg = "#F1F5F9"
         nm = ev.get("display") or ev["name"]
-        # 赛事行
-        ax.add_patch(_rounded(0.7, y - 0.18, 7.6, 0.40, COLOR_CARD,
-                              ec=COLOR_CARD_EDGE, lw=1, r=0.15))
-        ax.text(0.95, y + 0.02, f"•  {nm}", ha="left", va="center",
-                fontsize=10.5, color=COLOR_TEXT, fontweight="bold")
+        # 赛事行（zorder=5：盖在 QR 白底之上，确保 row 5 右侧 badge 不被遮）
+        ev_box = _rounded(0.7, y - 0.15, 7.6, row_h, COLOR_CARD,
+                          ec=COLOR_CARD_EDGE, lw=1, r=0.12)
+        ev_box.set_zorder(5)
+        ax.add_patch(ev_box)
+        ax.text(0.95, y, f"•  {nm}", ha="left", va="center",
+                fontsize=10, color=COLOR_TEXT, fontweight="bold", zorder=6)
         # 倒计时徽章
-        ax.add_patch(_rounded(6.55, y - 0.08, 1.65, 0.30, tag_bg, r=0.15))
-        ax.text(7.375, y + 0.07, tag, ha="center", va="center",
-                fontsize=9.5, color=tag_color, fontweight="bold")
-        y -= 0.40
+        ev_badge = _rounded(6.55, y - 0.07, 1.65, 0.24, tag_bg, r=0.12)
+        ev_badge.set_zorder(5)
+        ax.add_patch(ev_badge)
+        ax.text(7.375, y + 0.05, tag, ha="center", va="center",
+                fontsize=9, color=tag_color, fontweight="bold", zorder=6)
+        y -= row_h
     if not visible_events:
         ax.text(4.5, y, "（暂无即将到来的赛事）", ha="center", va="center",
                 fontsize=11, color=COLOR_TEXT_XL)
         y -= 0.4
 
-    # 备注脚注（固定 y=2.30，赛事行最底 y=2.75 → 顶 2.97，间距 0.50+）
-    y_foot = 2.30
+    # 备注脚注（5 行布局：最后一行 y≈2.35，下移脚注到 1.95 以避开 QR 顶 2.50）
+    y_foot = 1.95
     ax.text(4.5, y_foot, "CSP-J/S = CCF 软件能力认证 · NOIP = 信息学奥赛联赛 · NOI = 信息学奥赛决赛",
             ha="center", va="center", fontsize=8, color=COLOR_TEXT_XL, style="italic")
 
@@ -10229,7 +12069,7 @@ def _render_share_card_png(data: dict, qr_url: str) -> bytes:
                 fontsize=32, color=COLOR_AMBER)
         ax.text(6.975, 1.00, "扫码暂不可用", ha="center", va="center",
                 fontsize=10, color=COLOR_TEXT_LT)
-    # 左侧文字（与 QR 白底顶部对齐；脚注 y=2.30，"扫码..." y=2.00 距脚注 0.30）
+    # 左侧文字（与 QR 白底顶部对齐；脚注 y=1.95，"扫码..." y=2.00 距脚注 0.05）
     # 用紫色方块代替 📱 emoji
     ax.add_patch(_rounded(0.50, 1.89, 0.22, 0.22, COLOR_PRIMARY, r=0.05))
     ax.text(0.61, 2.00, "Q", ha="center", va="center",
@@ -10344,6 +12184,15 @@ def _extract_achievements_from_report(report_md: str) -> dict:
 
     # 1) 6 维评分：兼容多种格式
     six_dim_keys = ["基础算法", "数据结构", "图论", "动态规划", "字符串", "数学"]
+    # v3.9.63 · 5 档等级 × 评分对应表（防"假高分"硬约束）
+    # AI 经常给"入门"维度 91 分（违反规则），抽取时按"当前等级"列强制封顶
+    _LEVEL_SCORE_CAP_V3963 = {
+        "🟢精通": (85, 100),
+        "🟡熟练": (70, 84),
+        "🟠入门": (50, 69),
+        "🔵初窥": (30, 49),
+        "🔴空白": (0, 29),
+    }
     for k in six_dim_keys:
         m = None
         # 格式 A（旧）：`| **基础算法** | **72** | ...`（key 与 score 都加粗）
@@ -10370,8 +12219,40 @@ def _extract_achievements_from_report(report_md: str) -> dict:
         if m:
             try:
                 v = int(m.group(1))
-                if 0 <= v <= 100:
-                    out["six_dim"][k] = v
+                if not (0 <= v <= 100):
+                    continue
+                # v3.9.63 · 抓"当前等级"列做 clamp（防 AI 给"入门"维度 91 分）
+                # 从原文中找到这行 → 抓第 3 列（"当前等级"）
+                row_match = _re.search(
+                    r"^\s*\|[^\|]*?" + _re.escape(k) + r"[^\|]*?\|[^\|]*?\d{1,3}[^\|]*?\|"
+                    r"\s*([^\|]+?)\s*\|",
+                    report_md, _re.M,
+                )
+                level_norm = ""
+                if row_match:
+                    level_raw = row_match.group(1).strip()
+                    for ek in _LEVEL_SCORE_CAP_V3963:
+                        es = ek.replace("🟢", "").replace("🟡", "").replace("🟠", "").replace("🔵", "").replace("🔴", "")
+                        if ek in level_raw or es == level_raw or es in level_raw:
+                            level_norm = es
+                            break
+                # 按等级封顶
+                if level_norm in {"精通", "熟练", "入门", "初窥", "空白"}:
+                    for ek, (lo, hi) in _LEVEL_SCORE_CAP_V3963.items():
+                        if ek.endswith(level_norm):
+                            if v > hi:
+                                try:
+                                    from flask import current_app
+                                    current_app.logger.warning(
+                                        f"[v3.9.63 /r/<uid> six_dim 假高分] {k} 等级={level_norm} 评分={v} → 封顶到 {hi}"
+                                    )
+                                except Exception:
+                                    pass
+                                v = hi
+                            elif v < lo:
+                                v = lo
+                            break
+                out["six_dim"][k] = v
             except Exception:
                 pass
 
@@ -10930,6 +12811,41 @@ def parent_subscribe(luogu_uid: str):
     )
 
 
+def _is_parent_subscribed(luogu_uid: str) -> bool:
+    """v3.9.41 · 共享判断：某 UID 是否已激活家长订阅（含 parent_invite/parent_sub 任意 SKU）
+
+    与 has_parent_sub 的 SQL 完全一致，但抽出成共享函数供状态页门控、start-parent-subscribe 等
+    多处复用，避免「admin 显示已用，但前端仍要求输码」的体验断层。
+
+    返回 True 当且仅当：
+      · activation_codes.student_id 绑到该 UID
+      · sku ∈ {'parent_sub', 'parent_invite'}
+      · redeemed_at IS NOT NULL
+      · expires_at IS NULL OR expires_at > now
+    """
+    if not luogu_uid or not str(luogu_uid).isdigit():
+        return False
+    try:
+        from task_store import _get_conn
+        conn = _get_conn()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM activation_codes ac "
+                "JOIN students s ON s.id = ac.student_id "
+                "WHERE ac.sku IN ('parent_sub', 'parent_invite') "
+                "  AND s.luogu_uid = ? "
+                "  AND ac.redeemed_at IS NOT NULL "
+                "  AND (ac.expires_at IS NULL OR ac.expires_at > datetime('now'))",
+                (str(luogu_uid).strip(),),
+            ).fetchone()
+        finally:
+            conn.close()
+        return bool(row and dict(row).get("n", 0) > 0)
+    except Exception as _e:
+        app.logger.debug(f"[is_parent_subscribed] check failed: {_e}")
+        return False
+
+
 @app.route("/me/<luogu_uid>/start-parent-subscribe", methods=["POST", "GET"])
 def start_parent_subscribe(luogu_uid: str):
     """v3.5.2 · 触发生成家长订阅版（异步）
@@ -10948,6 +12864,9 @@ def start_parent_subscribe(luogu_uid: str):
     v3.9 · 邀请码门控：用户必须先填写正确的 invite_code 才能触发。
           白名单来源：环境变量 PARENT_INVITE_CODES（逗号分隔）
                      兜底默认：["PARENT-SUB-DEMO-2026"]（方便演示/测试）
+
+    v3.9.41 · 用户已激活（DB 里有 redeemed 记录）→ 直接跳过邀请码门控，
+              避免「admin 显示已用，前端仍要输码」造成"无效"误判。
     """
     # v3.8 · 此处不再拦截 _HIDE_COMMERCE。生成动作属于"已购用户的技术服务"，不归商业化展示开关管。
     student = _admin_students.get_student_by_uid(luogu_uid)
@@ -10960,19 +12879,30 @@ def start_parent_subscribe(luogu_uid: str):
     # v3.9.8 · 用户反馈：邀请码验证后必须失效（一次性使用）
     #         - 拒绝已 redeemed 的码
     #         - 验证通过后立即写 redeemed_at + student_id（与 /redeem 流程一致）
+    # v3.9.41 · 已激活用户（DB 里有任何 redeemed 记录）→ 直接跳过门控，进入生成流程
+    # v3.9.41 · 码归一化：upper() + strip()，与 /redeem 一致（之前只 strip，不 upper）
     form = request.form.to_dict() if request.method == "POST" else {}
-    submitted_code = (form.get("invite_code") or "").strip()
+    submitted_code = (form.get("invite_code") or "").strip().upper()
     invite_ok = False
     already_used = False
     inviter_code_id = None
-    if submitted_code:
+    # v3.9.42 · 区分"已激活用户走免码路径"与"输入码走正常路径"：
+    # 免码路径不能去碰 activation_codes 表（避免 "UPDATE WHERE id=NULL 匹配 0 行" 误报 "已被使用"）
+    short_circuit_used = False
+    # v3.9.41 · 优先短路：用户已激活 → 跳过门控
+    if _is_parent_subscribed(luogu_uid):
+        invite_ok = True
+        short_circuit_used = True
+    elif submitted_code:
         try:
             from task_store import _get_conn as _invite_conn
             _ic = _invite_conn()
             try:
+                # 归一化后再查：管理员生成的是大写，但 /redeem 全局入口也 .upper()，
+                # 之前这里只 .strip() 会出现「同一码在 /redeem 有效、在此处报无效」的诡异差异
                 row = _ic.execute(
                     "SELECT id, redeemed_at, student_id FROM activation_codes "
-                    "WHERE code = ? AND sku = 'parent_invite' LIMIT 1",
+                    "WHERE UPPER(code) = ? AND sku = 'parent_invite' LIMIT 1",
                     (submitted_code,),
                 ).fetchone()
             finally:
@@ -11023,75 +12953,79 @@ def start_parent_subscribe(luogu_uid: str):
 
     # v3.9.8 · 一次性使用：成功验证后立即原子标记 redeemed_at + student_id
     # 用事务 + UPDATE WHERE redeemed_at IS NULL 防并发
-    try:
-        from task_store import _get_conn as _mark_conn
-        _mc = _mark_conn()
+    # v3.9.42 · 免码路径（已激活用户）跳过整个标记 + 审计日志，避免 UPDATE WHERE id=NULL 误报 "已被使用"
+    if not short_circuit_used:
         try:
-            cur = _mc.execute(
-                "UPDATE activation_codes "
-                "SET redeemed_at = datetime('now'), student_id = ? "
-                "WHERE id = ? AND redeemed_at IS NULL",
-                (int(student["id"]), inviter_code_id),
-            )
-            _mc.commit()
-            if cur.rowcount == 0:
-                # 极小概率并发场景：被别人抢先 redeem
-                already_used = True
-                invite_ok = False
-        finally:
-            _mc.close()
-        if not invite_ok:
-            return render_template_string(
-                PARENT_SUBSCRIBE_HTML,
-                student=student,
-                luogu_uid=luogu_uid,
-                has_report=True,
-                report_dir_name="",
-                error_msg=(
-                    f"❌ 邀请码 {submitted_code} 刚被其他用户使用，请联系客服重新派发。"
-                ),
-                gesp_level=int(student.get("gesp_highest_passed") or 0),
-                gesp_score=int(student.get("gesp_latest_score") or 0),
-                next_level=(int(student.get("gesp_highest_passed") or 0) + 1) if int(student.get("gesp_highest_passed") or 0) < 8 else 8,
-                can_exempt_cspj=int(student.get("gesp_highest_passed") or 0) >= 7 and int(student.get("gesp_latest_score") or 0) >= 80,
-                can_exempt_csps=int(student.get("gesp_highest_passed") or 0) >= 8 and int(student.get("gesp_latest_score") or 0) >= 80,
-                gesp_gap=max(0, 60 - int(student.get("gesp_latest_score") or 0)) if int(student.get("gesp_highest_passed") or 0) else 60,
-                target="—",
-                timeline={"conservative": "—", "aggressive": "—", "fallback": "—"},
-                policy_events=[],
-                diff_dist={},
-                last_exam=None,
-                questions=[],
-            ), 403
-    except Exception as _me:
-        # 标记失败但 invite_ok=True，仍允许进入生成流程（不阻塞用户体验）
-        # 但记录错误供 admin 排查
-        try:
-            import traceback as _tb
-            print(f"[parent_subscribe] 邀请码标记失败：{_me}\n{_tb.format_exc()}")
-        except Exception:
-            pass
+            from task_store import _get_conn as _mark_conn
+            _mc = _mark_conn()
+            try:
+                cur = _mc.execute(
+                    "UPDATE activation_codes "
+                    "SET redeemed_at = datetime('now'), student_id = ? "
+                    "WHERE id = ? AND redeemed_at IS NULL",
+                    (int(student["id"]), inviter_code_id),
+                )
+                _mc.commit()
+                if cur.rowcount == 0:
+                    # 极小概率并发场景：被别人抢先 redeem
+                    already_used = True
+                    invite_ok = False
+            finally:
+                _mc.close()
+            if not invite_ok:
+                return render_template_string(
+                    PARENT_SUBSCRIBE_HTML,
+                    student=student,
+                    luogu_uid=luogu_uid,
+                    has_report=True,
+                    report_dir_name="",
+                    error_msg=(
+                        f"❌ 邀请码 {submitted_code} 刚被其他用户使用，请联系客服重新派发。"
+                    ),
+                    gesp_level=int(student.get("gesp_highest_passed") or 0),
+                    gesp_score=int(student.get("gesp_latest_score") or 0),
+                    next_level=(int(student.get("gesp_highest_passed") or 0) + 1) if int(student.get("gesp_highest_passed") or 0) < 8 else 8,
+                    can_exempt_cspj=int(student.get("gesp_highest_passed") or 0) >= 7 and int(student.get("gesp_latest_score") or 0) >= 80,
+                    can_exempt_csps=int(student.get("gesp_highest_passed") or 0) >= 8 and int(student.get("gesp_latest_score") or 0) >= 80,
+                    gesp_gap=max(0, 60 - int(student.get("gesp_latest_score") or 0)) if int(student.get("gesp_highest_passed") or 0) else 60,
+                    target="—",
+                    timeline={"conservative": "—", "aggressive": "—", "fallback": "—"},
+                    policy_events=[],
+                    diff_dist={},
+                    last_exam=None,
+                    questions=[],
+                ), 403
+        except Exception as _me:
+            # 标记失败但 invite_ok=True，仍允许进入生成流程（不阻塞用户体验）
+            # 但记录错误供 admin 排查
+            try:
+                import traceback as _tb
+                print(f"[parent_subscribe] 邀请码标记失败：{_me}\n{_tb.format_exc()}")
+            except Exception:
+                pass
 
     # 记录使用日志（v3.9.2 · 邀请码使用日志用于审计）
-    try:
-        from task_store import _get_conn as _log_conn
-        _lc = _log_conn()
-        _lc.execute(
-            """CREATE TABLE IF NOT EXISTS invite_code_usage_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                code TEXT NOT NULL,
-                luogu_uid TEXT NOT NULL,
-                used_at TEXT NOT NULL
-            )"""
-        )
-        _lc.execute(
-            "INSERT INTO invite_code_usage_log (code, luogu_uid, used_at) VALUES (?, ?, ?)",
-            (submitted_code, luogu_uid, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-        )
-        _lc.commit()
-        _lc.close()
-    except Exception:
-        pass  # 日志失败不影响主流程
+    # v3.9.42 · 免码路径（已激活用户）不写审计日志（无 submitted_code 概念）
+    if not short_circuit_used:
+        try:
+            from task_store import _get_conn as _log_conn
+            _lc = _log_conn()
+            _lc.execute(
+                """CREATE TABLE IF NOT EXISTS invite_code_usage_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    code TEXT NOT NULL,
+                    luogu_uid TEXT NOT NULL,
+                    used_at TEXT NOT NULL
+                )"""
+            )
+            _lc.execute(
+                "INSERT INTO invite_code_usage_log (code, luogu_uid, used_at) VALUES (?, ?, ?)",
+                (submitted_code, luogu_uid, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            )
+            _lc.commit()
+            _lc.close()
+        except Exception:
+            pass  # 日志失败不影响主流程
 
     report_dir = _find_latest_report_dir(luogu_uid, student.get("real_name") or "")
     if not report_dir or not (report_dir / "report.md").exists():
@@ -11812,11 +13746,36 @@ STUDENT_ME_HTML = """
                     {% endif %}
                 </div>
 
-                <!-- 信息学竞赛奖项数 -->
-                <div class="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 text-center">
-                    <div class="text-xs text-blue-700 font-bold">🏅 信息学奖项</div>
-                    <div class="text-4xl font-extrabold text-blue-700 mt-1">{{ award_summary.total_awards or 0 }}</div>
-                    <div class="text-xs text-blue-600 mt-1">条已录入 · CSP/NOIP/NOI</div>
+                <!-- 信息学竞赛奖项数 · v3.9.63 改为展示具体奖项 -->
+                <div class="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 text-left">
+                    <div class="text-xs text-blue-700 font-bold text-center">🏅 信息学奖项</div>
+                    {% if award_summary.total_awards %}
+                        <div class="text-lg font-extrabold text-blue-800 mt-1.5 leading-tight text-center">
+                            {{ csp_award_types_dict[award_summary.best_overall] if award_summary.best_overall in csp_award_types_dict else '—' }}
+                        </div>
+                        <div class="text-[10px] text-blue-600 text-center mt-0.5">
+                            {% if award_summary.best_year %}{{ award_summary.best_year }} 年 · {% endif %}共 {{ award_summary.total_awards }} 条
+                        </div>
+                        <!-- 最近 3 条明细（按年份倒序，raw 已经是排好序的） -->
+                        <div class="mt-2 space-y-0.5 border-t border-blue-100 pt-1.5">
+                            {% for a in (award_summary.raw or [])[:3] %}
+                            <div class="text-[10px] text-blue-700 flex items-center gap-1">
+                                <span class="font-mono text-blue-400 w-7 text-right">{{ a.award_year }}</span>
+                                <span class="text-blue-300">·</span>
+                                <span class="font-bold">
+                                    {{ csp_award_types_dict[a.competition_type] if a.competition_type in csp_award_types_dict else a.competition_type }}
+                                </span>
+                                <span class="text-blue-300">·</span>
+                                <span>
+                                    {{ csp_award_levels_dict[a.award_level] if a.award_level in csp_award_levels_dict else a.award_level }}
+                                </span>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="text-3xl font-extrabold text-gray-300 mt-1 text-center">—</div>
+                        <div class="text-xs text-gray-400 mt-1 text-center">尚未录入奖项</div>
+                    {% endif %}
                 </div>
             </div>
 
@@ -11871,6 +13830,104 @@ STUDENT_ME_HTML = """
                 {% endif %}
             </div>
             {% endif %}
+        </div>
+
+        {# v3.9.46 · 学员中心「我的排名」卡片（C 形态 · 深空玻璃质感）
+            设计要点：
+              1) 背景采用深色 glass（与排行榜 Top 3 视觉同源），与"个人成就"白卡形成节奏对比
+              2) 三个 period tab（月榜/周榜/总榜）+ 两组学段（全部 / 本段）= 6 个组合
+              3) 当前选中 = ?period=month & 全部学段（最常用口径）
+              4) 排名 < 总数 时显示具体名次；未上榜时显示"暂未入榜"提示 #}
+        <div class="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 border border-slate-700/60 rounded-2xl shadow-2xl p-5 mb-4 text-white relative overflow-hidden" id="my-ranking">
+            <div class="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl -mr-10 -mt-10"></div>
+            <div class="relative">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center gap-2">
+                        <span class="text-[11px] font-mono text-emerald-300/80">// MY_RANK</span>
+                        <h2 class="font-bold text-lg text-white">🏆 我的排名</h2>
+                    </div>
+                    <a href="/leaderboard?period=month&stage=all" class="text-[11px] text-emerald-300 hover:text-emerald-200 font-mono">看完整榜单 →</a>
+                </div>
+
+                {# 学段范围切换（全部 / 本段） #}
+                {% set _scope = request.args.get('rank_scope', 'all') %}
+                {% set _period = request.args.get('rank_period', 'month') %}
+                <div class="flex items-center gap-1.5 mb-2">
+                    <a href="?rank_scope=all&rank_period={{ _period }}" class="text-[11px] px-2.5 py-1 rounded-md font-mono
+                       {% if _scope == 'all' %}bg-emerald-500/20 text-emerald-200 border border-emerald-400/40{% else %}bg-slate-700/40 text-slate-300 border border-slate-600/40 hover:bg-slate-700/70{% endif %}">
+                       全学段
+                    </a>
+                    <a href="?rank_scope=own&rank_period={{ _period }}" class="text-[11px] px-2.5 py-1 rounded-md font-mono
+                       {% if _scope == 'own' %}bg-emerald-500/20 text-emerald-200 border border-emerald-400/40{% else %}bg-slate-700/40 text-slate-300 border border-slate-600/40 hover:bg-slate-700/70{% endif %}">
+                       本学段（{{ student.grade_label or '—' }}）
+                    </a>
+                </div>
+
+                {# 时间窗 tab：月榜（默认）/ 周榜 / 总榜 #}
+                <div class="flex items-center gap-1.5 mb-4">
+                    <a href="?rank_scope={{ _scope }}&rank_period=month" class="flex-1 text-center text-[12px] py-1.5 rounded-md font-mono
+                       {% if _period == 'month' %}bg-emerald-500/20 text-emerald-200 border border-emerald-400/40{% else %}bg-slate-700/40 text-slate-300 border border-slate-600/40 hover:bg-slate-700/70{% endif %}">
+                       📅 月榜
+                    </a>
+                    <a href="?rank_scope={{ _scope }}&rank_period=week" class="flex-1 text-center text-[12px] py-1.5 rounded-md font-mono
+                       {% if _period == 'week' %}bg-emerald-500/20 text-emerald-200 border border-emerald-400/40{% else %}bg-slate-700/40 text-slate-300 border border-slate-600/40 hover:bg-slate-700/70{% endif %}">
+                       📅 周榜
+                    </a>
+                    <a href="?rank_scope={{ _scope }}&rank_period=all" class="flex-1 text-center text-[12px] py-1.5 rounded-md font-mono
+                       {% if _period == 'all' %}bg-emerald-500/20 text-emerald-200 border border-emerald-400/40{% else %}bg-slate-700/40 text-slate-300 border border-slate-600/40 hover:bg-slate-700/70{% endif %}">
+                       📅 总榜
+                    </a>
+                </div>
+
+                {% set _cur_rank = (my_rank[_scope + '_stage'][_period]) if my_rank else None %}
+                {% if _cur_rank %}
+                <div class="grid grid-cols-4 gap-3">
+                    <div class="text-center">
+                        <div class="text-[10px] text-slate-400 font-mono mb-1">当前排名</div>
+                        <div class="font-mono font-extrabold text-4xl
+                            {% if _cur_rank.rank <= 3 %}text-yellow-300
+                            {% elif _cur_rank.rank <= 10 %}text-emerald-300
+                            {% elif _cur_rank.rank <= 50 %}text-amber-300
+                            {% else %}text-slate-200{% endif %}">
+                            #{{ _cur_rank.rank }}
+                        </div>
+                        <div class="text-[10px] text-slate-400 mt-0.5">/ {{ _cur_rank.total }} 人</div>
+                    </div>
+                    <div class="text-center border-l border-slate-700/50">
+                        <div class="text-[10px] text-slate-400 font-mono mb-1">AI 评分</div>
+                        <div class="font-mono font-extrabold text-4xl
+                            {% if _cur_rank.score >= 800 %}text-emerald-300
+                            {% elif _cur_rank.score >= 700 %}text-amber-300
+                            {% else %}text-slate-200{% endif %}">
+                            {{ _cur_rank.score }}
+                        </div>
+                        <div class="text-[10px] text-slate-400 mt-0.5">{{ _cur_rank.score_label }} · /1000</div>
+                    </div>
+                    <div class="text-center border-l border-slate-700/50">
+                        <div class="text-[10px] text-slate-400 font-mono mb-1">超过</div>
+                        <div class="font-mono font-extrabold text-4xl text-cyan-300">
+                            {{ 100 - _cur_rank.percentile }}<span class="text-base text-slate-400">%</span>
+                        </div>
+                        <div class="text-[10px] text-slate-400 mt-0.5">前 {{ _cur_rank.percentile + 1 }}%</div>
+                    </div>
+                    <div class="text-center border-l border-slate-700/50">
+                        <div class="text-[10px] text-slate-400 font-mono mb-1">省份</div>
+                        <div class="font-mono font-extrabold text-lg text-slate-200 truncate">
+                            {{ student.province or '—' }}
+                        </div>
+                        <div class="text-[10px] text-slate-400 mt-0.5">34 选 1 安全</div>
+                    </div>
+                </div>
+                <div class="mt-3 text-[10.5px] text-slate-400 font-mono text-center">
+                    📊 报告时间：{{ _cur_rank.report_time or '—' }} · 数据每 5 分钟刷新
+                </div>
+                {% else %}
+                <div class="text-center py-4 text-slate-400 text-sm">
+                    🚧 暂未入榜 —— 该时段内还没有你的有效报告
+                    <div class="text-[10.5px] text-slate-500 mt-1">生成一份 AI 报告即可上榜</div>
+                </div>
+                {% endif %}
+            </div>
         </div>
 
         {# v3.9.31 · 家长端入口（除「生成报告」外的第二个入口）
@@ -13378,6 +15435,159 @@ PARENT_TOKEN_ENTRY_HTML = """
             <a href="/" class="text-amber-600 hover:underline">返回首页</a> · 教练入口 <a href="/coach" class="text-indigo-600 hover:underline">/coach</a>
         </div>
     </div>
+</body>
+</html>
+"""
+
+
+# ========== v3.9.44 · AI 测评排行榜 完整页模板 ==========
+LEADERBOARD_HTML = """<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>AI 测评排行榜 · 信竞 AI 报告</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body{background:linear-gradient(180deg,#0B1024 0%,#06080F 100%);color:#E5E7EB;font-family:"DM Sans",ui-sans-serif,system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;}
+        .glass{background:rgba(11,16,36,.6);border:1px solid rgba(148,163,184,.18);backdrop-filter:blur(14px);}
+        .row-gold{border-left:3px solid #FFB627;}
+        .row-silver{border-left:3px solid #CBD5E1;}
+        .row-bronze{border-left:3px solid #B45309;}
+        .stage-tab{transition:all .18s;}
+        .stage-tab:hover{background:rgba(0,255,179,.06);}
+        .stage-tab.active{background:linear-gradient(135deg,rgba(0,255,179,.15),rgba(123,97,255,.15));color:#00FFB3;border-color:rgba(0,255,179,.4);}
+    </style>
+</head>
+<body class="min-h-screen">
+<main class="max-w-4xl mx-auto px-4 pt-8 pb-12 space-y-5">
+    <div class="flex items-center justify-between">
+        <div>
+            <a href="/" class="text-xs text-[var(--ink-3)] hover:text-emerald-400">← 返回首页</a>
+            <h1 class="font-bold text-2xl text-white mt-1">🏆 AI 测评排行榜</h1>
+            <p class="text-xs text-[#94A3B8] mt-1">
+                {% if total %}当前榜单共 <strong class="text-white">{{ total }}</strong> 位学员{% endif %}
+                {% if period == 'month' %} · 📅 月榜（近 30 天内最新报告）{% endif %}
+                {% if period == 'week' %} · 📅 周榜（近 7 天内最新报告）{% endif %}
+                {% if period == 'all' %} · 📅 总榜（不限时间）{% endif %}
+                · 缓存 {{ ttl_seconds }}s · 上次更新 {{ cached_at|int }}
+            </p>
+            <p class="text-[11px] text-emerald-300/90 mt-1.5 font-mono">
+                🔒 <strong>本榜单已脱敏</strong>：学员姓名统一匿称为 U+UID后4 位（如 U1375）；学校通过稳定 hash 匿称为 学校#NNNN（如 学校#1234）。
+                学员本人可到 <a href="/me" class="underline hover:text-emerald-200">个人中心</a> 查看真名真校 + 我的排名。
+            </p>
+        </div>
+        <div class="text-right text-xs text-[#94A3B8] font-mono">
+            v3.9.47<br>月榜+省份+大学
+        </div>
+    </div>
+
+    <!-- 学段 Tab -->
+    <div class="glass rounded-xl p-1.5 flex flex-wrap gap-1">
+        {% for s_key, s_label in valid_stages %}
+        <a href="/leaderboard?stage={{ s_key }}&period={{ period }}&limit={{ limit }}"
+           class="stage-tab flex-1 text-center px-3 py-2 rounded-lg border border-transparent text-sm
+                  {% if stage == s_key %}active{% endif %}">
+            {{ s_label }} <span class="text-[10px] text-[#64748B]">({{ stage_count.get(s_key, 0) }})</span>
+        </a>
+        {% endfor %}
+    </div>
+
+    <!-- v3.9.46 · 时间窗 Tab：月榜（默认）/ 周榜 / 总榜 -->
+    <div class="glass rounded-xl p-1.5 flex gap-1">
+        {% for p_key, p_label in valid_periods %}
+        <a href="/leaderboard?stage={{ stage }}&period={{ p_key }}&limit={{ limit }}"
+           class="stage-tab flex-1 text-center px-3 py-2 rounded-lg border border-transparent text-sm
+                  {% if period == p_key %}active{% endif %}">
+            {{ p_label }}
+            {% if p_key == 'month' %}
+            <span class="text-[10px] text-[#64748B]">近 30 天</span>
+            {% elif p_key == 'week' %}
+            <span class="text-[10px] text-[#64748B]">近 7 天</span>
+            {% else %}
+            <span class="text-[10px] text-[#64748B]">不限时间</span>
+            {% endif %}
+        </a>
+        {% endfor %}
+    </div>
+
+    <!-- 榜单 -->
+    <div class="glass rounded-xl overflow-hidden">
+        {% if rows %}
+        <div class="grid grid-cols-12 gap-2 px-4 py-2.5 text-[11px] text-[#64748B] font-mono uppercase tracking-wider border-b border-[rgba(148,163,184,.12)]">
+            <div class="col-span-1">#</div>
+            <div class="col-span-2">学员</div>
+            <div class="col-span-2">学段·年级</div>
+            <div class="col-span-1">省份</div>
+            <div class="col-span-2">学校</div>
+            <div class="col-span-2 text-right">分数</div>
+            <div class="col-span-2 text-right">报告时间</div>
+        </div>
+        {% for entry in rows %}
+        <div class="grid grid-cols-12 gap-2 px-4 py-3 items-center border-b border-[rgba(148,163,184,.06)] hover:bg-white/[.02]
+                    {% if entry.rank == 1 %}row-gold{% elif entry.rank == 2 %}row-silver{% elif entry.rank == 3 %}row-bronze{% endif %}">
+            <div class="col-span-1">
+                {% if entry.rank == 1 %}🥇
+                {% elif entry.rank == 2 %}🥈
+                {% elif entry.rank == 3 %}🥉
+                {% else %}<span class="font-mono text-[#94A3B8] text-sm">{{ entry.rank }}</span>
+                {% endif %}
+            </div>
+            <div class="col-span-2">
+                <div class="text-white text-sm font-semibold truncate">{{ entry.display_name }}</div>
+                <!-- v3.9.62 fix · 排行榜脱敏：只显示 U+末4位，不带详情链接（v3.9.63 · 用户要求删掉详情点击） -->
+                <div class="text-[10px] text-[#64748B] font-mono">
+                    {{ entry.luogu_uid_tail }}{% if entry.is_minor %} · 脱敏{% endif %}
+                </div>
+            </div>
+            <div class="col-span-2 text-xs text-[#94A3B8] truncate">
+                {{ entry.grade }}
+            </div>
+            <div class="col-span-1 text-xs text-cyan-300 font-mono truncate" title="省份（中国一级行政区，34 个选项，无法精确定位到人）">
+                {{ entry.province or '—' }}
+            </div>
+            <div class="col-span-2 text-xs text-[#94A3B8] truncate">
+                {{ entry.school }}
+            </div>
+            <div class="col-span-2 text-right">
+                <div class="font-mono font-extrabold text-lg
+                            {% if entry.score >= 900 %}text-emerald-400
+                            {% elif entry.score >= 800 %}text-emerald-300
+                            {% elif entry.score >= 700 %}text-amber-400
+                            {% elif entry.score >= 600 %}text-yellow-300
+                            {% else %}text-slate-300{% endif %}">
+                    {{ entry.score }}
+                </div>
+                <div class="text-[10px] text-[#64748B]">{{ entry.score_label }}</div>
+            </div>
+            <div class="col-span-2 text-right text-[10px] text-[#64748B] font-mono">
+                {{ entry.report_time }}
+            </div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="px-6 py-12 text-center text-[#64748B] text-sm">
+            🚧 暂无排行数据 —— 还没有学员生成过完整报告<br>
+            <a href="/" class="text-emerald-400 hover:underline">点此生成第一份报告 →</a>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- 公式说明 -->
+    <div class="glass rounded-xl p-4 text-[11px] text-[#94A3B8] font-mono space-y-1.5">
+        <div class="text-white text-xs font-semibold mb-2">📐 评分公式（v3.9.44 反刷题加权）</div>
+        <div>总评分 = (6维均值 × 0.6) + (难度深度 × 0.2) + (提交效率 × 0.1) + (知识广度 × 0.1)</div>
+        <div class="opacity-70">· 6维均值：基础算法 / 数据结构 / 图论 / DP / 字符串 / 数学（每项 0-95）</div>
+        <div class="opacity-70">· 难度深度：d≥3 题占比 + 难度加权平均（防止刷难度 1 题刷出高分）</div>
+        <div class="opacity-70">· 提交效率：AC 率 × 0.6 + 一次 AC 率 × 0.4（少 WA 加分）</div>
+        <div class="opacity-70">· 知识广度：涉及的不同 tag 数（避免单 tag 刷题）</div>
+        <div class="opacity-50 mt-2">🔒 v3.9.47 · 学员姓名 U+UID后4 位；学校 hash → 学校#NNNN；<strong>省份列直接显示省名</strong>（34 个选项无法精确定位）；月榜（30 天）/ 周榜 / 总榜 防历史霸榜；PIPL §5.2 防护 · 取最近一次有效报告</div>
+    </div>
+
+    <div class="text-center text-[10px] text-[#64748B] font-mono pt-2">
+        © 2026 信竞 AI 报告 · v3.9.47 · 数据每 5 分钟缓存
+    </div>
+</main>
 </body>
 </html>
 """

@@ -460,6 +460,152 @@ def compute_six_dimension_scores(export_data: dict, behavior_data: dict) -> dict
     return scores
 
 
+# ========== v3.9.44 · 反刷题 3 维评分 + 综合分（防"刷简单题刷出高分"）==========
+# 思路：原 6 维只看了「掌握哪些 tag」+「做过多少题」，没看「做得多难 / 多省力 / 多广」。
+# 大量刷难度 1 的「顺序结构 / 模拟」会导致基础算法维度虚高。
+# 新增 3 个反刷题维度，加权后压低纯刷题型选手的总分。
+
+# 难度档位权重（Codeforces rating 风格指数递增）
+# 难度 1 = 入门（顺序结构、模拟）→ 权重 1
+# 难度 6 = NOI / 顶级 → 权重 12
+_DIFFICULTY_WEIGHT = {1: 1, 2: 2, 3: 3, 4: 5, 5: 8, 6: 12}
+
+# 综合分加权：原 6 维 60% + 反刷题 40%
+_COMPREHENSIVE_WEIGHTS = {
+    "six_dim_mean": 0.60,            # 原 6 维均值
+    "difficulty_depth": 0.20,         # 难度深度（加权平均）
+    "submission_efficiency": 0.10,    # 提交效率
+    "knowledge_breadth": 0.10,         # 知识广度
+}
+
+
+def compute_anti_grind_dimensions(export_data: dict) -> dict[str, int]:
+    """v3.9.44 · 计算 3 个反刷题维度（0-100）。
+
+    返回 dict 包含：
+      - difficulty_depth: 难度加权平均（d≥3 题占比 + 整体难度系数）
+      - submission_efficiency: 一次 AC 率 + AC 率的综合
+      - knowledge_breadth: 涉及的不同 tag 数（去重 + 加权）
+
+    设计目标：让"刷 300 道难度 1 的顺序结构"与"做 50 道难度 5 的 DP/图论"在
+    反刷题维度上有显著差异。
+    """
+    summary = export_data.get("summary", {}) or {}
+    difficulty_histogram = summary.get("difficulty_histogram", {}) or {}
+    top_tags = summary.get("top_algorithm_tags", []) or summary.get("top_tags", []) or []
+    solved_count = int(export_data.get("solved_count", 0))
+    failed_count = int(export_data.get("failed_count", 0))
+
+    # ---- 1) 难度深度：难度加权平均 × 比例惩罚 ----
+    weighted_sum = 0
+    weight_total = 0
+    high_difficulty_count = 0  # d≥3 的题数
+    for key, value in difficulty_histogram.items():
+        if not str(key).isdigit():
+            continue
+        level = int(key)
+        cnt = int(value)
+        w = _DIFFICULTY_WEIGHT.get(level, 1)
+        weighted_sum += level * cnt
+        weight_total += cnt
+        if level >= 3:
+            high_difficulty_count += cnt
+    avg_difficulty = (weighted_sum / weight_total) if weight_total > 0 else 0
+    # 把平均难度（1-6）映射到 0-100：avg=3.5 → 50 分，avg=5 → 80 分
+    difficulty_depth = int(min(100, max(0, (avg_difficulty - 1.0) / 5.0 * 100)))
+    # 难度占比加成：d≥3 题占 50% 以上额外加分（最多 +15）
+    if weight_total > 0:
+        high_ratio = high_difficulty_count / weight_total
+        difficulty_depth = min(100, difficulty_depth + int(high_ratio * 15))
+
+    # ---- 2) 提交效率 = 0.6×AC率 + 0.4×一次AC率 ----
+    # 没有 behavior_data 时用粗估：passed / (passed+failed)
+    if solved_count + failed_count > 0:
+        ac_rate = solved_count / (solved_count + failed_count)
+    else:
+        ac_rate = 0.5
+    # 一次 AC 率从 top_tags 信息难拿，保守用 ac_rate 平方（AC 率越高，一次 AC 比例通常越高）
+    first_try_rate = ac_rate ** 0.5
+    submission_efficiency = int(0.6 * ac_rate * 100 + 0.4 * first_try_rate * 100)
+    submission_efficiency = max(0, min(100, submission_efficiency))
+
+    # ---- 3) 知识广度：去重 tag 数 × log 缩放 ----
+    distinct_tag_count = len([t for t in top_tags if int(t.get("count", 0)) > 0])
+    # 5 个 tag = 60 分，10 个 = 80 分，20 个 = 95 分
+    knowledge_breadth = int(min(100, distinct_tag_count * 8))
+    # 高难度 tag 加成：top_tags 中 count≥3 且涉及高级算法的（DP/图论/数据结构/字符串/数学）
+    advanced_kw = ("dp", "动态规划", "图", "线段树", "字符串", "kmp", "trie", "sam",
+                   "lca", "tarjan", "网络流", "匹配", "数论", "数学", "组合")
+    advanced_count = 0
+    for t in top_tags:
+        name = str(t.get("name") or "").lower()
+        cnt = int(t.get("count", 0))
+        if cnt >= 3 and any(kw in name for kw in advanced_kw):
+            advanced_count += 1
+    knowledge_breadth = min(100, knowledge_breadth + advanced_count * 3)
+
+    return {
+        "difficulty_depth": int(difficulty_depth),
+        "submission_efficiency": int(submission_efficiency),
+        "knowledge_breadth": int(knowledge_breadth),
+    }
+
+
+def compute_comprehensive_score(
+    export_data: dict,
+    behavior_data: dict | None = None,
+) -> dict:
+    """v3.9.44 · 综合分 = 加权 6 维 + 3 反刷题维度，输出千分制。
+
+    返回 dict：
+      - ai_score_thousand: int (0-1000) 主分
+      - ai_score_label:    str  5 档位（🏆顶尖/⭐优秀/🔵良好/🟡基础/🔴待提升）
+      - six_dimension_scores: dict[str, int] 原 6 维
+      - anti_grind_dimensions: dict[str, int] 反刷题 3 维
+      - component_scores: dict[str, float] 各部分加权明细（调试/展示用）
+      - score_source:    str  "comprehensive_v3944"
+    """
+    six_dim = compute_six_dimension_scores(export_data, behavior_data or {})
+    anti_grind = compute_anti_grind_dimensions(export_data)
+
+    six_mean = sum(six_dim.values()) / max(1, len(six_dim))
+
+    component_scores = {
+        "six_dim_mean": float(six_mean),
+        "difficulty_depth": float(anti_grind["difficulty_depth"]),
+        "submission_efficiency": float(anti_grind["submission_efficiency"]),
+        "knowledge_breadth": float(anti_grind["knowledge_breadth"]),
+    }
+    final = sum(
+        component_scores[k] * _COMPREHENSIVE_WEIGHTS[k]
+        for k in _COMPREHENSIVE_WEIGHTS
+    )
+    final = max(0, min(100, final))
+    score_thousand = int(round(final * 10))
+
+    # 5 档位（与 v3.9.25+ 已有口径保持一致）
+    if score_thousand >= 900:
+        label = "🏆 顶尖"
+    elif score_thousand >= 800:
+        label = "⭐ 优秀"
+    elif score_thousand >= 700:
+        label = "🔵 良好"
+    elif score_thousand >= 600:
+        label = "🟡 基础"
+    else:
+        label = "🔴 待提升"
+
+    return {
+        "ai_score_thousand": score_thousand,
+        "ai_score_label": f"{label} · 综合分",
+        "six_dimension_scores": six_dim,
+        "anti_grind_dimensions": anti_grind,
+        "component_scores": component_scores,
+        "weights": dict(_COMPREHENSIVE_WEIGHTS),
+        "score_source": "comprehensive_v3944",
+    }
+
+
 def format_behavior_summary(behavior_data: dict) -> str:
     """将行为分析数据格式化为 Markdown 文本，供 AI prompt 使用"""
     if "error" in behavior_data:

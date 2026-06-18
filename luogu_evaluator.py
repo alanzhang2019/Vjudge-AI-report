@@ -803,11 +803,17 @@ def build_trusted_data_summary_md(export_data: dict) -> str:
         #   空白 = "未覆盖"（AC = 0）
         #   总数 = 上述 5 档合计
         m1 = m2 = m3 = m4 = m5 = 0
+        # v3.9.48 · 5 档分别收集知识点名字（用于"掌握度分布"列展示明细）
+        by_level: dict[str, list[str]] = {"精通": [], "熟练": [], "入门": [], "初窥": [], "空白": []}
         for item in detail_list:
             if not isinstance(item, dict):
                 continue
             ac = int(item.get("ac_count", 0) or 0)
+            topic = str(item.get("topic", "")).strip()
             level = _level_for_ac(ac)
+            if not topic:
+                continue
+            by_level.setdefault(level, []).append(topic)
             if level == "精通":
                 m1 += 1
             elif level == "熟练":
@@ -819,21 +825,39 @@ def build_trusted_data_summary_md(export_data: dict) -> str:
             else:
                 m5 += 1
 
-        def _chip(color: str, n: int, lbl: str, *, fg: str = "#fff", bd: str = "") -> str:
+        def _chip(color: str, n: int, lbl: str, topics: list[str], *, fg: str = "#fff", bd: str = "") -> str:
+            """v3.9.49 · chip 顶部显示「N项 + 全部知识点名」（不再截断）
+            v3.9.48 旧版只显示前 2 个 + "…"，用户反馈"应该列出全部知识点明细"。
+            现改为：count 在前，下面 <br> 换行后逐个列出全部 topics，
+            CSS 用 max-width + word-wrap 兜底，避免长行撑爆。
+            """
             border_style = f"border:1px solid {bd};" if bd else ""
+            # tooltip 仍保留（鼠标 hover 看全）
+            tip = "、".join(topics) if topics else "（无）"
+            topic_html = ""
+            if topics:
+                topic_html = (
+                    "<br><span style=\"font-size:10px;font-weight:400;"
+                    "line-height:1.45;display:inline-block;max-width:240px;"
+                    "word-break:break-all;\">"
+                    + "、".join(topics)
+                    + "</span>"
+                )
             return (
-                f'<span style="display:inline-block;padding:1px 8px;'
+                f'<span title="{tip}" style="display:inline-block;padding:3px 8px;'
                 f'border-radius:6px;background:{color};color:{fg};'
                 f'{border_style}'
-                f'font-size:11px;font-weight:600;margin-right:4px;">'
-                f'{lbl} {n}项</span>'
+                f'font-size:11px;font-weight:600;margin:2px 4px 2px 0;cursor:help;'
+                f'vertical-align:top;text-align:left;">'
+                f'{lbl} {n}项{topic_html}</span>'
             )
+
         details = (
-            _chip("#14532D", m1, "精通")
-            + _chip("#166534", m2, "熟练")
-            + _chip("#16A34A", m3, "入门")
-            + _chip("#86EFAC", m4, "初窥", fg="#064E3B", bd="#4ADE80")
-            + _chip("#FFFFFF", m5, "空白", fg="#6B7280", bd="#9CA3AF")
+            _chip("#14532D", m1, "精通", by_level["精通"])
+            + _chip("#166534", m2, "熟练", by_level["熟练"])
+            + _chip("#16A34A", m3, "入门", by_level["入门"])
+            + _chip("#86EFAC", m4, "初窥", by_level["初窥"], fg="#064E3B", bd="#4ADE80")
+            + _chip("#FFFFFF", m5, "空白", by_level["空白"], fg="#6B7280", bd="#9CA3AF")
         )
         lines.append(f"<tr><td><strong>{label.split('（')[0].replace('级','')}</strong></td><td>{covered}/{total_topics}</td><td>{coverage}%</td><td>{details}</td></tr>")
 
@@ -974,7 +998,8 @@ _MASTERY_COLOR: dict[str, dict] = {
 #   - 搜索/DFS：迭代加深
 _CATEGORY_KEYWORDS = (
     ("基础实现", ["模拟", "枚举", "排序", "高精度", "进制", "字符串基础", "递推", "分治", "构造",
-                 "前缀和", "差分", "flood", "填充", "离散化", "离线", "随机化"]),
+                 "前缀和", "差分", "flood", "填充", "离散化", "离线", "随机化",
+                 "位运算", "位操作", "进制转换"]),
     ("搜索/DFS", ["搜索", "dfs", "bfs", "回溯", "剪枝", "递归", "双向搜索", "启发式", "迭代加深", "a*"]),
     ("动态规划", ["dp", "动态规划", "背包", "区间dp", "树形dp", "状压", "数位dp", "记忆化", "概率dp", "四边形不等式"]),
     ("贪心/二分", ["贪心", "二分", "倍增", "三分", "中位数"]),
@@ -983,12 +1008,13 @@ _CATEGORY_KEYWORDS = (
              "网络流", "二分图", "匹配", "拓扑", "差分约束", "最小生成树", "mst", "基环树", "欧拉",
              "次短路", "2-sat", "上下界", "km算法", "匈牙利"]),
     # 数据结构：含"bst/二叉搜索树"必须在"二叉树"前（避免"二叉树遍历"被错配"bst"）
+    # v3.9.50 · 补 stl 关键词（CSP-J 常见考点）
     ("数据结构", ["bst", "二叉搜索树", "哈夫曼", "栈", "队列", "链表", "二叉树",
                  "线段树", "树状数组", "堆", "单调栈", "单调队列", "平衡树", "st表", "treap", "splay", "红黑树",
                  "字典树", "trie", "树链剖分", "树剖", "树分治", "cdq", "kdtree", "kd树", "k-d", "树套树", "跳表", "左偏树",
                  "笛卡尔树", "虚树", "lct", "link-cut", "圆方树", "替罪羊", "wblt", "析合树",
                  "分块", "莫队",
-                 "bitset", "位集合"]),
+                 "bitset", "位集合", "stl"]),
     ("字符串", ["kmp", "字符串", "hash", "sam", "后缀", "manacher", "ac自动机", "回文", "z函数", "最小表示"]),
     # 数学/数论：把"gcd/素数/筛法/排列/组合/杨辉"等基础数论关键词补全 + 高级数论/代数
     ("数学/数论", ["gcd", "最大公约数", "辗转相除", "素数", "质数", "筛法", "杨辉", "组合", "排列",
@@ -1076,10 +1102,17 @@ def _build_one_tree_svg(
     HEADER_H = 24          # 顶部留白（给树冠+最顶部分类帽留余地）
     BRANCH_H = 56          # 每条主分支占的高度（紧凑 36%，让树更矮）
     BOTTOM_PAD = 22
-    # v3.9.40 · MAX_FRUITS 6→20：让 CSP-J 28 个知识点全部显示，不再有"+N"截断
-    # （CSP-S 51 个、省选 11 个、NOI 42 个也都 < 20，4 个级别都不会被截）
-    MAX_FRUITS = 20        # 每条分支最多挂几个果子（默认全部展示，零截断）
-    FRUIT_W = 38           # 果子之间的水平间距（紧凑 32%）
+    # v3.9.51 · 上游 build_knowledge_tree_html 已经按 AC 降序排好，
+    #   并对 >28 个的分类做了拆分。这里不再做 MAX_FRUITS 截断 + 排序，
+    #   直接信任传入的 topics 顺序。MAX_FRUITS 保留作为防御性兜底（>200 才截）。
+    MAX_FRUITS = 200
+    COMPACT_THRESHOLD = 6  # 6+ 果子进入紧凑模式
+    TINY_THRESHOLD = 8     # 8+ 果子进入极紧凑模式
+    # v3.9.51 · 增加更紧凑的级别：>20 进入"超紧凑"模式（果子半径 60%）
+    ULTRA_TINY_THRESHOLD = 20
+    FRUIT_W = 38           # 标准模式果子水平间距
+    FRUIT_W_MIN = 22       # 紧凑模式最小间距（更紧凑，确保 30+ 果子也能放下）
+    FRUIT_W_ULTRA = 16     # 超紧凑模式最小间距（>20 果子时用）
     SIDE_MARGIN = 18       # 边距（略减）
 
     n_branches = len(cat_topics)
@@ -1164,20 +1197,26 @@ def _build_one_tree_svg(
 
     # 主分支 = 分类；按 cat_topics 顺序（已排好）从下往上画
     branch_zone = trunk_bottom - trunk_top - 14
+    n_branches = len(cat_topics)
+
+    # v3.9.50 · 真正左右交替：i=0(最上)→左, i=1→右, i=2→左 ... 一棵"真·树"。
+    # 之前 v3.9.48 的"前半左、后半右"会让 4 根树枝挤在一侧像耙子，视觉完全不像树。
+    # 交替后：n=6 → 3L+3R, n=7 → 4L+3R, n=8 → 4L+4R, n=9 → 5L+4R, 天然平衡。
+    # 特例：n=1 时 i=0 → 左（保持原行为）
     for i, (cat, topics) in enumerate(cat_topics):
         # 分支 y：均匀分布（i=0 在最上，越往下 i 越大）
         by = trunk_top + 7 + (i + 0.5) * (branch_zone / n_branches)
-        # 方向：奇偶交替（i=0 → 右，i=1 → 左，i=2 → 右，…）
-        going_right = (i % 2 == 0)
+        # v3.9.50 · 真正左右交替（之前是 i >= half_n）
+        going_right = (i % 2 == 1) if n_branches > 1 else False
         # 长度因子：i=0（最上）最短，i=n-1（最下）最长；形成下宽上窄的圆锥
         if n_branches > 1:
             length_factor = 0.62 + 0.38 * i / (n_branches - 1)
         else:
             length_factor = 1.0
 
-        # 限长 + 按 AC 降序
-        topics_sorted = sorted(topics, key=lambda t: -t[1])[:MAX_FRUITS]
-        hidden = len(topics) - len(topics_sorted)
+        # 防御性截断（理论不会触发，因为上游已拆分；仅当数据异常时兜底）
+        topics_sorted = list(topics)[:MAX_FRUITS]
+        hidden = max(0, len(topics) - len(topics_sorted))
         n_fruits = len(topics_sorted)
         if n_fruits == 0:
             continue
@@ -1185,15 +1224,42 @@ def _build_one_tree_svg(
         # 计算本侧最大可用水平距离（按 length_factor 缩放）
         max_extent = half_w * length_factor
 
-        # 果子间距（如果太长则压缩，最小 38px）
-        if n_fruits > 1:
-            ideal_span = (n_fruits - 1) * FRUIT_W
-            if ideal_span > max_extent - 30:
-                fw = max(38, (max_extent - 30) / (n_fruits - 1))
-            else:
-                fw = FRUIT_W
+        # v3.9.51 · 紧凑度自适应（四档）：
+        #   - n_fruits < 6：标准模式，fw = FRUIT_W(38)
+        #   - 6 <= n_fruits < 8：紧凑模式，fw 自适应压到 FRUIT_W_MIN(22) 以上
+        #   - 8 <= n_fruits < 20：极紧凑模式，fw 更小 + 果子半径 70%
+        #   - n_fruits >= 20：超紧凑模式，fw=FRUIT_W_ULTRA(16) + 果子半径 60%
+        if n_fruits >= ULTRA_TINY_THRESHOLD:
+            compact_mode = "ultra_tiny"
+            fw = max(FRUIT_W_ULTRA, (max_extent - 20) / max(1, n_fruits - 1))
+            r_factor = 0.6    # 果子半径 60%
+            fs_factor = 0.85  # AC 数字略小
+            label_fs = 7.0    # 知识点名字体
+        elif n_fruits >= TINY_THRESHOLD:
+            compact_mode = "tiny"
+            fw = max(FRUIT_W_MIN, (max_extent - 24) / max(1, n_fruits - 1))
+            r_factor = 0.7    # 果子半径 70%
+            fs_factor = 0.9   # AC 数字略小
+            label_fs = 7.5    # 知识点名字体
+        elif n_fruits >= COMPACT_THRESHOLD:
+            compact_mode = "compact"
+            fw = max(FRUIT_W_MIN, (max_extent - 30) / max(1, n_fruits - 1))
+            r_factor = 0.85
+            fs_factor = 0.95
+            label_fs = 8.0
         else:
-            fw = 0
+            compact_mode = "standard"
+            if n_fruits > 1:
+                ideal_span = (n_fruits - 1) * FRUIT_W
+                if ideal_span > max_extent - 30:
+                    fw = max(FRUIT_W_MIN, (max_extent - 30) / max(1, n_fruits - 1))
+                else:
+                    fw = FRUIT_W
+            else:
+                fw = 0
+            r_factor = 1.0
+            fs_factor = 1.0
+            label_fs = 8.5
 
         if going_right:
             # 分支起点/终点
@@ -1284,7 +1350,8 @@ def _build_one_tree_svg(
             # 难度信息不再在果子颜色里展示（避免与掌握度维度重复），
             # 改在 hover 提示（full_info）和图例的文字说明里展示。
             mt = _MASTERY_VIS.get(level, _MASTERY_VIS["空白"])
-            r = mt["r"]
+            # v3.9.50 · 紧凑模式：果子半径按 r_factor 缩放
+            r = max(4, mt["r"] * r_factor)   # 最小 4px，保证小果子仍可见
             mc = _MASTERY_COLOR.get(level, _MASTERY_COLOR["空白"])
             fill = mc["fill"]
             fg = mc["fg"]
@@ -1312,31 +1379,39 @@ def _build_one_tree_svg(
             svg.append(
                 f'<ellipse cx="{fx - r * 0.32:.2f}" '
                 f'cy="{fy - r * 0.4:.2f}" '
-                f'rx="{r * 0.35:.2f}" '
-                f'ry="{r * 0.22:.2f}" '
+                f'rx="{r * 0.35:.2f}" ry="{r * 0.22:.2f}" '
                 f'fill="#FFFFFF" opacity="0.5"/>'
             )
-            # 果子内写 AC 数（半径 >= 11 才写，避免溢出）
-            if r >= 11:
+            # 果子内写 AC 数（半径 >= 8 才写，紧凑模式下半径小，跳过）
+            if r >= 8:
                 svg.append(
-                    f'<text x="{fx}" y="{fy + 4}" font-size="{mt["fs"]}" '
+                    f'<text x="{fx}" y="{fy + 4}" font-size="{mt["fs"] * fs_factor:.1f}" '
                     f'font-weight="{mt["fw"]}" fill="{fg}" '
                     f'text-anchor="middle">{ac}</text>'
                 )
             # 果子下写知识点名
             # 规则：<=4 字直接显示；5+ 字拆两行
+            # v3.9.50 · 紧凑模式：>=6 果子时 2+ 字也尝试拆两行，缩 font-size 到 label_fs
             topic_chars = list(topic)
             n = len(topic_chars)
-            if n <= 4:
-                lines = ["".join(topic_chars)]
+            # 紧凑模式：>2 字就拆两行（避免横向占太宽）
+            if compact_mode == "standard":
+                if n <= 4:
+                    lines = ["".join(topic_chars)]
+                else:
+                    mid = (n + 1) // 2
+                    lines = ["".join(topic_chars[:mid]), "".join(topic_chars[mid:])]
             else:
-                mid = (n + 1) // 2
-                lines = ["".join(topic_chars[:mid]), "".join(topic_chars[mid:])]
+                if n <= 2:
+                    lines = ["".join(topic_chars)]
+                else:
+                    mid = (n + 1) // 2
+                    lines = ["".join(topic_chars[:mid]), "".join(topic_chars[mid:])]
             label_y_start = fy + r + 12
             for li, line in enumerate(lines):
                 svg.append(
-                    f'<text x="{fx}" y="{label_y_start + li * 10}" '
-                    f'font-size="8.5" font-weight="600" fill="#1F2937" '
+                    f'<text x="{fx}" y="{label_y_start + li * 9}" '
+                    f'font-size="{label_fs}" font-weight="600" fill="#1F2937" '
                     f'text-anchor="middle">{line}</text>'
                 )
 
@@ -1455,6 +1530,28 @@ def build_knowledge_tree_html(syllabus_eval: dict) -> str:
 
         cat_topics = [(c, cat_to_topics[c]) for c in cat_order]
         cat_topics.sort(key=lambda kv: _cat_score(kv[0]), reverse=True)
+
+        # v3.9.51 · 拆分超大分类：单分类 >28 个知识点时拆成多个子分支，
+        #   确保所有知识点都能被展示（之前会被 +N 截断）。
+        #   - 子分类标签 = 父分类 + 角标①②…
+        #   - 子分类内按 AC 降序排（强项在前）
+        MAX_FRUITS_PER_BRANCH = 28
+        expanded_cat_topics: list[tuple[str, list]] = []
+        for cat, topics in cat_topics:
+            topics_sorted = sorted(topics, key=lambda t: -t[1])
+            if len(topics_sorted) <= MAX_FRUITS_PER_BRANCH:
+                expanded_cat_topics.append((cat, topics_sorted))
+                continue
+            n_chunks = (len(topics_sorted) + MAX_FRUITS_PER_BRANCH - 1) // MAX_FRUITS_PER_BRANCH
+            # 拆分时尽量让**强项集中在第 1 个子分支**（高 AC），其它均分
+            # 这里直接按 AC 降序均分即可
+            for ci in range(n_chunks):
+                chunk = topics_sorted[ci * MAX_FRUITS_PER_BRANCH:(ci + 1) * MAX_FRUITS_PER_BRANCH]
+                # 角标：用①②③ 简洁不占空间
+                subscript = "①②③④⑤⑥⑦⑧⑨"[ci] if ci < 9 else f"({ci+1})"
+                label = f"{cat}{subscript}" if n_chunks > 1 else cat
+                expanded_cat_topics.append((label, chunk))
+        cat_topics = expanded_cat_topics
 
         svg = _build_one_tree_svg(icon, title, cat_topics)
 
@@ -2593,9 +2690,44 @@ def generate_ai_report(
  3. **【难度分布与水平研判】**：
     分析选手的难度分布特征，判断其处于哪个阶段（入门/普及/提高/省选）。必须使用洛谷官方难度名称：暂无评定、入门、普及-、普及/提高-、普及+/提高、提高+/省选-、省选/NOI-、NOI/NOI+/CTSC。严禁输出“难度1/难度2/难度3”。
 
- 4. **【六维能力雷达表与诊断】（评分参考：85-100 优秀 | 65-84 良好 | 40-64 基础 | <40 薄弱）**：
+ 4. **【六维能力雷达表与诊断】（评分 × 等级必须一一对应 · v3.9.63 防"假高分"硬约束）**：
       输出 Markdown 表格，评估选手在六大维度的状态：`| 能力块 | 评分 | 当前等级 | 数据证据 | 已经具备 |`
-      六大维度：基础算法、数据结构、图论、动态规划、字符串、数学。当前等级请使用前缀符号（如 🟢精通）。
+      六大维度：基础算法、数据结构、图论、动态规划、字符串、数学。
+
+      ★★★★★ **【硬约束 1：评分 = 等级对应表，严禁"低等级给高分"】** ★★★★★
+      ```
+        🟢 精通   →  85 ≤ 评分 ≤ 100
+        🟡 熟练   →  70 ≤ 评分 ≤ 84
+        🟠 入门   →  50 ≤ 评分 ≤ 69    （绝不能给 70+，图例会立刻判错）
+        🔵 初窥   →  30 ≤ 评分 ≤ 49
+        🔴 空白   →   0 ≤ 评分 <  30
+      ```
+      抽出的"当前等级"列必须从该维度"做过题的最高难度"推出，与"评分"列必须落在同一档。
+      例：图论维度只 AC 过 d≤3（入门/普及-/普及/提高-）的题 → 等级必须写 🟠入门，评分必须 ≤ 69，
+        绝不能因为"做得多"就给 91 分（这叫"假高分"，海报/榜单会立刻暴露）。
+
+      ★★★★★ **【硬约束 2：难度加权打分（防刷简单题刷出高分）】** ★★★★★
+      同等数量下难度越深分越高；低难度题做再多也不能突破等级上限：
+      ```
+        d=1（入门）         1 题 = 0.5 分（仅算"接触"，无等级资格）
+        d=2-3（普及- / 普及/提高-） 1 题 = 1-2 分
+        d=4-5（普及+/提高 / 提高+/省选-）1 题 = 3-5 分
+        d=6+（省选/NOI- / NOI/NOI+/CTSC）1 题 = 6-10 分
+      ```
+      反例：某个选手"模拟 38 / 贪心 22 / 排序 20" 80 题全是 d≤2 → 基础算法 ≤ 50 分（入门档上限），
+        不能再按"题多就给 80+ 分"。若 d≥3 的题占比 < 20% → 整维度硬性封顶 60。
+
+      ★★★★★ **【硬约束 3：等级判定的"硬证据"是最高难度，不是题数】** ★★★★★
+      ```
+        🟢 精通 = 核心 tag 在 d≥5 上有 AC（必须真的写过 NOI 级别题）
+        🟡 熟练 = 核心 tag 在 d≥3 上有 AC（普及+/提高 上有真本事）
+        🟠 入门 = 核心 tag 在 d≤3 上有 AC（仅接触，没到提高）
+        🔵 初窥 = 核心 tag 仅在 d≤2 上 AC
+        🔴 空白 = 核心 tag 无 AC
+      ```
+
+      诊断段落必须先自检"是否有假高分"，有就要主动指出（例："此六维雷达图存在'假高分'现象，
+      X 维度 91 分实质应为 50-60 分（入门档），掩盖了在 d≥4 上的无力"）。
 
   5. **【考纲精准定级与知识点盲区】**（根据提供的 NOI大纲 2025版）：
      - **当前对应等级水平**：明确指出该选手目前处于 CSP-J / CSP-S / 省选 / NOI 哪个阶段。
@@ -2816,42 +2948,61 @@ def generate_parent_subscribe(
                         except Exception:
                             age_str = str(sd.get("birth_date") or "")
                     # 同步取 GESP 真考历史
+                    # v3.9.50 · 修 bug：之前用 `c.event_date` 但 competitions 表实际是 `exam_date`，
+                    # 导致整个 try 块 raise 被外层 except 静默吞掉，profile_block 退化为
+                    # "暂无 GESP/CSP/NOIP/NOI 比赛记录"，AI 报告永远显示"暂未参加 GESP/CSP"。
+                    # 现在改用正确列名 + 失败时记 ERROR 日志，不静默吞错。
                     gesp_lines = []
-                    for g in conn.execute(
-                        "SELECT g.registered_level, g.actual_score, g.passed, "
-                        "       g.certificate_no, c.name AS exam_name, c.event_date, c.data_year "
-                        "FROM gesp_exams g LEFT JOIN competitions c ON c.id = g.exam_id "
-                        "WHERE g.student_id = ? ORDER BY c.event_date DESC",
-                        (sid_int,),
-                    ).fetchall():
-                        gd = dict(g)
-                        passed = "✅通过" if gd.get("passed") else "❌未通过"
-                        score = f"{gd.get('actual_score')}分" if gd.get("actual_score") else "未记录分数"
-                        gesp_lines.append(
-                            f"  - GESP L{gd.get('registered_level')} · {gd.get('exam_name') or gd.get('data_year') or '?'} · {passed} · {score}"
+                    try:
+                        for g in conn.execute(
+                            "SELECT g.registered_level, g.actual_score, g.passed, "
+                            "       g.certificate_no, g.exam_id, c.name AS exam_name, c.exam_date, c.data_year "
+                            "FROM gesp_exams g LEFT JOIN competitions c ON c.id = g.exam_id "
+                            "WHERE g.student_id = ? ORDER BY COALESCE(c.exam_date, g.award_year || '-12-31') DESC",
+                            (sid_int,),
+                        ).fetchall():
+                            gd = dict(g)
+                            passed = "✅通过" if gd.get("passed") else "❌未通过"
+                            score = f"{gd.get('actual_score')}分" if gd.get("actual_score") else "未记录分数"
+                            gesp_lines.append(
+                                f"  - GESP L{gd.get('registered_level')} · {gd.get('exam_name') or gd.get('data_year') or '?'} · {passed} · {score}"
+                            )
+                    except Exception as _ge:
+                        import logging as _lg
+                        _lg.getLogger("luogu_evaluator").error(
+                            f"[v3.9.50 /generate_parent_subscribe] 查 GESP 失败 sid={sid_int}: {_ge}",
+                            exc_info=True,
                         )
                     # 同步取 CSP/NOIP/NOI 奖项
+                    # v3.9.50 · 同上：兜底 + 日志，避免单个 query 失败导致整个档案拉取断流
                     award_lines = []
-                    for a in conn.execute(
-                        "SELECT competition_type, award_level, award_year, actual_score, province, certificate_no "
-                        "FROM csp_awards WHERE student_id = ? ORDER BY award_year DESC",
-                        (sid_int,),
-                    ).fetchall():
-                        ad = dict(a)
-                        type_label = {
-                            "csp_j_pre": "CSP-J 初赛", "csp_j_final": "CSP-J 复赛",
-                            "csp_s_pre": "CSP-S 初赛", "csp_s_final": "CSP-S 复赛",
-                            "noip_1": "NOIP 普及组", "noi_bronze": "NOI 铜牌",
-                            "noi_silver": "NOI 银牌", "noi_gold": "NOI 金牌",
-                        }.get(ad.get("competition_type") or "", ad.get("competition_type") or "?")
-                        level_label = {
-                            "excellent": "优秀", "first": "一等", "second": "二等",
-                            "third": "三等", "bronze": "铜牌", "silver": "银牌", "gold": "金牌",
-                        }.get(ad.get("award_level") or "", ad.get("award_level") or "?")
-                        score = f" · {ad.get('actual_score')}分" if ad.get("actual_score") else ""
-                        prov = f" · {ad.get('province')}" if ad.get("province") else ""
-                        award_lines.append(
-                            f"  - {ad.get('award_year')} {type_label} {level_label}{score}{prov}"
+                    try:
+                        for a in conn.execute(
+                            "SELECT competition_type, award_level, award_year, actual_score, province, certificate_no "
+                            "FROM csp_awards WHERE student_id = ? ORDER BY award_year DESC",
+                            (sid_int,),
+                        ).fetchall():
+                            ad = dict(a)
+                            type_label = {
+                                "csp_j_pre": "CSP-J 初赛", "csp_j_final": "CSP-J 复赛",
+                                "csp_s_pre": "CSP-S 初赛", "csp_s_final": "CSP-S 复赛",
+                                "noip_1": "NOIP 普及组", "noi_bronze": "NOI 铜牌",
+                                "noi_silver": "NOI 银牌", "noi_gold": "NOI 金牌",
+                            }.get(ad.get("competition_type") or "", ad.get("competition_type") or "?")
+                            level_label = {
+                                "excellent": "优秀", "first": "一等", "second": "二等",
+                                "third": "三等", "bronze": "铜牌", "silver": "银牌", "gold": "金牌",
+                            }.get(ad.get("award_level") or "", ad.get("award_level") or "?")
+                            score = f" · {ad.get('actual_score')}分" if ad.get("actual_score") else ""
+                            prov = f" · {ad.get('province')}" if ad.get("province") else ""
+                            award_lines.append(
+                                f"  - {ad.get('award_year')} {type_label} {level_label}{score}{prov}"
+                            )
+                    except Exception as _ce:
+                        import logging as _lg
+                        _lg.getLogger("luogu_evaluator").error(
+                            f"[v3.9.50 /generate_parent_subscribe] 查 CSP/NOIP/NOI 失败 sid={sid_int}: {_ce}",
+                            exc_info=True,
                         )
                     profile_block_lines = [
                         f"- 姓名：{sd.get('real_name') or '未填'}",

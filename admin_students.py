@@ -554,15 +554,19 @@ def get_student_award_summary(student_id: int) -> dict:
 
 # 学段判定（基于 grade 字段 · GRADES_REGISTRATION 编码）
 STAGE_PRIMARY = "primary"        # 小学 1-6
-STAGE_JUNIOR  = "junior"        # 初中 1-3
-STAGE_SENIOR  = "senior"        # 高中 1-3
-# v3.5.4: NOI 不再面向大学生，删除 STAGE_UNIVERSITY
+STAGE_JUNIOR  = "junior"         # 初中 1-3
+STAGE_SENIOR  = "senior"         # 高中 1-3
+# v3.9.47 · 重新引入 STAGE_UNIV（"大学"），与高中分开展示
+# 之前 v3.5.4 因 NOI 不再面向大学生而把 UNIV_* 兜底为 senior，但现在用户
+# 要求把"大学"独立成段，UI Tab 用「大学」字样展示。已毕业 (GRADUATED) 仍走 senior。
+STAGE_UNIV    = "univ"           # 大学 1-4
 
 
 def _grade_to_stage(grade: str | None) -> str:
     """根据 GRADES_REGISTRATION 编码判定学段
 
     v3.5.4 修订：NOI 不再面向大学生，未识别 grade 兜底为 senior
+    v3.9.47 修订：UNIV_* 独立为 STAGE_UNIV，与高中分开（用户要求显示「大学」Tab）
     """
     if not grade:
         return STAGE_SENIOR  # 默认高中
@@ -571,10 +575,9 @@ def _grade_to_stage(grade: str | None) -> str:
         return STAGE_PRIMARY
     if g.startswith("JUNIOR_"):
         return STAGE_JUNIOR
-    if g.startswith("SENIOR_"):
-        return STAGE_SENIOR
     if g.startswith("UNIV_"):
-        # v3.5.4: 历史数据兼容 — UNIV_* 兜底为 senior
+        return STAGE_UNIV  # v3.9.47 · 大学独立成段
+    if g.startswith("SENIOR_") or g == "GRADUATED":
         return STAGE_SENIOR
     return STAGE_SENIOR
 

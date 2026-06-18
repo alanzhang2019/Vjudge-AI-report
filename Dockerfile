@@ -34,6 +34,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libasound2 \
     && rm -rf /var/lib/apt/lists/*
 
+# v3.9.52 · 装 Google Chrome 稳定版 (Playwright channel="chrome" 需要)
+# 用真 Chrome 比 chromium 触发洛谷的 bot 检测概率低很多, C3VK 能正常下发
+RUN wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends /tmp/chrome.deb \
+    && rm -f /tmp/chrome.deb \
+    && rm -rf /var/lib/apt/lists/* \
+    && google-chrome --version || echo "google-chrome 安装失败, 退回 Playwright chromium"
+
 # 刷新字体缓存
 RUN fc-cache -fv
 

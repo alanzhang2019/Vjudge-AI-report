@@ -1,4 +1,4 @@
-﻿# ============================================================================
+# ============================================================================
 # luogu-AI-report 一键部署脚本（Windows 客户端）
 # 用法（在 PowerShell 里）：
 #   .\deploy.ps1                                 # 默认：打包+scp+调用服务器 deploy.sh
@@ -108,7 +108,7 @@ function New-Package {
         & $tarExe -czf $PkgPath -- *
         Set-Location $oldLocation
         Remove-Item -Recurse -Force $staging
-        $ZipPath = $PkgPath   # 改用 .tar.gz 路径
+        $script:ZipPath = $PkgPath   # 改用 .tar.gz 路径（v3.9.42+：用 $script: 写回外层作用域）
     } else {
         Compress-Archive -Path "$staging\*" -DestinationPath $ZipPath -CompressionLevel Optimal
         Remove-Item -Recurse -Force $staging

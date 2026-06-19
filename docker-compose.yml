@@ -26,6 +26,8 @@ services:
       - tasks-data:/app/data
       # 洛谷题目缓存 - 命名卷
       - source-cache:/app/.source_cache
+      # v3.9.72 · 洛谷接入一键开关文件（容器重建/升级不丢）
+      - ./luogu_killswitch.json:/app/luogu_killswitch.json
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/', timeout=5).read()"]
       interval: 30s

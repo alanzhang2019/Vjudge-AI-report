@@ -733,6 +733,288 @@ def repair_behavior_analysis_from_items(export_data: dict) -> dict:
     return repaired
 
 
+def _level_status_for_gesp(
+    level_info: dict,
+    top_tags_map: dict[str, int],
+    diff_hist: dict[str | int, int],
+    passed_levels: set[int],
+    level: int,
+) -> tuple[str, str, int, str]:
+    """v3.9.66 · 计算学员在某个 GESP 级别下的状态。
+
+    Returns:
+        (status_emoji_text, core_tags_matched, max_diff_ac, risk_text)
+    """
+    core_tags = level_info.get("core_tags") or []
+    themes = level_info.get("themes") or []
+    max_diff = int(level_info.get("max_difficulty") or 1)
+
+    # 1) 真考直通：学员 GESP 真考已通过该级（最权威）
+    if level in passed_levels:
+        return ("🟢已掌握", len(core_tags), 0, "GESP 真考已通过（最权威）")
+
+    # 2) 计算 core_tags 在学员 top_tags 里的命中数
+    matched_tags = [t for t in core_tags if t in top_tags_map]
+    matched_n = len(matched_tags)
+    coverage = matched_n / max(1, len(core_tags))
+
+    # 3) 计算学员在该级要求难度区间内 AC 题数（d ≤ max_diff）
+    max_diff_ac = 0
+    for d in range(1, max_diff + 1):
+        max_diff_ac += int(diff_hist.get(str(d), diff_hist.get(d, 0)))
+
+    if max_diff_ac == 0 and matched_n == 0:
+        status = "🔴未接触"
+        risk = "学员在洛谷上未训练过该级任何题目，AI 估算无依据"
+    elif coverage >= 0.8 and max_diff_ac >= 30:
+        status = "🟢已掌握"
+        risk = f"已覆盖 {matched_n}/{len(core_tags)} 核心 tag，难度覆盖充分（{max_diff_ac} 题）"
+    elif coverage >= 0.5 and max_diff_ac >= 10:
+        status = "🟡部分掌握"
+        risk = f"覆盖 {matched_n}/{len(core_tags)} tag，建议补齐缺失项"
+    elif matched_n >= 1 or max_diff_ac >= 1:
+        status = "🟠薄弱"
+        risk = f"仅覆盖 {matched_n}/{len(core_tags)} tag，难度覆盖偏少（{max_diff_ac} 题）"
+    else:
+        status = "🔴未接触"
+        risk = "无 GESP 真考 + 无洛谷相关 tag 训练"
+
+    return (status, matched_n, max_diff_ac, risk)
+
+
+def build_gesp_trusted_data_summary_md(
+    export_data: dict,
+    target_level: int = 1,
+    highest_passed: int = 0,
+) -> str:
+    """v3.9.66 · GESP 报告专用可信块。
+
+    跟 NOI 版（`build_trusted_data_summary_md`）的关键区别：
+      1. **不再注入 NOI 4 级（入门/提高/省选/NOI）知识树**——GESP 报告按 8 级展开
+      2. 新增"GESP 8 级知识地图"表，1-8 级全列
+      3. 每级显示：主题 / 关键知识点（top 3） / 学员状态 / 核心 tag 覆盖 / 难度覆盖 / 风险点
+      4. 状态判定优先级：GESP 真考 > 洛谷 tag 覆盖 + 难度覆盖 > 默认未接触
+
+    Args:
+        export_data: 与 NOI 版共享的 export_data
+        target_level: 学员目标 GESP 级别（1-8），用于高亮目标行
+        highest_passed: 学员已通过的最高 GESP 级别（0=无），用于状态判断
+
+    Returns:
+        str: Markdown 字符串，包含 "## 数据校准与真实统计" 主标题
+    """
+    student_info = export_data.get("student_info", {}) or {}
+    eval_time = str(student_info.get("eval_time") or "")
+    summary = export_data.get("summary", {}) or {}
+    diff_hist = summary.get("difficulty_histogram", {}) or {}
+
+    # 解析 top_tags → {tag_name: count} 映射
+    top_tags_list = summary.get("top_algorithm_tags", []) or summary.get("top_tags", []) or []
+    top_tags_map: dict[str, int] = {}
+    for item in top_tags_list:
+        if isinstance(item, dict):
+            name = str(item.get("name") or item.get("id") or "").strip()
+            count = int(item.get("count", 0) or 0)
+            if name:
+                top_tags_map[name] = top_tags_map.get(name, 0) + count
+
+    passed_levels = set(int(x) for x in (highest_passed and [highest_passed]) or [])
+
+    # 难度分布统计
+    total_ac = 0
+    for d in range(1, 8):
+        total_ac += int(diff_hist.get(str(d), diff_hist.get(d, 0)))
+    total_ac = total_ac or 1
+
+    lines = [
+        "## 数据校准与真实统计（GESP 8 级版）",
+        f"- 报告生成时间：{eval_time or '未知'}",
+        f"- 测评体系：**GESP**（1-8 级）· 目标级别：**GESP {target_level} 级** · 已通过最高级：{highest_passed or '暂无'}",
+        "",
+        "> ⚠️ v3.9.66 · 本节按 **GESP 1-8 级官方考纲** 展示学员覆盖度，"
+        "不再使用 NOI/CSP 4 级（入门/提高/省选/NOI）体系。"
+        "GESP 1-3 级（基础编程 / 顺序分支 / 数组字符串 / 排序函数）在洛谷上题目较少，"
+        "若学员 GESP 真考已通过，**直接信任**真考结果；若仅看洛谷数据，"
+        "**不要轻易判定『未掌握』**——可能只是没在洛谷上训练。",
+        "",
+        "### 难度分布（程序生成）",
+        '<table><thead><tr><th>洛谷难度</th><th>题数</th><th>占比</th><th>分布图</th></tr></thead><tbody>',
+    ]
+
+    for level in range(1, 8):
+        count = int(diff_hist.get(str(level), diff_hist.get(level, 0)))
+        name = DIFFICULTY_NAME_MAP[level]
+        color = DIFFICULTY_COLOR_MAP[level]
+        pct = count * 100 / total_ac
+        badge = (
+            f'<span style="display:inline-block;padding:2px 10px;border-radius:6px;'
+            f'background:{color};color:#fff;font-weight:600;">{name}</span>'
+        )
+        lines.append(
+            "<tr>"
+            f"<td>{badge}</td>"
+            f"<td>{count}</td>"
+            f"<td>{pct:.1f}%</td>"
+            f"<td>{_render_progress_bar(pct, color)} <span style=\"margin-left:8px;\">{pct:.1f}%</span></td>"
+            "</tr>"
+        )
+    lines.extend(["</tbody></table>", ""])
+
+    # ===== 核心：GESP 8 级知识地图 =====
+    lines.extend([
+        "### GESP 8 级知识地图 · 学员覆盖度",
+        '<table><thead><tr>'
+        '<th>级别</th><th>名称</th><th>主题</th><th>学员状态</th>'
+        '<th>核心 tag 覆盖</th><th>难度覆盖</th><th>风险 / 备注</th>'
+        '</tr></thead><tbody>',
+    ])
+
+    for lv in range(1, 9):
+        info = GESP_LEVELS[lv]
+        status, matched_n, max_diff_ac, risk = _level_status_for_gesp(
+            info, top_tags_map, diff_hist, passed_levels, lv,
+        )
+        core_tags = info.get("core_tags") or []
+        themes = info.get("themes") or []
+        max_diff = int(info.get("max_difficulty") or 1)
+        total_core = len(core_tags)
+
+        # 目标级别行高亮
+        row_style = ""
+        if lv == target_level:
+            row_style = ' style="background:#FEF3C7;border-left:4px solid #F59E0B;" '
+        elif lv < target_level:
+            row_style = ' style="background:#F0FDF4;" '  # 浅绿：已通过或目标前的级别
+        elif lv == target_level + 1:
+            row_style = ' style="background:#EFF6FF;" '  # 浅蓝：下一跳级目标
+
+        # 核心 tag 显示：已匹配 / 总数
+        if total_core == 0:
+            tag_cov_cell = "—"
+        else:
+            pct = matched_n * 100 / total_core
+            tag_cov_cell = (
+                f'<span style="font-weight:600;">{matched_n}/{total_core}</span>'
+                f'<br><span style="color:#6b7280;font-size:11px;">{pct:.0f}%</span>'
+            )
+
+        # 难度覆盖
+        if max_diff_ac == 0:
+            diff_cell = '<span style="color:#9ca3af;">0 题</span>'
+        elif max_diff_ac >= 30:
+            diff_cell = f'<span style="color:#16A34A;font-weight:600;">{max_diff_ac} 题</span>'
+        else:
+            diff_cell = f'{max_diff_ac} 题'
+
+        # 主题 + 关键知识点提示
+        themes_str = " / ".join(themes[:3]) + ("…" if len(themes) > 3 else "")
+
+        # 学员状态徽章
+        if "🟢" in status:
+            status_badge = (
+                f'<span style="display:inline-block;padding:2px 10px;border-radius:10px;'
+                f'background:#16A34A;color:#fff;font-size:12px;font-weight:600;">{status}</span>'
+            )
+        elif "🟡" in status:
+            status_badge = (
+                f'<span style="display:inline-block;padding:2px 10px;border-radius:10px;'
+                f'background:#CA8A04;color:#fff;font-size:12px;font-weight:600;">{status}</span>'
+            )
+        elif "🟠" in status:
+            status_badge = (
+                f'<span style="display:inline-block;padding:2px 10px;border-radius:10px;'
+                f'background:#EA580C;color:#fff;font-size:12px;font-weight:600;">{status}</span>'
+            )
+        elif "🔴" in status:
+            status_badge = (
+                f'<span style="display:inline-block;padding:2px 10px;border-radius:10px;'
+                f'background:#DC2626;color:#fff;font-size:12px;font-weight:600;">{status}</span>'
+            )
+        else:
+            status_badge = status
+
+        # 目标级标记
+        lv_name = info.get("name", f"GESP {lv} 级")
+        if lv == target_level:
+            lv_name = f"🎯 **{lv_name}**（目标）"
+        elif highest_passed and lv == highest_passed:
+            lv_name = f"✅ {lv_name}"
+
+        lines.append(
+            f"<tr{row_style}>"
+            f"<td><strong>{lv}</strong></td>"
+            f"<td>{lv_name}</td>"
+            f"<td style=\"font-size:12px;color:#374151;\">{themes_str}</td>"
+            f"<td>{status_badge}</td>"
+            f"<td>{tag_cov_cell}</td>"
+            f"<td>≤{DIFFICULTY_NAME_MAP.get(max_diff, '?')}: {diff_cell}</td>"
+            f"<td style=\"font-size:12px;color:#4b5563;\">{risk}</td>"
+            "</tr>"
+        )
+
+    lines.extend([
+        "</tbody></table>",
+        "",
+        "- 口径说明：",
+        "  - **学员状态**判定优先级：`GESP 真考` > `洛谷核心 tag 覆盖度 × 难度覆盖` > 默认未接触；",
+        "  - **核心 tag 覆盖** = 学员洛谷做题数据中匹配该级 `core_tags` 的数量 / 该级 `core_tags` 总数；",
+        "  - **难度覆盖** = 学员 AC 题数中，难度 ≤ 该级 `max_difficulty` 的题目总数；",
+        "  - **GESP 1-3 级**（基础编程 / 顺序分支 / 数组字符串）在洛谷上可用题源较少，"
+        "若学员 GESP 真考已通过，**直接信任**真考结果；",
+        "  - 🎯 黄色行 = 目标级别，✅ 绿色行 = 学员已通过最高级。",
+    ])
+
+    return "\n".join(lines)
+
+
+def _build_gesp_difficulty_section_md(export_data: dict) -> str:
+    """v3.9.66 · GESP 报告的"难度分布"小节（NOI 版用的是"水平研判"，这里保留）"""
+    summary = export_data.get("summary", {}) or {}
+    hist = summary.get("difficulty_histogram", {}) or {}
+    solved = int(export_data.get("solved_count", 0))
+    failed = int(export_data.get("failed_count", 0))
+    total_attempted = solved + failed
+
+    def _count(levels: list[int]) -> int:
+        s = 0
+        for lv in levels:
+            s += int(hist.get(str(lv), hist.get(lv, 0)))
+        return s
+
+    z1 = _count([1, 2, 3])
+    z2 = _count([4, 5])
+    z3 = _count([6])
+    z4 = _count([7])
+    z_total = max(1, z1 + z2 + z3 + z4)
+
+    def _pct(v: int) -> str:
+        return f"{(v * 100 / z_total):.1f}%"
+
+    avg_info = summarize_average_difficulty(hist)
+    avg_label = str(avg_info.get("label") or "")
+
+    lines = [
+        "## 3. 难度分布与水平研判（GESP 版）",
+        "",
+        "![](assets/difficulty_histogram.png)",
+        "",
+        "![](assets/status_ratio.png)",
+        "",
+        f"- 平均难度：{avg_label}（均值 {float(avg_info.get('average_value') or 0):.2f}）",
+        f"- 题目覆盖区间：入门~普及/提高-(1-3) {z1} 题（{_pct(z1)}）；"
+        f"普及+/提高~提高+/省选-(4-5) {z2} 题（{_pct(z2)}）；"
+        f"省选/NOI-(6) {z3} 题（{_pct(z3)}）；"
+        f"NOI/NOI+/CTSC(7) {z4} 题（{_pct(z4)}）。",
+    ]
+    if total_attempted > 0:
+        lines.append(f"- 通过/未通过：已通过 {solved} 题，未通过 {failed} 题（总尝试 {total_attempted}）。")
+    lines.append("")
+    lines.append("> 💡 GESP 备考口径：学员在洛谷上的难度分布只是参考，"
+                "GESP 真考级别才是最权威的能力基线。GESP 1-3 级（基础编程）的题目"
+                "在洛谷上少，建议以真考分 + 官方考纲为主，不要被洛谷数据误导。")
+    return "\n".join(lines)
+
+
 def build_trusted_data_summary_md(export_data: dict) -> str:
     student_info = export_data.get("student_info", {}) or {}
     eval_time = str(student_info.get("eval_time") or "")
@@ -1616,10 +1898,22 @@ def build_knowledge_tree_html(syllabus_eval: dict) -> str:
 
 
 # 重建场景：先抹掉已注入的可信块，再走 normalize_report_markdown 重新注入。
-# strip 范围：从 H2「数据校准与真实统计」开始，一直吞到 H2「掌握度判定标准」之前
-# （H2 掌握度判定标准 / 知识树图谱 也是 inject 的一部分，但下一次 inject 会自动重建）
+# strip 范围：
+#   1) 从 H2「数据校准与真实统计」开始 → H2「掌握度判定标准（5 档）」之前
+#      （统计表部分）。GESP 版块内没有此 H2，所以 fallback 到 H1（`^\s*#\s`）边界。
+#   2) 再单独抹掉 H2「掌握度判定标准（5 档）」及其后续 5 档表 + 「🌳 知识树图谱」HTML 块
+#      （NOI 版会在这里塞 4 棵 SVG 树；GESP 版则没有此块）
+# v3.9.66 · 同时兼容 GESP 版「数据校准与真实统计（GESP 8 级版）」标题
+# v3.9.66 · 修 GESP 块无 `## 掌握度判定标准` 锚点时被 `\Z` 贪婪吞 H1 的 bug
 _TRUSTED_BLOCK_RE = re.compile(
-    r"(?ms)^##\s*数据校准与真实统计\s*\n.*?(?=^##\s*掌握度判定标准|\Z)"
+    r"(?ms)^##\s*数据校准与真实统计(?:（GESP 8 级版）)?\s*\n.*?(?=^##\s*掌握度判定标准|^\s*#\s|\Z)"
+)
+# 抹除「掌握度判定标准（5 档）」表 + 之后紧邻的「🌳 知识树图谱」HTML 块
+# （NOI 4 棵 SVG 树嵌在三层 div 里：最外层 page-break div → kt-section → kt-grid）
+# 需要匹配到第三个 `</div>` 之后才能完整抹除。
+# GESP 块内没有此标题，跳过即可。
+_KT_SECTION_RE = re.compile(
+    r"(?ms)^##\s*掌握度判定标准[^\n]*\n.*?(?:🌳\s*知识树图谱.*?(?:</div>\s*){3,}|^\s*#\s|\Z)"
 )
 
 
@@ -1628,13 +1922,64 @@ def remove_injected_trusted_block(report_md: str) -> str:
     重新注入最新代码生成的版本。
 
     Prompt 已禁止 AI 写这些标题，所以抹掉 inject 不会误伤 AI 内容。
+
+    v3.9.66 · 同时兼容 GESP 版的"## 数据校准与真实统计（GESP 8 级版）"标题。
+    v3.9.66 · 同时抹除"## 掌握度判定标准"之后的 5 档表 + NOI 4 棵 SVG 树。
     """
     if "## 数据校准与真实统计" not in report_md:
         return report_md
-    return _TRUSTED_BLOCK_RE.sub("", report_md, count=1)
+    md = _TRUSTED_BLOCK_RE.sub("", report_md, count=1)
+    if "## 掌握度判定标准" in md:
+        md = _KT_SECTION_RE.sub("", md, count=1)
+    return md
 
 
-def normalize_report_markdown(report_md: str, export_data: dict) -> str:
+# v3.9.67 · GESP 报告专用：抹除 LLM 在主体里可能输出的"8 级知识地图"表
+# 用户实测：模型凭印象写"GESP 一级 100% 覆盖"、与末尾程序化表"GESP 一级 0/5 tag"打架
+# 规则：只抹 GESP 报告里、报告主体（非末尾程序化小节）、LLM 输出的那张 8 级表
+# 保留末尾"## 数据校准与真实统计（GESP 8 级版）"里的程序化版本（那是真相源）
+_LLM_GESP_8LEVEL_HEADINGS = [
+    r"#{1,6}\s*(?:【|‹)?\s*GESP\s*8\s*级知识地图[^#\n]*",  # 含 8 级知识地图 标题
+    r"#{1,6}\s*(?:【|‹)?\s*学员覆盖度\s*[\-·—]?\s*GESP\s*8\s*级[^#\n]*",
+    r"#{1,6}\s*【GESP\s*8\s*级知识地图[^#\n]*】",
+]
+_LLM_GESP_8LEVEL_RE = re.compile(
+    r"(?ms)^(#{1,6}\s*(?:【|‹)?\s*GESP\s*8\s*级知识地图[^#\n]*\n)"  # 标题
+    r"(?:.*?\n)*?"                                                          # 标题到表格之间的描述段
+    r"(?:\|[^\n]*\|[ \t]*\n)+"                                              # 至少 1 行 markdown 表格行
+    r"[^\n]*\n?"                                                            # 表尾说明（可选）
+)
+
+
+def _strip_llm_gesp_8level_table(report_md: str) -> str:
+    """v3.9.67 · 抹除 GESP 报告里 LLM 主体中的"8 级知识地图"表
+
+    实现策略（保守，不误伤）：
+      1) 用一段保守 regex 匹配 "## ... GESP 8 级知识地图 ..." 整段标题 + 后续行；
+      2) 抹除范围：标题行 + 后续行，直到下一个 # 标题或文件末尾；
+      3) 末尾"## 数据校准与真实统计（GESP 8 级版）"小节不会被抹，
+         因为它在独立的 # 标题下，与 LLM 8 级表无关联。
+    """
+    if "GESP 8 级知识地图" not in report_md:
+        return report_md
+    # 抹除规则：找到含 8 级知识地图 的标题（允许标题前有"二、"等编号）→ 抹到下一个标题前
+    new_md = re.sub(
+        r"(?ms)^[ \t]*#{1,6}[ \t]*[^\n]*?GESP[ \t]*8[ \t]*级知识地图[^\n]*\n"  # 标题行（允许前面有"二、"等任意文本）
+        r"(?:[^\n]*\n)*?"  # 后续行（非贪婪）
+        r"(?=^[ \t]*#{1,6}[ \t]*\S|\Z)",  # 直到下一个 # 标题或文件末尾
+        "",
+        report_md,
+    )
+    return new_md
+
+
+def normalize_report_markdown(
+    report_md: str,
+    export_data: dict,
+    exam_type: str = "noi_csp",
+    target_gesp_level: int = 1,
+    gesp_highest_passed: int = 0,
+) -> str:
     """对 AI 输出做最小必要的纠偏，锁定难度名称并修正明显错误表述。
 
     调用次数语义：
@@ -1642,31 +1987,47 @@ def normalize_report_markdown(report_md: str, export_data: dict) -> str:
     - 第二次（输入 = 已注入过可信块的 report.md）：**整段直接返回**，避免把"已注入的
       知识点覆盖统计表/知识树"被 strip 误吞（这是上一版"幂等修复"的副作用）
     - 重建场景：调用方应先 `remove_injected_trusted_block()` 再走本函数
+
+    v3.9.66 · 新增 exam_type 分支：
+      - "noi_csp"（默认）：注入 NOI 4 级（入门/提高/省选/NOI）知识树（原行为）
+      - "gesp"：注入 GESP 8 级知识地图（新行为，不再注入 NOI 4 级知识树）
     """
+    _is_gesp = str(exam_type or "noi_csp").strip().lower() == "gesp"
+
     # 幂等：已注入过可信块 → 跳过 strip + 跳过 inject，原样返回
-    if (
-        "## 数据校准与真实统计" in report_md
-        and "知识树图谱（按算法标签" in report_md
-    ):
-        return report_md
+    if _is_gesp:
+        # GESP 版：检测是否已注入过 GESP 版可信块
+        if (
+            "## 数据校准与真实统计（GESP 8 级版）" in report_md
+        ):
+            return report_md
+    else:
+        if (
+            "## 数据校准与真实统计" in report_md
+            and "知识树图谱（按算法标签" in report_md
+        ):
+            return report_md
 
     normalized = report_md
 
-    normalized = re.sub(
-        r"(?ms)^\s{0,3}#{2,6}\s*知识点覆盖统计表（按算法标签）\s*\n+.*?(?=^\s{0,3}#{2,6}\s|\Z)",
-        "",
-        normalized,
-    )
-    normalized = re.sub(
-        r"(?ms)^\s{0,3}#{2,6}\s*知识点覆盖表（按算法标签统计）\s*\n+.*?(?=^\s{0,3}#{2,6}\s|\Z)",
-        "",
-        normalized,
-    )
-    normalized = re.sub(
-        r"(?ms)^\s{0,3}#{2,6}\s*知识树[^\n]*\n+.*?(?=^\s{0,3}#{2,6}\s|\Z)",
-        "",
-        normalized,
-    )
+    # v3.9.66 · GESP 版不再 strip "知识树"——因为 prompt 禁止 AI 写，且 GESP 版
+    # 不会注入 NOI 知识树。NOI 版继续按 v3.9.48 行为 strip 掉 AI 误重复生成的统计表/树。
+    if not _is_gesp:
+        normalized = re.sub(
+            r"(?ms)^\s{0,3}#{2,6}\s*知识点覆盖统计表（按算法标签）\s*\n+.*?(?=^\s{0,3}#{2,6}\s|\Z)",
+            "",
+            normalized,
+        )
+        normalized = re.sub(
+            r"(?ms)^\s{0,3}#{2,6}\s*知识点覆盖表（按算法标签统计）\s*\n+.*?(?=^\s{0,3}#{2,6}\s|\Z)",
+            "",
+            normalized,
+        )
+        normalized = re.sub(
+            r"(?ms)^\s{0,3}#{2,6}\s*知识树[^\n]*\n+.*?(?=^\s{0,3}#{2,6}\s|\Z)",
+            "",
+            normalized,
+        )
 
     for idx, name in DIFFICULTY_NAME_MAP.items():
         normalized = re.sub(rf"难度\s*{idx}\b", name, normalized)
@@ -1737,14 +2098,36 @@ def normalize_report_markdown(report_md: str, export_data: dict) -> str:
         lines.append("结论：以难度分布与通过比例为准，当前训练重心应优先覆盖 4-6 档的典型模型题，避免只在 1-3 档堆题量。")
         return "\n".join(lines)
 
-    # 用“图表 + 程序生成说明”替换 AI 的 ASCII 条形图段落，避免乱码/难读
-    normalized = re.sub(
-        r"(?ms)^\s{0,3}#{2,6}\s*3\.\s*难度分布与水平研判\s*\n+.*?(?=^\s{0,3}#{2,6}\s|\Z)",
-        _build_difficulty_chart_section_md() + "\n\n",
-        normalized,
-    )
+    # 用"图表 + 程序生成说明"替换 AI 的 ASCII 条形图段落，避免乱码/难读
+    # v3.9.66 · GESP 版使用专门的"难度分布（GESP 版）"小节标题
+    if _is_gesp:
+        normalized = re.sub(
+            r"(?ms)^\s{0,3}#{2,6}\s*3\.\s*难度分布[^\n]*\n+.*?(?=^\s{0,3}#{2,6}\s|\Z)",
+            _build_gesp_difficulty_section_md(export_data) + "\n\n",
+            normalized,
+        )
+    else:
+        normalized = re.sub(
+            r"(?ms)^\s{0,3}#{2,6}\s*3\.\s*难度分布与水平研判\s*\n+.*?(?=^\s{0,3}#{2,6}\s|\Z)",
+            _build_difficulty_chart_section_md() + "\n\n",
+            normalized,
+        )
 
-    trusted_block = build_trusted_data_summary_md(export_data)
+    # v3.9.67 · GESP 报告防御：LLM 万一还在主体里输出了"8 级知识地图"表（用户已实测
+    # 看到模型凭印象写 100% 覆盖、跟末尾程序化表 0/5 tag 打架），这里强制抹除。
+    if _is_gesp:
+        normalized = _strip_llm_gesp_8level_table(normalized)
+
+    # v3.9.66 · 注入可信块：NOI 版 vs GESP 版
+    if _is_gesp:
+        trusted_block = build_gesp_trusted_data_summary_md(
+            export_data,
+            target_level=int(target_gesp_level or 1),
+            highest_passed=int(gesp_highest_passed or 0),
+        )
+    else:
+        trusted_block = build_trusted_data_summary_md(export_data)
+
     heading_match = re.match(r"^(# .+\n+)", normalized)
     if heading_match:
         head = heading_match.group(1)
@@ -2506,19 +2889,73 @@ GESP_LEVELS: dict[int, dict] = {
     },
     8: {
         "name": "GESP 八级 · 高级算法",
-        "themes": ["计数原理", "排列组合", "杨辉三角", "倍增法", "图论应用", "算法优化"],
-        "key_points": [
-            "计数原理（加法 / 乘法）",
+        # v3.9.65 · 严格按 CCF GESP C++&Python 八级标准（一）（1）-（8）补全，
+        # 见 GESP考纲.pdf.txt 第 793-869 行。
+        "themes": [
+            "计数原理",
             "排列与组合",
             "杨辉三角",
-            "倍增法（二分倍增）",
-            "代数与平面几何（初中数学）",
-            "最小生成树（Kruskal / Prim）",
-            "单源最短路（Dijkstra / SPFA）",
-            "较复杂算法的时空复杂度分析 + 算法优化",
+            "倍增法",
+            "代数与平面几何",
+            "图论算法及综合应用",
+            "算法时间/空间效率分析",
+            "算法优化",
+        ],
+        "key_points": [
+            # (1) 计数原理
+            "加法原理（互斥事件的方案数 = 各方案数之和）",
+            "乘法原理（分步事件的方案数 = 各步方案数之积）",
+            "加法原理 vs 乘法原理的判定（分类 vs 分步）",
+            # (2) 排列与组合
+            "排列 A(n,k) = n! / (n-k)! 的定义与计算",
+            "组合 C(n,k) = n! / (k! (n-k)!) 的定义与计算",
+            "排列组合编程：枚举 / 递推 / 卢卡斯定理（入门）",
+            "常见组合恒等式（C(n,k)=C(n,n-k)、杨辉递推）",
+            # (3) 杨辉三角
+            "杨辉三角（帕斯卡三角）的定义：C(n,k) = C(n-1,k-1) + C(n-1,k)",
+            "杨辉三角的编程实现（递推 / 二维数组 / 单行滚动）",
+            "杨辉三角与组合数的关系",
+            # (4) 倍增法
+            "倍增法（二分倍增）思想：用 2 的幂次拼出任意步长",
+            "倍增法时间复杂度：O(log N) 次迭代",
+            "ST 表 / 树上倍增 LCA 等典型倍增应用（概念）",
+            # (5) 代数与平面几何（限初中数学）
+            "一元一次方程的求解（编程实现：移项 + 系数化 1）",
+            "二元一次方程组的求解（消元法 / 代入法）",
+            "平面几何基础图形的面积：长方形 / 正方形 / 三角形 / 圆形 / 梯形",
+            "基础平面几何概念（周长、面积、相似三角形入门）",
+            # (6) 图论算法及综合应用
+            "最小生成树（MST）概念：n 个点用 n-1 条边连通且权值和最小",
+            "Kruskal 算法（按边权排序 + 并查集判环）",
+            "Prim 算法（按点扩展，类 Dijkstra 思想）",
+            "单源最短路径概念",
+            "Dijkstra 算法（非负权图，O((n+m) log n)）",
+            "SPFA / Bellman-Ford（含负权边的单源最短路）",
+            "Floyd 多源最短路径（O(n³) 动态规划）",
+            "图论综合应用：MST + 最短路、差分约束（入门概念）",
+            # (7) 算法时间/空间效率分析
+            "时间复杂度一般分析方法（循环层数 × 内层执行次数）",
+            "空间复杂度一般分析方法（递归栈 / 数组 / 哈希表占用）",
+            "排序算法（冒泡 / 插入 / 选择 / 归并 / 快速 / 堆排）复杂度对比",
+            "查找算法（顺序 / 二分 / 哈希）复杂度对比",
+            "树 / 图的遍历（DFS / BFS）复杂度：O(n+m)",
+            "搜索算法（回溯 / BFS / DFS）复杂度",
+            "分治算法（归并 / 快速排序）复杂度：O(n log n)",
+            "动态规划（DP）算法的时间/空间复杂度",
+            # (8) 算法优化
+            "不同算法求解同一问题的复杂度差异（如：枚举求和 vs 等差数列公式）",
+            "算法优化的一般方法：剪枝 / 预处理 / 哈希 / 二分 / 数学化简",
+            "用数学知识优化算法：等差数列求和公式 n(a₁+aₙ)/2",
+            "用数学知识优化算法：等比数列求和公式 a₁(1-qⁿ)/(1-q)",
+            "用数学知识优化算法：前缀和 / 差分替代 O(n²) 区间操作",
         ],
         "max_difficulty": 6,  # 省选/NOI-
-        "core_tags": ["组合数学", "倍增", "最小生成树", "最短路", "算法优化"],
+        "core_tags": [
+            "组合数学", "排列组合", "杨辉三角", "倍增",
+            "代数方程", "平面几何",
+            "最小生成树", "最短路", "Dijkstra", "Floyd", "Kruskal", "Prim",
+            "时间复杂度", "空间复杂度", "算法优化",
+        ],
     },
 }
 
@@ -2573,6 +3010,12 @@ def _build_gesp_prompt(
 
 **报告生成时间**：{current_time}
 **目标 GESP 级别**：{target_level} 级（{GESP_LEVELS.get(target_level, {}).get('name', '?')}）
+> ⚠️ v3.9.65 · 本目标级别由系统按"就高不就低"原则自动判定，优先级：
+>   1) 学员 GESP 真考最高级 + 该级最近分（CCF 跳级规则：60-89 → N+1；90+ → N+2；封顶 8）
+>   2) 学员自录最高级（兜底）
+>   3) 洛谷通过题数 AI 估算
+>   4) 全新学员默认 1 级
+> 如果学员已通过较高 GESP 级（≥ 3 级），**不要再建议下调到 1 级去"打基础"**——可以直接基于目标级别做备考路线图，并显式给出"保底通过 1 级（如有需要）+ 跳级冲高"双策略。
 
 ### GESP 8 级官方考纲（CCF 2025 版）
 {gesp_outline_md}
@@ -2589,11 +3032,34 @@ def _build_gesp_prompt(
 - 难度分布直方图：{json.dumps(diff_hist, ensure_ascii=False)}
 - 偏好的算法标签 TOP：{json.dumps(top_tags, ensure_ascii=False)}
 
+### 重要：洛谷标签覆盖与 GESP 考纲的对应关系（v3.9.65 用户反馈）
+- 洛谷上的题目标签主要围绕算法（DP / 图论 / 数论 / 数据结构）展开，**不是按 GESP 1-8 级考纲一一对应的**。
+- 学员在 GESP 1-3 级（计算机基础 / 顺序分支循环 / 数组字符串 / 排序函数）这类"基础编程"知识点上**看起来"未接触/空白"**，
+  **不一定是真实薄弱**——很可能只是没在洛谷上训练过这些基础题。
+- 学员的真实能力以"GESP 真考级别"为最权威依据（见上方"学员 GESP 真考历史"）。
+  请在知识盲区诊断、训练计划、家长建议等章节中**显式区分**：
+  - ✅ 真考已通过的级别（直接信任）
+  - 🔍 洛谷数据可观测的薄弱（要练）
+  - ⚠️ 洛谷数据缺失的级别（先验证再判断，不要直接判"未掌握"）
+
 请你输出一份**专为 GESP 备考**的结构化 Markdown 报告，必须包含以下章节（顺序固定）。风格要求：
  - **不要复刻 NOI-CSP 报告的"6 维雷达图"**——GESP 报告是按 8 级知识地图展开的；
+ - **不要把"目标级别 1 级 / 入门"当默认起点**——目标级别已自动校准为学员实际能力对应的级别；
  - 难度名称必须使用洛谷官方口径：入门 / 普及- / 普及/提高- / 普及+/提高 / 提高+/省选- / 省选/NOI- / NOI/NOI+/CTSC；
- - 等级前缀符号使用 🟢已掌握 | 🟡部分掌握 | 🟠薄弱 | 🔴未接触 | ⚪不要求；
+ - 等级前缀符号使用 🟢已掌握 | 🟡部分掌握 | 🟠薄弱 | 🔴未接触 | ⚪不要求 | ⚠️数据缺失；
  - 表格优先，少用长段落；每节结尾用 `<p class="text-blue-700 font-semibold">建议：...</p>` 收口。
+
+**v3.9.67 · 重要红线：禁止输出"GESP 8 级知识地图"表**
+
+本报告末尾会由代码自动注入一张**程序化的、基于真实洛谷做题数据**的 8 级知识地图
+（位于 `## 数据校准与真实统计（GESP 8 级版）` 小节）。如果模型在报告主体也生成
+一张，会出现两张表数据自相矛盾的 bug（模型凭印象写 100% 覆盖、程序化表写
+0/5 tag，家长看不懂）。所以：
+
+- **禁止**在报告主体输出"8 级知识地图 · 学员覆盖度"这种完整 8 行表；
+- **禁止**在分析段落中伪造"GESP X 级已掌握 N%"等覆盖率数据；
+- 如确需在分析中提到 1-8 级状态，**只能写"详见末尾数据校准小节"**，不允许列出
+  8 行 8 列的具体覆盖百分比。
 
  1. **【GESP 进度总览】**
     用 Markdown 表格输出学员的 GESP 进度：`| 维度 | 状态 | 数据依据 |`
@@ -2601,20 +3067,13 @@ def _build_gesp_prompt(
     1) 学员已通过最高级别  2) 最近一次考试分  3) 距目标级别 {target_level} 还差几级  4) 是否能免 CSP-J 初赛  5) 是否能免 CSP-S 初赛  6) 建议最近一次考试时间
     状态列用 emoji 徽章（✅/❌/⏳）+ 简短文字。
 
- 2. **【GESP 8 级知识地图 · 学员覆盖度】**
-    输出 1 张 8 级知识地图表，列固定为：`| 级别 | 名称 | 学员状态 | 核心 tags 覆盖 | 难度覆盖 | 风险 |`
-    8 行（1-8 级）必须全列。学员状态从以下 5 档选：🟢已掌握 / 🟡部分掌握 / 🟠薄弱 / 🔴未接触 / ⚪不要求。
-    - **核心 tags 覆盖**：用学员最近通过题目里是否出现该级核心 tag 来评估，给出覆盖度百分比和典型题号；
-    - **难度覆盖**：学员在 GESP 该级要求难度区间内的 AC 数（如 GESP 5 级要求 d ≤ 4，统计 d=1..4 的 AC 数）；
-    - **风险**：1-2 句指出"该级哪些核心 tag 还缺 / 难度上不去"。
-
- 3. **【目标级别（{target_level} 级）知识盲区诊断】**
+ 2. **【目标级别（{target_level} 级）知识盲区诊断】**
     针对目标级别 `{target_level}` 的所有 key_points（见上方 GESP 大纲），逐一对照学员洛谷做题数据：
     - 列出 **3-5 个学员已掌握** 的关键点（写"已掌握"，并给出 1-2 道题号证明）；
     - 列出 **3-5 个学员未掌握 / 薄弱** 的关键点（写"未掌握/薄弱"，并说明数据证据：从未 AC 过相关 tag / 难度达不到 / 提交卡在某个题型）；
     - 输出一段 80-150 字的"学员 vs 目标级别差距"诊断文字。
 
- 4. **【从当前级别到目标级别 · 6 个月备考路线图】**
+ 3. **【从当前级别到目标级别 · 6 个月备考路线图】**
     按月分阶段（如果当前级别 0 / 1 / 2，每阶段 2 个月；如果 3+，每阶段 1-2 个月），输出训练计划表：
     `| 阶段 | 月份 | 主攻级别 | 核心知识点 | 推荐题单（洛谷题号） | 验收标准 |`
     **至少 3 行**（不能只写 1 阶段敷衍）。每阶段：
@@ -2623,23 +3082,23 @@ def _build_gesp_prompt(
     - **推荐题单**：每阶段给 3-5 道洛谷题号（按 Pxxxx 格式），并简述推荐理由（不超过 20 字）；
     - **验收标准**：用什么方式判断"该阶段完成"（如：模拟考分数 ≥ 80 / 关键 tag 题量 ≥ 30 / 历年真题通过率 ≥ 60%）。
 
- 5. **【训练弱项 TOP 5 · 优先突破】**
+ 4. **【训练弱项 TOP 5 · 优先突破】**
     输出 Markdown 表格：`| 排名 | 弱项 | 触发场景 | 训练方法 | 推荐资源 |`
-    **必须 5 行**。弱项从第 3 节的"未掌握"清单里挑，按"提分性价比"排序（S > A > B）。每行训练方法要具体到"每天刷几道、刷多久"。
+    **必须 5 行**。弱项从第 2 节的"未掌握"清单里挑，按"提分性价比"排序（S > A > B）。每行训练方法要具体到"每天刷几道、刷多久"。
 
- 6. **【GESP 报名 & 考试策略建议】**
+ 5. **【GESP 报名 & 考试策略建议】**
     - **下次报名建议**：GESP 一年 4 次（3/6/9/12 月），根据学员当前进度推荐最佳报名月份；
     - **模拟考建议**：考前 1 个月怎么刷真题（年份 + 套数）；
     - **跳级策略**：学员是否适合跳级（90+ 分的判定），如果当前已通过级别 ≥ 4，建议尝试跳级 1-2 级；
     - **考前心理建设**：1-2 句鼓励性文字。
 
- 7. **【核心建议（家长可执行版）】**
+ 6. **【核心建议（家长可执行版）】**
     列出 5-8 条核心建议，按优先级排序（🔴紧急 / 🟡重要 / 🟢建议）。重点告诉家长"接下来 1 个月 / 3 个月 / 6 个月要做什么"，避免空话。例如：
     - 🔴 紧急：未来 2 周内完成 5 道 GESP 5 级真题，记录错题
     - 🟡 重要：每周固定 4 小时算法训练 + 1 小时真题模拟
     - 🟢 建议：报名 6 月 GESP 5 级，目标 80+
 
- 8. **【风险提示】**
+ 7. **【风险提示】**
     - 列出 2-3 条"学员接下来 3 个月最大的潜在风险"（如：难度断层 / 心理瓶颈 / 时间投入不足）；
     - 每条风险给出"规避方案"。
 """

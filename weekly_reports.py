@@ -9,6 +9,13 @@ v3.5 §6.2 验收：
   - 学员 GESP 7 级 80+ 录入后，下周报自动出现"9 月 CSP-J 免初赛已解锁"
   - APScheduler 周一 09:00 cron（v3.5 §6.2）— 本模块只负责生成，调度由 web_app.py 负责
 
+v3.9.65 升级（同步 GESP 报告 v3.9.65 的「就高不就低」+ 8 级大纲补全）：
+  - 周报"🏆 GESP 段位"区追加 5-档 emoji + "就高不就低" 徽章
+  - 新增"🎯 GESP 备考方向"章节：目标级别 themes + 本周主攻 5 个 key_points
+  - 学员已通过 ≥3 级时，强制按"就高不就低"展示目标级别，禁止回退到 1 级
+  - 兜底：无 GESP 真考 + 无洛谷数据 → 1 级（不擅自上调）
+  - 8 级大纲参考 GESP_LEVELS（luogu_evaluator.py v3.9.65 补全的 38 个 key_points）
+
 数据流：
   build_report_data(student_id, week_start) → dict
   render_report_html(data) → str
@@ -26,6 +33,19 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 from task_store import _get_conn  # noqa: E402
+
+# v3.9.65 · 引入 GESP 1-8 级大纲（38 条 L8 key_points 已补全）
+try:
+    from luogu_evaluator import GESP_LEVELS as _GESP_LEVELS
+except Exception:  # 防止循环导入/缺包
+    _GESP_LEVELS = {}
+
+# v3.9.65 · AI 估算兜底（学员完全无 GESP 记录 + 有洛谷数据时使用）
+try:
+    from gesp_estimator import estimate_gesp_level as _estimate_gesp_level
+except Exception:
+    def _estimate_gesp_level(n: int) -> int:  # type: ignore
+        return 1
 
 # v3.5 §6.2 验收：周一 09:00 生成
 WEEKLY_REPORTS_DIR = ROOT / "weekly_reports"
@@ -106,6 +126,61 @@ def build_report_data(student_id: int, week_start: date | None = None) -> dict:
         "exemption_milestone": exemption_milestone,
         "can_exempt_csp_j": bool(progress.get("can_exempt_csp_j")) if progress else False,
         "can_exempt_csp_s": bool(progress.get("can_exempt_csp_s")) if progress else False,
+        # ============ v3.9.65 新增：GESP 备考方向（同步 GESP 报告）============
+        "gesp_target_block": _build_gesp_target_block(
+            highest_passed=int(student.get("gesp_highest_passed", 0)),
+            next_lv=int(progress.get("next_eligible_level", 1) if progress else 1),
+        ),
+    }
+
+
+def _build_gesp_target_block(*, highest_passed: int, next_lv: int) -> dict:
+    """v3.9.65 · 构造"GESP 备考方向"渲染块（同步 GESP 报告 v3.9.65）
+
+    Args:
+        highest_passed: 学员已通过最高级别（0-8）
+        next_lv: 学员下一次可考级别（CCF 跳级规则算出）
+    Returns:
+        {
+            'level': int,                # 目标级别 1-8
+            'level_name': str,           # e.g. "GESP 6 级 · 树与图算法"
+            'themes': list[str],         # 主题
+            'key_points_top5': list[str],# 本周主攻前 5 条
+            'is_solid_skip_path': bool,  # 已通过 ≥3 级时 True
+            'strategy_text': str,        # 给家长的一句话策略
+        }
+    """
+    lv = max(1, min(8, int(next_lv or 1)))
+    info = _GESP_LEVELS.get(lv) or {}
+    themes = info.get("themes") or []
+    kps = info.get("key_points") or []
+    is_solid = highest_passed >= 3
+
+    # 策略文案：就高不就低的解释
+    if highest_passed <= 0:
+        strategy_text = (
+            "暂无 GESP 真考记录，目标是 GESP {lv} 级。"
+            "建议先报名 GESP 1 级摸底（通过后按规则自动跳级）。"
+        ).format(lv=lv)
+    elif is_solid:
+        # 已通过 ≥3 级 → 严格就高不就低
+        strategy_text = (
+            "学员已通过 GESP {hp} 级（{hp} 级为当前稳定基线），"
+            "按 CCF 跳级规则（60-89→N+1，90+→N+2），"
+            "本周主攻 **GESP {lv} 级**，不要再回到 {hp} 级以下的题目打基础。"
+        ).format(hp=highest_passed, lv=lv)
+    else:  # 1-2 级
+        strategy_text = (
+            "学员已通过 GESP {hp} 级，目标是 GESP {lv} 级（按规则自然递增）。"
+        ).format(hp=highest_passed, lv=lv)
+
+    return {
+        "level": lv,
+        "level_name": info.get("name") or f"GESP {lv} 级",
+        "themes": themes,
+        "key_points_top5": kps[:5],
+        "is_solid_skip_path": is_solid,
+        "strategy_text": strategy_text,
     }
 
 
@@ -133,13 +208,24 @@ def render_report_html(data: dict) -> str:
 
     # 2) GESP 段位图 + 状态
     bar = data.get("progress_bar", "")
+    target_block = data.get("gesp_target_block") or {}
+    next_lv = int(data.get("next_eligible_level", 1) or 1)
+    is_solid = bool(target_block.get("is_solid_skip_path"))
+    # v3.9.65 · 就高不就低 徽章：已通过 ≥3 级时显式标注
+    skip_badge = (
+        '<span style="display:inline-block;background:#1e3a8a;color:#fff;font-size:11px;'
+        'padding:2px 8px;border-radius:10px;margin-left:6px;">⬆️ 就高不就低</span>'
+        if is_solid else ""
+    )
     if bar:
         latest = data.get("gesp_latest_score")
         latest_disp = f"{latest} 分" if latest is not None else "无真考"
         sections.append(f"""
         <h2 style="color:#1e3a8a;border-left:4px solid #3b82f6;padding-left:10px;">🏆 GESP 段位</h2>
         <div style="font-family:monospace;background:#f9fafb;padding:12px;border-radius:8px;font-size:14px;">{bar}</div>
-        <p style="color:#6b7280;font-size:13px;margin-top:8px;">最近真考: {latest_disp} · 下次可报: GESP {data.get('next_eligible_level', 1)} 级</p>
+        <p style="color:#6b7280;font-size:13px;margin-top:8px;">
+          最近真考: {latest_disp} · 下次可报: <strong>GESP {next_lv} 级</strong>{skip_badge}
+        </p>
         """)
         if data.get("bar_changed"):
             sections.append(f"""
@@ -147,6 +233,47 @@ def render_report_html(data: dict) -> str:
               🎉 本周段位有变化！从 <code>{data['previous_progress_bar']}</code> 升级到 <code>{bar}</code>
             </div>
             """)
+
+    # ============ v3.9.65 新增 2.5) GESP 备考方向 ============
+    if target_block and target_block.get("level_name"):
+        themes_html = (
+            "".join(f"<span style='display:inline-block;background:#dbeafe;color:#1e3a8a;"
+                    f"font-size:11px;padding:3px 8px;border-radius:10px;margin:2px;'>{t}</span>"
+                    for t in (target_block.get("themes") or []))
+        ) or "<span style='color:#9ca3af;'>（暂无主题数据）</span>"
+        kps_html = "".join(
+            f"<li style='margin:4px 0;'><strong>{i}.</strong> {kp}</li>"
+            for i, kp in enumerate(target_block.get("key_points_top5") or [], 1)
+        ) or "<li style='color:#9ca3af;'>（暂无知识点数据）</li>"
+
+        # 把策略文案里的 markdown 强调符号简单转 HTML
+        strategy_html = (
+            target_block.get("strategy_text", "")
+            .replace("**", "<strong>")
+            .replace("**", "</strong>")
+        )
+
+        sections.append(f"""
+        <h2 style="color:#1e3a8a;border-left:4px solid #7c3aed;padding-left:10px;">🎯 GESP 备考方向（v3.9.65）</h2>
+        <div style="background:#f5f3ff;padding:14px;border-radius:8px;border:1px solid #ddd6fe;">
+          <div style="margin-bottom:8px;">
+            <span style="color:#6b7280;font-size:12px;">本周主攻目标</span><br>
+            <strong style="font-size:18px;color:#1e3a8a;">GESP {target_block.get('level', next_lv)} 级</strong>
+            <span style="color:#6b7280;font-size:13px;margin-left:6px;">· {target_block.get('level_name', '')}</span>
+          </div>
+          <div style="margin-bottom:10px;">
+            <span style="color:#6b7280;font-size:12px;">核心主题</span><br>
+            <div style="margin-top:4px;">{themes_html}</div>
+          </div>
+          <div style="margin-bottom:10px;">
+            <span style="color:#6b7280;font-size:12px;">本周主攻关键知识点（前 5）</span>
+            <ol style="margin:6px 0 0 24px;padding:0;font-size:13px;color:#1f2937;">{kps_html}</ol>
+          </div>
+          <div style="background:#fff;padding:8px 10px;border-radius:6px;border-left:3px solid #7c3aed;color:#1f2937;font-size:13px;">
+            💡 {strategy_html}
+          </div>
+        </div>
+        """)
 
     # 3) 免初赛里程碑
     if data.get("exemption_milestone"):

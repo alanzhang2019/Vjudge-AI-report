@@ -17,6 +17,8 @@ services:
       - LUOGU_REPORT_AUTO_FONT_DOWNLOAD=1
       # 把 sqlite db 写到挂载的命名卷里
       - TASK_DB_PATH=/app/data/tasks.db
+      # v3.9.68 · 海报 QR 码基础 URL（扫码跳转用）。如果用域名访问，改成 https://your-domain.com
+      - PUBLIC_BASE_URL=https://oi.aijiangti.cn
     volumes:
       # 持久化报告（目录挂载）
       - ./reports:/app/reports

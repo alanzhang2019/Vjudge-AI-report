@@ -149,6 +149,10 @@ luogu_coach_report*.html
 luogu_report_assets/
 *.report.pdf
 
+# v3.9.70 · admin 一键开关运行时状态（每台服务器独立，不入库）
+luogu_killswitch.json
+luogu_killswitch.json.tmp
+
 # web_app 持久化数据
 reports/
 tasks.db

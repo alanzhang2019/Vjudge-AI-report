@@ -1034,15 +1034,17 @@ def list_columns() -> list[str]:
     return [row["name"] for row in rows]
 
 
-def get_latest_done_task_for_uid(luogu_uid: str, since_hours: int = 24) -> dict | None:
+def get_latest_done_task_for_uid(luogu_uid: str, since_hours: int = 24, task_type: str = "") -> dict | None:
     """v3.8 · 查最近 N 小时内该 UID 是否已生成过报告（用于每日 1 次限流）
 
     Args:
         luogu_uid: 洛谷 UID（字符串）
         since_hours: 限定 N 小时内（默认 24）
+        task_type: 报告类型过滤（v3.9.64 · report_noi_csp / report_gesp）。
+                   传空字符串表示不限类型（任意报告都算）。
 
     Returns:
-        若存在已完成的 report.md 任务，返回该任务字典；
+        若存在已完成的报告任务，返回该任务字典；
         否则返回 None。
 
     判定条件：
@@ -1061,17 +1063,24 @@ def get_latest_done_task_for_uid(luogu_uid: str, since_hours: int = 24) -> dict 
         if "luogu_uid" not in cols:
             return None
         threshold = (datetime.now() - timedelta(hours=int(since_hours))).strftime("%Y-%m-%d %H:%M:%S")
+        # v3.9.64 · 按 task_type 过滤（不同报告类型互不限制）
+        _type_filter = ""
+        _params: list = [uid, threshold]
+        if task_type and "task_type" in cols:
+            _type_filter = " AND t.task_type = ?"
+            _params.append(str(task_type))
         row = conn.execute(
-            """
+            f"""
             SELECT t.task_id, t.status, t.created_at, t.html, t.student_name
             FROM tasks t
             WHERE t.luogu_uid = ?
               AND t.status IN ('done', 'partial')
               AND (t.created_at IS NULL OR t.created_at >= ?)
+              {_type_filter}
             ORDER BY t.created_at DESC
             LIMIT 1
             """,
-            (uid, threshold),
+            tuple(_params),
         ).fetchone()
         if not row:
             return None
@@ -1080,7 +1089,8 @@ def get_latest_done_task_for_uid(luogu_uid: str, since_hours: int = 24) -> dict 
         conn.close()
 
 
-def insert_task(task_id: str, status: str = "queued", message: str = "排队中...", luogu_uid: str = ""):
+def insert_task(task_id: str, status: str = "queued", message: str = "排队中...", luogu_uid: str = "", task_type: str = ""):
+    """v3.9.64 · 新增 task_type 参数（report_noi_csp / report_gesp），用于按报告类型限流。"""
     conn = _get_conn()
     try:
         # v3.8 · 幂等添加 luogu_uid 列（用于每日 1 次生成限制）
@@ -1088,13 +1098,35 @@ def insert_task(task_id: str, status: str = "queued", message: str = "排队中.
             conn.execute("ALTER TABLE tasks ADD COLUMN luogu_uid TEXT DEFAULT ''")
         except sqlite3.OperationalError:
             pass  # 列已存在
+        # v3.9.64 · 幂等添加 task_type 列
+        try:
+            conn.execute("ALTER TABLE tasks ADD COLUMN task_type TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
         try:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_luogu_uid ON tasks(luogu_uid)")
         except sqlite3.OperationalError:
             pass
+        try:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_task_type ON tasks(task_type)")
+        except sqlite3.OperationalError:
+            pass
+        # 兜底：检查 luogu_uid / task_type 列存在性，老库可能完全没这些列
+        _cols = [r["name"] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()]
+        _has_luogu_uid = "luogu_uid" in _cols
+        _has_task_type = "task_type" in _cols
+        _col_names = ["task_id", "status", "message", "created_at"]
+        _col_vals: list = [task_id, status, message, datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
+        if _has_luogu_uid:
+            _col_names.append("luogu_uid")
+            _col_vals.append(str(luogu_uid or "").strip())
+        if _has_task_type:
+            _col_names.append("task_type")
+            _col_vals.append(str(task_type or "").strip())
+        _placeholders = ",".join(["?"] * len(_col_names))
         conn.execute(
-            "INSERT OR IGNORE INTO tasks (task_id, status, message, created_at, luogu_uid) VALUES (?, ?, ?, ?, ?)",
-            (task_id, status, message, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), str(luogu_uid or "").strip()),
+            f"INSERT OR IGNORE INTO tasks ({','.join(_col_names)}) VALUES ({_placeholders})",
+            _col_vals,
         )
         conn.commit()
     finally:

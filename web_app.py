@@ -1,4 +1,4 @@
-import os
+﻿import os
 from markupsafe import Markup
 import json
 import uuid
@@ -108,6 +108,7 @@ from examples.export_for_ai import (
 from pyLuogu.errors import AuthenticationError, ForbiddenError, RequestError
 from luogu_evaluator import (
     generate_ai_report,
+    generate_gesp_report,
     generate_chart_images,
     build_html_and_pdf,
     DEFAULT_REPORT_MD,
@@ -232,8 +233,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.9.43"
-APP_VERSION_BUILD = "20260615_v3p9p43"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.9.70"
+APP_VERSION_BUILD = "20260619_v3p9p70"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -313,6 +314,42 @@ def _api_version():
         "git": APP_GIT_COMMIT,
         "ts": _dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
     }, ensure_ascii=False), 200, {"Content-Type": "application/json; charset=utf-8"}
+
+
+# v3.9.69 · 部署时一次性清理旧版缓存（避免旧 share-card*.png / parent_subscribe.html
+# 继续展示真名 + 真校）。执行一次后 .cache_v3p9p69 标记文件落盘，下次启动跳过。
+# 安全网：只删已知前缀的文件，不删 report.md / export_data.json 等数据源。
+try:
+    _reports_dir = Path("reports") if Path("reports").exists() else Path("static/reports")
+    _cache_marker = _reports_dir / ".cache_v3p9p69"
+    if _reports_dir.exists() and not _cache_marker.exists():
+        _purged_files = 0
+        for _d in _reports_dir.iterdir():
+            if not _d.is_dir():
+                continue
+            # 脱敏相关缓存：分享海报 (PNG) + 家长订阅版 HTML
+            for _fn in (
+                "share-card.png",
+                "share-card_gesp.png",
+                "share-card_noi_csp.png",
+                "share-card_parent.png",
+                "parent_subscribe.html",
+            ):
+                _fp = _d / _fn
+                if _fp.exists():
+                    try:
+                        _fp.unlink()
+                        _purged_files += 1
+                    except Exception:
+                        pass
+        try:
+            _cache_marker.touch()
+        except Exception:
+            pass
+        if _purged_files:
+            print(f"[v3.9.69] 脱敏缓存清理：删除 {_purged_files} 个旧文件（首次部署执行）")
+except Exception as _purge_e:
+    print(f"[v3.9.69] 缓存清理失败（不影响主流程）: {_purge_e}")
 
 
 # v3.9.5 · 模板全局变量（页脚 / 家长报告页头显示版本号）
@@ -499,6 +536,7 @@ _APP_SKIN_CSS = r"""
 .app-box-blue{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;}
 .app-box-green{background:#ecfdf5;border-color:#a7f3d0;color:#065f46;}
 .app-box-red{background:#fef2f2;border-color:#fecaca;color:#991b1b;}
+.app-box-amber{background:#fffbeb;border-color:#fde68a;color:#92400e;}
 .app-label{display:block;font-size:13px;font-weight:700;color:#374151;}
 .app-input{margin-top:6px;display:block;width:100%;border-radius:10px;border:1px solid #d1d5db;padding:10px 12px;box-shadow:0 1px 2px rgba(0,0,0,.04);background:#fff;}
 .app-input:focus{outline:none;border-color:#10b981;box-shadow:0 0 0 3px rgba(16,185,129,.2);}
@@ -1471,7 +1509,8 @@ INDEX_HTML = """
         <div class="mt-5 pt-5 border-t border-dashed border-[var(--line-2)]">
             <div class="font-mono text-[10.5px] text-[var(--ink-3)] mb-2">// 已注册用户 · 直接进个人中心</div>
             <!-- v3.9.62 fix · 改用 POST /me-entry，由服务端签发签名 token 后再跳转 /me/<uid>?t=... -->
-            <form id="me-entry" action="/me-entry" method="post" class="flex gap-2" onsubmit="var u=document.getElementById('meUid').value.trim(); if(u && /^\d{6,10}$/.test(u)) return true; alert('请输入 6-10 位洛谷 UID'); return false;">
+            <!-- v3.9.65 fix · JS 正则里的 d 在 Python 字符串里需要写两个反斜杠，否则 SyntaxWarning -->
+            <form id="me-entry" action="/me-entry" method="post" class="flex gap-2" onsubmit="var u=document.getElementById('meUid').value.trim(); if(u && /^\\d{6,10}$/.test(u)) return true; alert('请输入 6-10 位洛谷 UID'); return false;">
                 <input id="meUid" name="luogu_uid" type="text" inputmode="numeric" pattern="\\d{6,10}" placeholder="洛谷 UID（6-10 位数字）" class="field flex-1" required>
                 <button type="submit" class="btn-secondary whitespace-nowrap font-mono">进入 ›</button>
             </form>
@@ -1945,6 +1984,56 @@ def _mask_student_name(luogu_uid: str, is_minor: bool, real_name: str | None) ->
     return uid_label
 
 
+# v3.9.69 · 报告 / 海报中的姓名脱敏（仅展示姓氏）
+def _mask_name_for_public(real_name: str | None) -> str:
+    """报告 + 海报中的姓名脱敏：只展示**姓氏**（姓），不带 UID 尾号。
+
+    与 _mask_student_name 的区别：
+      · 排行榜用 `_mask_student_name(uid, is_minor, name)` → "童·U1375"
+        （保留 UID 尾号，方便外部用户区分不同学员）
+      · 报告 / 海报用 `_mask_name_for_public(name)` → "童"
+        （仅展示姓氏，UID 已经在报告里独立展示，不重复加尾号）
+
+    设计：
+      1) 常见复姓（欧阳/司马/诸葛…）→ 取整个复姓
+      2) 全 CJK（中文）名字 → 取第一个字符作姓
+      3) 英文名（"John Smith"）→ 取第一个空白分隔的词
+      4) 单个拉丁词（"Alice"）→ 整个词作姓
+      5) 空值 → "同学"（兜底，避免暴露"匿名"暗示）
+
+    返回样例：
+      _mask_name_for_public("童家瑞")  → "童"
+      _mask_name_for_public("欧阳明")  → "欧阳"
+      _mask_name_for_public("John Smith") → "John"
+      _mask_name_for_public("")  → "同学"
+      _mask_name_for_public(None) → "同学"
+    """
+    if not real_name:
+        return "同学"
+    name = str(real_name).strip()
+    if not name:
+        return "同学"
+
+    # 常见复姓（优先级最高，匹配"欧阳"必须在"欧"之前）
+    compound_surnames = (
+        "欧阳", "司马", "诸葛", "上官", "夏侯", "尉迟", "皇甫",
+        "东方", "令狐", "宇文", "长孙", "慕容", "司徒", "司空",
+        "鲜于", "闾丘", "万俟", "单于", "公冶", "亓官",
+    )
+    for cs in compound_surnames:
+        if name.startswith(cs):
+            return cs
+
+    # 空白分隔的英文名（"John Smith"）→ 取第一个词作姓
+    if " " in name or "\t" in name:
+        return name.split()[0]
+    # 全 CJK（中文）名字 → 取第一个字符作姓
+    if all('\u4e00' <= ch <= '\u9fff' for ch in name):
+        return name[0] if name else "同学"
+    # 单个拉丁词（"Alice"）→ 整个词作姓
+    return name
+
+
 def _mask_school(school: str | None) -> str:
     """v3.9.45 · 学校脱敏：hash 生成稳定匿称「学校#NNNN」
 
@@ -2353,6 +2442,123 @@ def _write_export_data_json(out_dir: Path, export_data: dict) -> Path:
     return export_json_path
 
 
+def _resolve_auto_target_gesp_level(
+    luogu_uid: str,
+    export_data: dict | None = None,
+) -> tuple[int, str]:
+    """v3.9.65 · 当用户在表单选「🤖 系统自动算」时，根据学员真实情况
+    兜底出一个"就高不就低"的 GESP 目标级别。
+
+    兜底优先级（严格遵循 CCF 跳级规则，参考 gesp_estimator）：
+      1) gesp_exams 表里 actual_score >= 60 的最高 registered_level
+         → 用 gesp_estimator.next_eligible_gesp_level({level, score}) 算
+            （60-89 → N+1；>= 90 → N+2；封顶 8；< 60 → 重考 N）
+      2) students.gesp_highest_passed（学员表缓存字段）
+         → 没分数时按 +1 算；有分数时也走 1)
+      3) 完全无 GESP 记录，但有 export_data.solved_count
+         → gesp_estimator.estimate_gesp_level(solved_count)
+      4) 都没有 → 1（全新学员）
+
+    Args:
+        luogu_uid: 洛谷 UID
+        export_data: 可选，已抓取的 export_data（用于第 3 步 AI 估算）
+
+    Returns:
+        (target_level, reason) — 解析出的级别 + 选这个级别的依据（写入 task message）
+    """
+    try:
+        from gesp_estimator import estimate_gesp_level, next_eligible_gesp_level
+    except Exception:
+        try:
+            from docs.gesp_estimator import estimate_gesp_level, next_eligible_gesp_level
+        except Exception:
+            return 1, "GESP 估算模块不可用，兜底 1 级"
+
+    luogu_uid = str(luogu_uid or "").strip()
+    if not luogu_uid:
+        return 1, "无洛谷 UID，按全新学员处理"
+
+    # 1) gesp_exams 真考记录
+    sid: int | None = None
+    gesp_level = 0
+    gesp_score = 0
+    try:
+        conn = _get_conn()
+        try:
+            r = conn.execute(
+                "SELECT id FROM students WHERE luogu_uid = ? LIMIT 1",
+                (luogu_uid,),
+            ).fetchone()
+            if r and r["id"]:
+                sid = int(r["id"])
+            if sid:
+                # 找最高通过的级别 + 该级别最近一次考试的分数
+                rows = conn.execute(
+                    "SELECT registered_level, actual_score, passed "
+                    "FROM gesp_exams WHERE student_id = ? AND passed = 1 "
+                    "ORDER BY registered_level DESC, actual_score DESC LIMIT 1",
+                    (sid,),
+                ).fetchall()
+                if rows:
+                    gesp_level = int(rows[0]["registered_level"] or 0)
+                    gesp_score = int(rows[0]["actual_score"] or 0)
+                if not gesp_level:
+                    # 兜底 2：学生表缓存字段
+                    rs = conn.execute(
+                        "SELECT gesp_highest_passed, gesp_latest_score "
+                        "FROM students WHERE id = ?",
+                        (sid,),
+                    ).fetchone()
+                    if rs:
+                        gesp_level = int(rs["gesp_highest_passed"] or 0)
+                        gesp_score = int(rs["gesp_latest_score"] or 0)
+        finally:
+            conn.close()
+    except Exception as _e:
+        app.logger.warning(f"[v3.9.65] _resolve_auto_target_gesp_level 读 DB 失败: {_e}")
+
+    if gesp_level and gesp_level > 0:
+        # 60-89 → N+1；90+ → N+2；封顶 8
+        next_lv = int(next_eligible_gesp_level(
+            {"registered_level": gesp_level, "actual_score": gesp_score or 60}
+        ))
+        # 就高不就低：如果学员已在 5 级或更高、且分数 ≥ 70，至少给 N+1（next_eligible_gesp_level 已经满足）
+        next_lv = max(1, min(8, next_lv))
+        score_text = f"{gesp_score} 分" if gesp_score else "分数未记录"
+        return next_lv, (
+            f"已通过 GESP {gesp_level} 级（{score_text}），按 CCF 跳级规则 → "
+            f"下一可考 {next_lv} 级"
+        )
+
+    # 3) 无 GESP 真考记录 → 用洛谷通过题数 AI 估算
+    solved = 0
+    if isinstance(export_data, dict):
+        try:
+            solved = int(export_data.get("solved_count") or 0)
+        except Exception:
+            solved = 0
+    if solved <= 0 and sid:
+        # 退而求其次：用最近一份 export_data.json 的 solved_count
+        try:
+            from pathlib import Path as _P
+            report_dir = _find_latest_report_dir(luogu_uid, "")
+            if report_dir is not None:
+                _j = report_dir / "export_data.json"
+                if _j.exists():
+                    import json as _json
+                    _d = _json.loads(_j.read_text(encoding="utf-8"))
+                    solved = int(_d.get("solved_count") or 0)
+        except Exception:
+            pass
+
+    if solved > 0:
+        est = int(estimate_gesp_level(solved))
+        return est, f"暂无 GESP 真考记录，按洛谷 {solved} 题估算 ≈ GESP {est} 级"
+
+    # 4) 全新学员
+    return 1, "无 GESP 真考 + 无洛谷数据，按全新学员处理 → GESP 1 级"
+
+
 def _generate_ai_report_artifacts(
     task_id: str,
     export_data: dict,
@@ -2515,9 +2721,35 @@ def _generate_ai_report_artifacts(
     # 关键：AI 原始输出不含『知识树图谱』『掌握度判定标准』等结构化小节，
     # 统一在这里走一遍 normalize_report_markdown，由代码注入最新结构，
     # 避免依赖 prompt 命中 / 旧报告残留。
+    # v3.9.66 · GESP 版注入 8 级知识地图（不再注入 NOI 4 级树）
     if report_md and export_data is not None:
         try:
-            report_md = normalize_report_markdown(report_md, export_data)
+            _gesp_hp = 0
+            if _is_gesp and luogu_uid:
+                try:
+                    from task_store import _get_conn as _ts_get_conn
+                    _conn = _ts_get_conn()
+                    try:
+                        _row = _conn.execute(
+                            "SELECT gesp_highest_passed, gesp_highest_score FROM students "
+                            "WHERE luogu_uid = ?",
+                            (str(luogu_uid).strip(),),
+                        ).fetchone()
+                        if _row:
+                            _gesp_hp = int(_row["gesp_highest_passed"] or 0)
+                    finally:
+                        _conn.close()
+                except Exception as _hp_err:
+                    app.logger.warning(
+                        f"拉取 gesp_highest_passed 失败 uid={luogu_uid}: {_hp_err}"
+                    )
+            report_md = normalize_report_markdown(
+                report_md,
+                export_data,
+                exam_type=exam_type or "noi_csp",
+                target_gesp_level=int(_target_level or 1) if _is_gesp else 1,
+                gesp_highest_passed=_gesp_hp if _is_gesp else 0,
+            )
             with open(md_path, "w", encoding="utf-8") as f:
                 f.write(report_md)
         except Exception as _norm_err:
@@ -2559,17 +2791,35 @@ def _generate_ai_report_artifacts(
             if len(_parts) >= 2 and _parts[-2].isdigit():
                 _cached_uid = _parts[-2]
         if _cached_uid:
-            _sc_data = _build_share_card_data(_cached_uid)
+            _sc_data = _build_share_card_data(_cached_uid, exam_type=exam_type or "noi_csp")
             if _sc_data:
                 # qr_url 用 base URL（让本地和线上都能扫码）
-                _base = request.host_url.rstrip("/") if request else ""
+                # v3.9.68 · 优先用环境变量 PUBLIC_BASE_URL（公网域名），
+                # 否则 fallback 到 request.host_url（容器内可能是 localhost，扫码后打不开）
+                _base = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
+                if not _base and request:
+                    _base = request.host_url.rstrip("/")
                 if not _base:
                     _base = "https://oi.aijiangti.cn"  # v3.8 · 部署默认域名
-                _sc_qr = f"{_base}/r/{_cached_uid}"
-                _sc_png = _render_share_card_png(_sc_data, _sc_qr)
-                _sc_path = out_dir / "share-card.png"
+                # v3.9.67 · QR 码按 exam_type 区分,扫码后 /r/<uid> 路由能找到对应类型报告
+                # （否则 GESP 报告扫码进 /r/<uid> 后, _find_latest_report_dir 返回 NOI 报告 → 报告内容不一致）
+                _qr_exam_type = exam_type or "noi_csp"
+                _sc_qr = f"{_base}/r/{_cached_uid}?exam_type={_qr_exam_type}"
+                # v3.9.67 · 海报按报告类型分文件 + 切换视觉风格
+                # GESP 报告用琥珀色主题 + 「GESP 8 级备考测评」标题
+                # NOI/CSP 报告保留紫色主题 + 「信息学AI测评结果」原版
+                _sc_png = _render_share_card_png(_sc_data, _sc_qr, exam_type=exam_type or "noi_csp")
+                _suffix = "_gesp" if (exam_type or "noi_csp") == "gesp" else "_noi_csp"
+                _sc_path = out_dir / f"share-card{_suffix}.png"
                 _sc_path.write_bytes(_sc_png)
-                app.logger.info(f"v3.8 share-card.png cached: {_sc_path} ({len(_sc_png)} bytes)")
+                # 兼容旧路径（裸 share-card.png）：始终指向最新一份
+                try:
+                    (out_dir / "share-card.png").write_bytes(_sc_png)
+                except Exception:
+                    pass
+                app.logger.info(
+                    f"v3.9.67 share-card cached: {_sc_path} ({len(_sc_png)} bytes) exam_type={exam_type}"
+                )
     except Exception as _sc_err:
         app.logger.warning(f"v3.8 预渲染分享海报失败（不影响主流程）: {_sc_err}")
 
@@ -2577,6 +2827,9 @@ def _generate_ai_report_artifacts(
 def validate_cookies(form: dict) -> dict[str, object]:
     current_stage = "构造 Cookies"
     luogu = None
+    # v3.9.70 · 洛谷接入一键开关：关闭时直接返回友好错误，不调任何 luogu API
+    if not _is_luogu_access_enabled():
+        return _luogu_killswitch_error_payload()
     try:
         cookies = pyLuogu.LuoguCookies(build_cookie_dict(form))
         current_stage = "预检用户信息"
@@ -2739,6 +2992,40 @@ def run_generation(task_id: str, form: dict):
         exam_type = _exam_type_raw if _exam_type_raw in ("noi_csp", "gesp") else "noi_csp"
         _target_gesp_level_raw = str(form.get("target_gesp_level") or "auto").strip()
         target_gesp_level: int | str = _target_gesp_level_raw if _target_gesp_level_raw else "auto"
+        # v3.9.70 · 洛谷接入一键开关：关闭时不允许新发起抓取（"续写"模式例外：旧 export_data 还在 → 不读洛谷）
+        if not _is_luogu_access_enabled() and not str(form.get("resume_task_id", "") or "").strip():
+            ks_err = _luogu_killswitch_error_payload()
+            try:
+                with TASKS_LOCK:
+                    update_task(
+                        task_id,
+                        status="error",
+                        stage="洛谷接入已关闭",
+                        message=ks_err.get("message", "洛谷接入已暂时关闭"),
+                    )
+            except Exception:
+                pass
+            return jsonify({
+                "ok": False,
+                "blocked_by_killswitch": True,
+                "message": ks_err.get("message", "洛谷接入已暂时关闭"),
+                "reason": ks_err.get("reason", ""),
+                "updated_at": ks_err.get("updated_at", ""),
+                "updated_by": ks_err.get("updated_by", ""),
+            }), 503  # 503 Service Unavailable · 让前端 fetch() 一眼看到非 2xx
+        # v3.9.65 · GESP auto 模式：按学员真考历史兜底"就高不就低"的目标级别
+        # （之前表单默认 auto，但代码没实现该逻辑，导致已通过 5 级也被压到 1 级）
+        if exam_type == "gesp" and str(target_gesp_level).strip().lower() == "auto":
+            _auto_lv, _auto_reason = _resolve_auto_target_gesp_level(_form_uid)
+            target_gesp_level = _auto_lv  # 直接覆盖为 int
+            with TASKS_LOCK:
+                update_task(
+                    task_id,
+                    message=f"🤖 auto 模式已识别 GESP 目标级别：{_auto_lv} 级（{_auto_reason}）",
+                )
+            app.logger.info(
+                f"[v3.9.65] GESP auto 解析 luogu_uid={_form_uid} → target={_auto_lv} ({_auto_reason})"
+            )
         resume_task_id = str(form.get("resume_task_id", "") or "").strip()
         resume_export_data, resume_task = load_resume_export_data(resume_task_id)
         if resume_export_data is not None:
@@ -3932,7 +4219,10 @@ STATUS_HTML = """
                     <div id="posterError" class="text-center text-rose-600 text-sm" style="display:none"></div>
                 </div>
                 <div class="flex gap-2">
-                    <a id="posterDownloadBtn" href="/me/{{ luogu_uid }}/share-card.png" download="学习报告海报_{{ luogu_uid }}.png"
+                    {# v3.9.67 · 海报按报告类型分文件, GESP 报告渲染琥珀色 GESP 海报, NOI/CSP 渲染紫色原版 #}
+                    <a id="posterDownloadBtn"
+                       href="/me/{{ luogu_uid }}/share-card.png?exam_type={{ 'gesp' if task_type == 'report_gesp' else 'noi_csp' }}"
+                       download="学习报告海报_{{ luogu_uid }}.png"
                        class="app-btn app-btn-primary flex-1">⬇ 再次下载</a>
                     <button type="button" onclick="closeSharePoster()" class="app-btn app-btn-secondary flex-1">关闭</button>
                 </div>
@@ -3953,7 +4243,9 @@ STATUS_HTML = """
                 img.style.display='none';
                 m.classList.remove('hidden');
                 // 1) 预加载海报 PNG（matplotlib 现场渲染，可能 5-15s）
-                var url='/me/{{ luogu_uid }}/share-card.png?t='+Date.now();
+                // v3.9.67 · GESP 报告传 exam_type=gesp, NOI/CSP 报告传 exam_type=noi_csp
+                var _exam_type = '{{ "gesp" if task_type == "report_gesp" else "noi_csp" }}';
+                var url = '/me/{{ luogu_uid }}/share-card.png?exam_type=' + encodeURIComponent(_exam_type) + '&t=' + Date.now();
                 var pre=new Image();
                 pre.onload=function(){
                     // 2) 加载完成 → 显示 + 自动下载
@@ -4413,8 +4705,40 @@ def rebuild_existing_report_html(task_id: str, export_pdf: bool = False) -> str:
     # 即便 luogu_evaluator.py 改了也会一直保留。
     # 先抹掉已注入的可信块（避免被 strip 误吞），再让 normalize_report_markdown
     # 自动用最新代码覆盖旧表格/知识树，并把更新后的 markdown 写回 report.md。
+    # v3.9.66 · 重建时按 task_type 决定走 GESP / NOI 流程
     from luogu_evaluator import remove_injected_trusted_block, normalize_report_markdown
-    report_md = normalize_report_markdown(remove_injected_trusted_block(report_md), export_data)
+    _task_type = str((task or {}).get("task_type") or "").strip().lower()
+    _is_rebuild_gesp = _task_type == "report_gesp"
+    _rebuild_target_gesp = 1
+    _rebuild_gesp_hp = 0
+    if _is_rebuild_gesp:
+        _rebuild_luogu_uid = str((task or {}).get("luogu_uid") or "").strip()
+        if _rebuild_luogu_uid:
+            try:
+                from task_store import _get_conn as _ts_get_conn
+                _conn = _ts_get_conn()
+                try:
+                    _row = _conn.execute(
+                        "SELECT gesp_highest_passed, gesp_next_eligible_level "
+                        "FROM students WHERE luogu_uid = ?",
+                        (_rebuild_luogu_uid,),
+                    ).fetchone()
+                    if _row:
+                        _rebuild_gesp_hp = int(_row["gesp_highest_passed"] or 0)
+                        _rebuild_target_gesp = max(
+                            1, min(8, int(_row["gesp_next_eligible_level"] or 1))
+                        )
+                finally:
+                    _conn.close()
+            except Exception:
+                pass
+    report_md = normalize_report_markdown(
+        remove_injected_trusted_block(report_md),
+        export_data,
+        exam_type="gesp" if _is_rebuild_gesp else "noi_csp",
+        target_gesp_level=_rebuild_target_gesp,
+        gesp_highest_passed=_rebuild_gesp_hp,
+    )
     md_path.write_text(report_md, encoding="utf-8")
     assets_dir.mkdir(parents=True, exist_ok=True)
     chart_paths = generate_chart_images(export_data, str(assets_dir))
@@ -4750,8 +5074,53 @@ ADMIN_HTML = """
         </div>
 
         {% if notice %}
-        <div class="app-box {% if notice_type == 'error' %}app-box-red{% else %}app-box-green{% endif %}">{{ notice }}</div>
+        <div class="app-box {% if notice_type == 'error' %}app-box-red{% elif notice_type == 'warning' %}app-box-amber{% else %}app-box-green{% endif %}">{{ notice }}</div>
         {% endif %}
+
+        <!-- v3.9.70 · 洛谷接入一键开关（kill switch） -->
+        <div id="luoguKillswitchCard" class="app-card border-l-4 {% if luogu_killswitch_enabled %}border-emerald-500{% else %}border-rose-500{% endif %}">
+            <div class="flex items-center justify-between gap-4 flex-wrap">
+                <div class="flex-1 min-w-[260px]">
+                    <h2 class="text-lg font-bold flex items-center gap-2">
+                        {% if luogu_killswitch_enabled %}
+                            <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                            <span class="text-emerald-700">🌐 洛谷接入：已开启</span>
+                        {% else %}
+                            <span class="inline-block w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse"></span>
+                            <span class="text-rose-700">🚧 洛谷接入：已关闭</span>
+                        {% endif %}
+                    </h2>
+                    <p class="text-xs text-gray-500 mt-1">
+                        {% if luogu_killswitch_enabled %}
+                            报告生成 / Cookies 预校验 / 做题记录抓取 → 全部正常
+                        {% else %}
+                            <span class="font-semibold text-rose-600">新报告 / 抓取已拦截</span>，学员只能看历史报告 / 海报
+                        {% endif %}
+                    </p>
+                    {% if luogu_killswitch_reason or luogu_killswitch_updated_at %}
+                    <p class="text-xs text-gray-500 mt-1">
+                        {% if luogu_killswitch_reason %}<span class="text-rose-600">原因：</span>{{ luogu_killswitch_reason }} {% endif %}
+                        {% if luogu_killswitch_updated_at %}<span class="text-gray-400">·</span> 更新：{{ luogu_killswitch_updated_at }}（{{ luogu_killswitch_updated_by }}）{% endif %}
+                    </p>
+                    {% endif %}
+                </div>
+                <form method="POST" action="/admin/luogu-killswitch" class="flex items-center gap-2" onsubmit="return _luogu_ks_confirm(this);">
+                    <input type="text" name="reason" maxlength="200" placeholder="关闭原因（可选）"
+                           class="border rounded-lg px-3 py-1.5 text-sm w-56 focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                    {% if luogu_killswitch_enabled %}
+                        <input type="hidden" name="enabled" value="off">
+                        <button type="submit" class="px-4 py-2 bg-rose-600 text-white text-sm font-bold rounded-lg hover:bg-rose-700 flex items-center gap-1.5">
+                            <span>🚧</span> 一键关闭接入
+                        </button>
+                    {% else %}
+                        <input type="hidden" name="enabled" value="on">
+                        <button type="submit" class="px-4 py-2 bg-emerald-600 text-white text-sm font-bold rounded-lg hover:bg-emerald-700 flex items-center gap-1.5">
+                            <span>✅</span> 一键恢复接入
+                        </button>
+                    {% endif %}
+                </form>
+            </div>
+        </div>
 
         <!-- 统计卡片 -->
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -4870,6 +5239,22 @@ ADMIN_HTML = """
             </div>
         </div>
     </div>
+    <script>
+        // v3.9.70 · 洛谷接入一键开关：关闭时弹确认（避免误操作）
+        function _luogu_ks_confirm(formEl) {
+            try {
+                var enabledInput = formEl.querySelector('input[name="enabled"]');
+                var willEnable = enabledInput && enabledInput.value === 'on';
+                if (willEnable) {
+                    return confirm('确认恢复洛谷接入？\n\n恢复后学员可继续生成新报告、预校验 Cookies。');
+                } else {
+                    return confirm('⚠️ 确认关闭洛谷接入？\n\n关闭后：\n· 所有新报告 / 抓取请求会被立即拒绝\n· 学员中心 / 历史报告 / 海报 仍可正常查看\n· 已进行的"续写"任务可继续（不再读洛谷）\n\n（误操作可点右侧绿按钮秒恢复）');
+                }
+            } catch (e) {
+                return true;
+            }
+        }
+    </script>
 </body>
 </html>
 """
@@ -5102,6 +5487,165 @@ def admin_rebuild_html(task_id):
     return redirect(url_for("admin_page", notice="已开始后台重建 HTML，请稍后刷新查看结果。", notice_type="success"))
 
 
+# ============================================================
+#  v3.9.70 · 洛谷接入一键开关（kill switch）
+#  ------------------------------------------------------------
+#  场景：洛谷主站维护 / 验证码策略升级 / 临时风控封禁时，admin 想
+#  "先停掉所有外部抓取" 而不需要重启服务。开关一关：
+#    · /generate 表单提交 → 立即返回 "洛谷接入已暂停"
+#    · 校验 Cookies → 立即返回 "洛谷接入已暂停"
+#    · 历史报告查看 / 学员中心 / 家长版 / 海报 → 不受影响（不读洛谷）
+#  ------------------------------------------------------------
+#  存储：用 JSON 文件而不是 DB 表 / 环境变量，因为：
+#    · DB 写入要事务，热改期间 admin 看不到最新值
+#    · 环境变量必须重启服务才生效，不满足"一键"
+#    · 文件写在 web_app 进程同目录，atomic write（写 .tmp + rename）防并发损坏
+# ============================================================
+import json as _json_ks
+
+_LUOGU_KS_PATH = Path(__file__).parent / "luogu_killswitch.json"
+_LUOGU_KS_LOCK = threading.Lock()
+
+
+def _read_luogu_killswitch() -> dict:
+    """读洛谷接入开关状态。文件不存在/损坏 → 默认开启（fail-open）。
+
+    返回 dict:
+      · enabled:        bool  是否启用
+      · reason:         str   关闭原因（admin 填的）
+      · updated_at:     str   ISO 时间
+      · updated_by:     str   管理员账号
+    """
+    try:
+        if not _LUOGU_KS_PATH.exists():
+            return {"enabled": True, "reason": "", "updated_at": "", "updated_by": ""}
+        raw = _LUOGU_KS_PATH.read_text(encoding="utf-8").strip()
+        if not raw:
+            return {"enabled": True, "reason": "", "updated_at": "", "updated_by": ""}
+        data = _json_ks.loads(raw)
+        # 容错：enabled 字段缺失 / 错值时默认开启
+        enabled = data.get("enabled")
+        if not isinstance(enabled, bool):
+            enabled = True
+        return {
+            "enabled": enabled,
+            "reason": str(data.get("reason", "") or ""),
+            "updated_at": str(data.get("updated_at", "") or ""),
+            "updated_by": str(data.get("updated_by", "") or ""),
+        }
+    except Exception as _e:
+        app.logger.warning(f"[luogu_killswitch] 读取失败，fail-open: {_e}")
+        return {"enabled": True, "reason": "", "updated_at": "", "updated_by": ""}
+
+
+def _write_luogu_killswitch(enabled: bool, reason: str, updated_by: str) -> dict:
+    """写洛谷接入开关状态。原子写（写 .tmp + rename），并发安全。"""
+    with _LUOGU_KS_LOCK:
+        payload = {
+            "enabled": bool(enabled),
+            "reason": str(reason or "")[:200],  # 限长，避免被刷垃圾
+            "updated_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S%z") or datetime.now().isoformat(timespec="seconds"),
+            "updated_by": str(updated_by or "admin")[:50],
+        }
+        tmp_path = _LUOGU_KS_PATH.with_suffix(".json.tmp")
+        try:
+            tmp_path.write_text(
+                _json_ks.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            # 原子替换（POSIX/NTFS 都支持）
+            os.replace(tmp_path, _LUOGU_KS_PATH)
+        except Exception as _e:
+            app.logger.error(f"[luogu_killswitch] 写入失败: {_e}")
+            raise
+    return payload
+
+
+def _is_luogu_access_enabled() -> bool:
+    """一键开关：返回 True 表示允许访问洛谷，False 表示已关闭。
+
+    用法：在 web_app 里任何要调 pyLuogu.luoguAPI() / validate_cookies() 之前
+    先调一次本函数，False 就直接给用户返回友好提示。
+    """
+    return _read_luogu_killswitch().get("enabled", True)
+
+
+def _luogu_killswitch_error_payload() -> dict:
+    """开关关闭时，统一给前端返回的错误 payload（前端 JS 直接读 .ok / .message）"""
+    state = _read_luogu_killswitch()
+    return {
+        "ok": False,
+        "blocked_by_killswitch": True,
+        "message": (
+            "🚧 洛谷接入已暂时关闭。"
+            + (f"原因：{state.get('reason', '')}。" if state.get("reason") else "")
+            + f"（最后更新：{state.get('updated_at', '')}，操作人：{state.get('updated_by', '')}）"
+            + "请联系管理员开启，或稍后重试。"
+        ),
+        "reason": state.get("reason", ""),
+        "updated_at": state.get("updated_at", ""),
+        "updated_by": state.get("updated_by", ""),
+    }
+
+
+@app.route("/admin/luogu-killswitch", methods=["GET", "POST"])
+def admin_luogu_killswitch():
+    """v3.9.70 · admin 一键开关：暂停/恢复洛谷接入
+
+    GET  → 返回当前状态（JSON，给 admin 页 JS 读）
+    POST → 切换 / 设置（form: enabled=on/off, reason=...）
+    """
+    auth_redirect = require_admin_auth()
+    if auth_redirect is not None:
+        return auth_redirect
+    if request.method == "GET":
+        state = _read_luogu_killswitch()
+        return _json_ks.dumps(
+            {"ok": True, **state}, ensure_ascii=False
+        ), 200, {"Content-Type": "application/json; charset=utf-8"}
+    # POST
+    enabled_raw = (request.form.get("enabled") or "").strip().lower()
+    if enabled_raw in ("1", "true", "on", "yes", "enable", "enabled"):
+        new_enabled = True
+        action = "开启"
+    elif enabled_raw in ("0", "false", "off", "no", "disable", "disabled"):
+        new_enabled = False
+        action = "关闭"
+    else:
+        # 缺省值：toggle（点一次切一次）
+        cur = _read_luogu_killswitch()
+        new_enabled = not cur.get("enabled", True)
+        action = "切换"
+    reason = (request.form.get("reason") or "").strip()
+    admin_user = str(session.get("admin_user", "") or "admin")
+    try:
+        payload = _write_luogu_killswitch(new_enabled, reason, admin_user)
+    except Exception as _e:
+        return redirect(url_for(
+            "admin_page",
+            notice=f"洛谷开关写入失败：{_e}",
+            notice_type="error",
+        ))
+    state_text = "✅ 已开启" if payload["enabled"] else "🚧 已关闭"
+    return redirect(url_for(
+        "admin_page",
+        notice=f"洛谷接入{action}成功 · 当前状态：{state_text}（操作人：{admin_user}）",
+        notice_type="success" if payload["enabled"] else "warning",
+    ))
+
+
+@app.route("/admin/luogu-killswitch/api", methods=["GET"])
+def admin_luogu_killswitch_api():
+    """v3.9.70 · 开关状态查询（仅 admin），供 admin 页 JS 拉取实时状态"""
+    auth_redirect = require_admin_auth()
+    if auth_redirect is not None:
+        return auth_redirect
+    state = _read_luogu_killswitch()
+    return _json_ks.dumps(
+        {"ok": True, **state}, ensure_ascii=False
+    ), 200, {"Content-Type": "application/json; charset=utf-8"}
+
+
 @app.route("/admin")
 def admin_page():
     auth_redirect = require_admin_auth()
@@ -5213,6 +5757,11 @@ def admin_page():
         notice_type=str(request.args.get("notice_type", "") or "success"),
         admin_user=str(session.get("admin_user", "") or "admin"),
         running_tasks=get_active_generation_task_count(),
+        # v3.9.70 · 洛谷接入一键开关（admin 页头状态卡）
+        luogu_killswitch_enabled=_is_luogu_access_enabled(),
+        luogu_killswitch_reason=_read_luogu_killswitch().get("reason", ""),
+        luogu_killswitch_updated_at=_read_luogu_killswitch().get("updated_at", ""),
+        luogu_killswitch_updated_by=_read_luogu_killswitch().get("updated_by", ""),
     )
 
 
@@ -5395,8 +5944,15 @@ def _collect_report_data(student: dict) -> dict:
     gesp_level = int(student.get("gesp_highest_passed") or 0)
     gesp_score = int(student.get("gesp_latest_score") or 0)
     exemptions = compute_exemptions(gesp_level, gesp_score) if gesp_level else []
+    # v3.9.69 · 报告 / 海报公开显示的脱敏字段：
+    #   · masked_name:   学员姓名 → 仅姓氏（与 _mask_student_name 不同，不带 UID 尾号）
+    #   · masked_school: 学员学校 → "学校#NNNN"（稳定 hash 匿称）
+    # 学员本人在 /me/<uid> 个人中心 / admin 面板仍看得到真名 / 真校
+    _student_view = dict(student)
+    _student_view["masked_name"] = _mask_name_for_public(student.get("real_name"))
+    _student_view["masked_school"] = _mask_school(student.get("school"))
     return {
-        "student": dict(student),
+        "student": _student_view,
         "progress": progress,
         "mistakes": mistakes,
         "mistake_count": mistake_count,
@@ -5476,8 +6032,10 @@ def _list_student_report_htmls(luogu_uid: str, student_name: str = "", limit: in
                 "dir_name": dir_name,
                 "html_url": f"/reports/{dir_name}/report.html" if status == "complete" else "",
                 "mtime_display": mtime.strftime("%Y-%m-%d %H:%M"),
-                "share_url": f"/me/{luogu_uid}/share-card.png",
-                "has_poster": (d / "share-card.png").exists(),
+                # v3.9.67 · 报告行通过目录名后缀（_gesp / _noi_csp）识别海报类型
+                "exam_type": "gesp" if "_gesp" in dir_name.lower() else "noi_csp",
+                "share_url": f"/me/{luogu_uid}/share-card.png?exam_type={'gesp' if '_gesp' in dir_name.lower() else 'noi_csp'}",
+                "has_poster": (d / "share-card.png").exists() or (d / "share-card_gesp.png").exists() or (d / "share-card_noi_csp.png").exists(),
                 "size_kb": round(stat.st_size / 1024, 1),
                 "status": status,  # v3.9.17
             })
@@ -5539,7 +6097,7 @@ STUDENT_REPORT_HTML = """
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>🎓 学员版报告 · {{ student.real_name or luogu_uid }}</title>
+    <title>🎓 学员版报告 · {{ student.masked_name or luogu_uid }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     {{ app_skin_head() }}
     <style>
@@ -5559,7 +6117,7 @@ STUDENT_REPORT_HTML = """
             📤
         </button>
         <div class="text-sm text-gray-500">🎓 学员版报告</div>
-        <h1 class="text-2xl font-extrabold text-gray-800 mt-1">Hi，{{ student.real_name or '选手' }}！</h1>
+        <h1 class="text-2xl font-extrabold text-gray-800 mt-1">Hi，{{ student.masked_name or '同学' }}！</h1>
         <p class="text-xs text-gray-400 mt-1">{{ student.city or '未填城市' }} · {{ student.grade_label or student.grade or '—' }} · UID {{ luogu_uid }}</p>
         <div class="mt-4 flex items-center justify-center gap-4">
             <div>
@@ -5588,16 +6146,16 @@ STUDENT_REPORT_HTML = """
                     📌 把这张图发到家长群 / 朋友圈，分享孩子 GESP 段位 + 9 月免初赛倒计时 + 关键赛事路线。
                 </p>
                 <div class="flex justify-center bg-gray-50 border border-gray-200 rounded-lg p-2 mb-3">
-                    <img id="shareCardImg" src="/me/{{ luogu_uid }}/share-card.png" alt="位置图海报"
+                    <img id="shareCardImg" src="/me/{{ luogu_uid }}/share-card.png?exam_type={{ primary_exam_type_for_share }}" alt="位置图海报"
                          class="max-w-full h-auto rounded shadow"
                          onerror="this.alt='海报生成失败 · 请刷新重试'; this.style.display='none';" />
                 </div>
                 <div class="flex flex-wrap items-center gap-2 justify-center">
-                    <a id="shareCardDownload" href="/me/{{ luogu_uid }}/share-card.png" download="我家孩子位置图_{{ student.real_name or luogu_uid }}.png"
+                    <a id="shareCardDownload" href="/me/{{ luogu_uid }}/share-card.png?exam_type={{ primary_exam_type_for_share }}" download="我家孩子位置图_{{ student.masked_name or luogu_uid }}.png"
                        class="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white text-sm font-bold rounded-lg hover:bg-emerald-700">
                         💾 保存图片
                     </a>
-                    <a href="/me/{{ luogu_uid }}/share-card.png" target="_blank"
+                    <a href="/me/{{ luogu_uid }}/share-card.png?exam_type={{ primary_exam_type_for_share }}" target="_blank"
                        class="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-emerald-600 text-emerald-700 text-sm font-bold rounded-lg hover:bg-emerald-50">
                         🔗 在新窗口打开
                     </a>
@@ -5748,6 +6306,8 @@ STUDENT_REPORT_HTML = """
                     <div class="flex items-center gap-2">
                         <span class="text-sm font-bold text-emerald-700">📅 {{ r.mtime_display }}</span>
                         {% if loop.first %}<span class="text-[10px] px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded">最新</span>{% endif %}
+                        {# v3.9.67 · 报告行按 exam_type 显示标签（GESP 琥珀 / NOI 紫） #}
+                        {% if r.exam_type == 'gesp' %}<span class="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded">GESP</span>{% else %}<span class="text-[10px] px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded">NOI/CSP</span>{% endif %}
                         {% if r.has_poster %}<span class="text-[10px] px-1.5 py-0.5 bg-rose-100 text-rose-700 rounded">海报已生成</span>{% endif %}
                     </div>
                     <div class="text-[11px] text-gray-400 mt-0.5 truncate">{{ r.dir_name }} · {{ r.size_kb }} KB</div>
@@ -5859,11 +6419,12 @@ STUDENT_REPORT_HTML = """
 </div>
 <script>
 // v3.8 · 历史报告行的 📤 分享按钮：复用 shareModal，注入指定版本的 share-card.png
+// v3.9.67 · shareUrl 已含 exam_type=gesp/noi_csp, 缓存 / 海报主题就分开了
 function openSharePosterByUrl(shareUrl, dirName) {
     var m = document.getElementById('shareModal');
     var img = document.getElementById('shareCardImg');
     if (!m || !img) return;
-    var url = shareUrl + '?v=' + encodeURIComponent(dirName) + '&t=' + Date.now();
+    var url = shareUrl + (shareUrl.indexOf('?') >= 0 ? '&' : '?') + 'v=' + encodeURIComponent(dirName) + '&t=' + Date.now();
     img.src = url;
     img.style.display = '';
     img.alt = '分享海报 · ' + dirName;
@@ -5887,7 +6448,7 @@ PARENT_REPORT_HTML = """
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>👨‍👩‍👧 家长版报告 · {{ student.real_name or '' }}</title>
+    <title>👨‍👩‍👧 家长版报告 · {{ student.masked_name or '' }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     {{ app_skin_head() }}
     <style>
@@ -5900,7 +6461,7 @@ PARENT_REPORT_HTML = """
     <!-- 头部：完整档案 -->
     <div class="bg-white rounded-2xl card-shadow p-6">
         <div class="text-sm text-gray-500">👨‍👩‍👧 家长版报告（完整）</div>
-        <h1 class="text-2xl font-extrabold text-gray-800 mt-1">您家孩子 · {{ student.real_name or '—' }}</h1>
+        <h1 class="text-2xl font-extrabold text-gray-800 mt-1">您家孩子 · {{ student.masked_name or '—' }}</h1>
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 text-center">
             <div class="bg-emerald-50 rounded-lg p-2">
                 <div class="text-xs text-gray-500">城市</div>
@@ -5981,7 +6542,7 @@ PARENT_SUBSCRIBE_HTML = """
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>📨 家长订阅版 · {{ student.real_name or luogu_uid }}</title>
+    <title>📨 家长订阅版 · {{ student.masked_name or luogu_uid }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     {{ app_skin_head() }}
     <style>
@@ -6006,7 +6567,7 @@ PARENT_SUBSCRIBE_HTML = """
                     <span class="text-xs px-2 py-0.5 bg-rose-100 text-rose-700 rounded-full">v3.9 · 5 维度深度</span>
                 </div>
                 <h1 class="text-2xl font-extrabold text-gray-800 mt-2">
-                    {{ student.real_name or '您家孩子' }} 的 OI 决策报告
+                    {{ student.masked_name or '您家孩子' }} 的 OI 决策报告
                 </h1>
                 <p class="text-xs text-gray-500 mt-1">
                     {{ student.city or '所在城市待补' }}{% if student.province %} · {{ student.province }}{% endif %}
@@ -6129,10 +6690,14 @@ PARENT_SUBSCRIBE_HTML = """
         </div>
     </div>
 
-    <!-- 维度 4 · 学员当前状态诊断 -->
+    <!-- 维度 4 · 学员当前状态诊断（仅在已有基础报告时显示，否则显示空状态提示） -->
+    {% if has_report %}
     <div class="bg-white rounded-2xl card-shadow p-6">
         <h2 class="text-lg font-bold text-gray-800">🔍 维度 4 · 学员当前状态诊断（家长友好版）</h2>
-        <p class="text-xs text-gray-500 mt-1">术语翻译：难度/算法标签解释为"学习水平分布"</p>
+        <p class="text-xs text-gray-500 mt-1">
+            术语翻译：难度/算法标签解释为"学习水平分布"
+            {% if diff_kind == "gesp" %}· <span class="text-amber-700">当前报告为 GESP 8 级版</span>{% elif diff_kind == "noi" %}· <span class="text-amber-700">当前报告为 NOI/CSP 版</span>{% endif %}
+        </p>
 
         <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -6143,7 +6708,7 @@ PARENT_SUBSCRIBE_HTML = """
                     <div class="flex items-center gap-2 text-sm">
                         <span class="w-16 text-gray-600">{{ lvl }}</span>
                         <div class="flex-1 bg-gray-200 rounded h-3 overflow-hidden">
-                            <div class="bg-blue-500 h-3" style="width: {{ (cnt / (diff_dist.values()|list|max) * 100)|int if cnt else 0 }}%"></div>
+                            <div class="{% if diff_kind == 'gesp' %}bg-amber-500{% else %}bg-blue-500{% endif %} h-3" style="width: {{ (cnt / (diff_dist.values()|list|max) * 100)|int if cnt else 0 }}%"></div>
                         </div>
                         <span class="w-10 text-right text-gray-700 font-medium">{{ cnt }}</span>
                     </div>
@@ -6151,6 +6716,7 @@ PARENT_SUBSCRIBE_HTML = """
                 </div>
                 {% else %}
                 <p class="text-sm text-gray-400">暂未抓取到难度分布</p>
+                <p class="text-xs text-gray-400 mt-1">（报告不含结构化难度列，可在 <a href="/report/student/{{ luogu_uid }}" class="text-emerald-600 hover:underline">学员版报告</a> 查完整题档）</p>
                 {% endif %}
             </div>
             <div>
@@ -6170,11 +6736,21 @@ PARENT_SUBSCRIBE_HTML = """
 
         <p class="text-xs text-gray-400 mt-3">完整数据看板请见 <a href="/report/student/{{ luogu_uid }}" class="text-emerald-600 hover:underline">学员版报告</a></p>
     </div>
+    {% else %}
+    <div class="bg-white rounded-2xl card-shadow p-6 border-2 border-dashed border-gray-200">
+        <h2 class="text-lg font-bold text-gray-400">🔍 维度 4 · 学员当前状态诊断（家长友好版）</h2>
+        <p class="text-sm text-gray-400 mt-3">需先生成基础报告后，此处自动填入"难度分布 + 最近 GESP 真考"实时数据。</p>
+    </div>
+    {% endif %}
 
-    <!-- 维度 5 · 教练沟通清单 -->
+    <!-- 维度 5 · 教练沟通清单（仅在已有基础报告时显示问题清单） -->
+    {% if has_report %}
     <div class="bg-white rounded-2xl card-shadow p-6">
         <h2 class="text-lg font-bold text-gray-800">💬 维度 5 · 教练沟通清单</h2>
-        <p class="text-xs text-gray-500 mt-1">下次面谈直接对照问，下方按钮一键复制</p>
+        <p class="text-xs text-gray-500 mt-1">
+            下次面谈直接对照问，下方按钮一键复制
+            {% if diff_kind == "gesp" %}· <span class="text-amber-700">GESP 专项问题</span>{% else %}· <span class="text-amber-700">NOI/CSP 路径问题</span>{% endif %}
+        </p>
 
         <ol class="mt-4 space-y-2">
             {% for q in questions %}
@@ -6192,14 +6768,20 @@ PARENT_SUBSCRIBE_HTML = """
         <div class="mt-4 flex gap-2">
             <button onclick="var qs=Array.from(document.querySelectorAll('ol li span:nth-child(2)')).map(s=>s.textContent).join('\\n\\n');navigator.clipboard.writeText(qs);this.textContent='✓ 全部已复制';"
                     class="flex-1 bg-amber-500 hover:bg-amber-600 text-white font-semibold py-2 rounded-md transition">
-                📋 复制全部 7 个问题
+                📋 复制全部 {{ questions|length }} 个问题
             </button>
-            <a href="mailto:?subject={{ student.real_name or '学员' }} 的 OI 决策沟通清单&body={{ (questions|join('%0D%0A%0D%0A'))|urlencode }}"
+            <a href="mailto:?subject={{ student.masked_name or '同学' }} 的 OI 决策沟通清单&body={{ (questions|join('%0D%0A%0D%0A'))|urlencode }}"
                class="flex-1 bg-gray-700 hover:bg-gray-800 text-white font-semibold py-2 rounded-md text-center transition">
                 📧 发到教练邮箱
             </a>
         </div>
     </div>
+    {% else %}
+    <div class="bg-white rounded-2xl card-shadow p-6 border-2 border-dashed border-gray-200">
+        <h2 class="text-lg font-bold text-gray-400">💬 维度 5 · 教练沟通清单</h2>
+        <p class="text-sm text-gray-400 mt-3">需先生成基础报告后，此处自动生成 {{ "GESP 专项" if diff_kind == "gesp" else "NOI/CSP 路径" }}沟通问题清单。</p>
+    </div>
+    {% endif %}
 
     <!-- 触发 AI 决策支持生成表单（仅当已生成基础报告、且还没有家长订阅版时显示） -->
     {% if has_report %}
@@ -6269,7 +6851,7 @@ _PARENT_SUBSCRIBE_SHELL_HTML = """
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>📨 {{ student_name }} 的家长订阅版</title>
+    <title>📨 {{ masked_name or '同学' }} 的家长订阅版</title>
     <script src="https://cdn.tailwindcss.com"></script>
     {{ app_skin_head() }}
     <style>
@@ -6296,7 +6878,7 @@ _PARENT_SUBSCRIBE_SHELL_HTML = """
         <div class="flex items-center justify-between flex-wrap gap-3">
             <div>
                 <span class="inline-block text-xs px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full">📨 家长专属深度报告</span>
-                <h1 class="text-2xl font-extrabold text-gray-800 mt-2">您家孩子 {{ student_name }} 的 OI 学习深度分析</h1>
+                <h1 class="text-2xl font-extrabold text-gray-800 mt-2">您家孩子 {{ masked_name or '—' }} 的 OI 学习深度分析</h1>
                 <p class="text-xs text-gray-500 mt-1">UID {{ luogu_uid }} · 生成于 {{ generated_at }}</p>
             </div>
             <div class="flex gap-2">
@@ -6958,6 +7540,18 @@ def generate_form_submit():
     import re as _re
     form = request.form.to_dict()
 
+    # v3.9.70 · 洛谷接入一键开关：关闭时直接渲染错误页（友好提示，不调 luogu）
+    if not _is_luogu_access_enabled():
+        ks_err = _luogu_killswitch_error_payload()
+        return render_template_string(
+            GENERATE_FORM_HTML,
+            form=form,
+        pwd_login_2fa=None,
+            server_key_hint=_get_server_key_hint(),
+            gesp_default_year=date.today().year,
+            error=ks_err.get("message", "洛谷接入已暂时关闭"),
+        ), 503
+
     # 必填校验
     # v3.9.60 fix · C3VK 不再需要
     required = ["client_id", "uid", "real_name", "city", "grade"]  # 移除了 c3vk
@@ -6985,9 +7579,14 @@ def generate_form_submit():
         ), 400
 
     # v3.8 · 每日 1 次限流：最近 24 小时内该 UID 已生成过报告，则引导到 /me/<uid>
+    # v3.9.64 · 按报告类型分别限流：NOI-CSP 和 GESP 互不限制（每天可各生成一次）
     try:
         from task_store import get_latest_done_task_for_uid
-        existing = get_latest_done_task_for_uid(luogu_uid, since_hours=24)
+        _rate_exam_type = (form.get("exam_type") or "noi_csp").strip()
+        if _rate_exam_type not in ("noi_csp", "gesp"):
+            _rate_exam_type = "noi_csp"
+        _rate_task_type = "report_gesp" if _rate_exam_type == "gesp" else "report_noi_csp"
+        existing = get_latest_done_task_for_uid(luogu_uid, since_hours=24, task_type=_rate_task_type)
         if existing:
             from flask import url_for as _uf
             me_url = _uf("student_me", luogu_uid=luogu_uid)
@@ -7009,8 +7608,8 @@ def generate_form_submit():
                 gesp_default_year=date.today().year,
                 error=None,
                 info=(
-                    f"⚠️ UID {luogu_uid} 在最近 24 小时内已生成过报告（{remain_txt}）。"
-                    f"请前往「个人中心」查看已生成的报告。"
+                    f"⚠️ UID {luogu_uid} 在最近 24 小时内已生成过「{('GESP 备考' if _rate_task_type == 'report_gesp' else 'NOI-CSP')}报告」（{remain_txt}）。"
+                    f"如需重新生成，请切换到另一种报告类型（NOI-CSP ↔ GESP），或等待冷却时间结束。"
                 ),
                 info_me_url=me_url,
             ), 429
@@ -7370,7 +7969,7 @@ GENERATE_FORM_HTML = """
                     <p class="text-xs text-amber-800 font-semibold">🔐 {{ pwd_login_2fa.get('message','该账号开启了二次验证') }}</p>
                     <input type="hidden" name="luogu_username" value="{{ pwd_login_2fa.get('username','') }}">
                     <input id="pwTotp" type="text" name="totp_code" required maxlength="6" minlength="6"
-                           pattern="\d{6}"
+                           pattern="\\d{6}"
                            class="app-input"
                            placeholder="6 位验证码"
                            inputmode="numeric"
@@ -7403,6 +8002,16 @@ GENERATE_FORM_HTML = """
                     <button id="pwCancelBtn" type="button" onclick="pwCancelLogin()" class="text-xs text-gray-500 hover:text-gray-700 underline">取消登录</button>
                 </div>
                 <div id="pwError" class="hidden mt-2 bg-red-50 border border-red-300 rounded-lg p-2 text-xs text-red-700"></div>
+                <!-- v3.9.67 · 6 次验证码失败后, 提示用户改用手动 cookie, 自动展开下方折叠区 -->
+                <div id="captchaFailHint" class="hidden mt-2 bg-amber-50 border-2 border-amber-400 rounded-lg p-3 space-y-2">
+                    <p class="text-sm font-bold text-amber-900">⚠️ 连续 6 次验证码识别失败</p>
+                    <p class="text-xs text-amber-800 leading-relaxed">图形验证码自动 OCR 暂时识别不了, 请改用下方<strong>「手动复制 Cookie」</strong>备用方案 (3 步搞定):</p>
+                    <button id="openManualCookieBtn" type="button"
+                            onclick="document.getElementById('manualCookieBox').open = true; document.getElementById('manualCookieBox').scrollIntoView({behavior:'smooth', block:'start'});"
+                            class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-4 rounded-md text-sm">
+                        👇 展开手动获取 Cookie 方案
+                    </button>
+                </div>
             </div>
             <!-- v3.9.56 fix · pw2faForm 也必须放在任何 form 外面
                  HTML 解析时会拆嵌套 form, 浏览器把内层 form 的 submit button
@@ -7412,7 +8021,7 @@ GENERATE_FORM_HTML = """
                 <p class="text-xs text-amber-800 font-semibold">🔐 该账号开启了二次验证, 请输入 6 位验证码:</p>
                 <input type="hidden" name="sid" id="pw2faSid">
                 <input id="pw2faInput" type="text" name="totp_code" maxlength="6" minlength="6"
-                       pattern="\d{6}" inputmode="numeric" autocomplete="one-time-code"
+                       pattern="\\d{6}" inputmode="numeric" autocomplete="one-time-code"
                        class="w-full text-center text-xl tracking-widest font-mono px-3 py-2 border-2 border-amber-300 rounded-md focus:border-amber-500 focus:outline-none"
                        placeholder="• • • • • •">
                 <button id="pw2faBtn" type="button" class="w-full bg-amber-500 text-white font-bold py-2 rounded-md hover:bg-amber-600 text-sm">提交验证码</button>
@@ -7423,7 +8032,7 @@ GENERATE_FORM_HTML = """
         </div>
 
         {# v3.9.62 · 2. 手动获取 Cookie（折叠在授权登录之后 · 授权失败时备用）#}
-        <details class="bg-amber-50 border border-amber-200 rounded-xl overflow-hidden group">
+        <details id="manualCookieBox" class="bg-amber-50 border border-amber-200 rounded-xl overflow-hidden group">
             <summary class="cursor-pointer select-none px-4 py-3 font-bold text-sm text-amber-800 hover:bg-amber-100/40 flex items-center gap-2 list-none">
                 <span class="text-lg">⚠️</span>
                 <span>授权登录失败？手动复制 Cookie（备用方案）</span>
@@ -7968,7 +8577,23 @@ GENERATE_FORM_HTML = """
         break;
       case 'done':
         clearInterval(PW_TIMER);
-        setStage('登录成功!', '已提取 Cookies, 正在回填表单…', 100);
+        // v3.9.67 · 登录成功: 进度框停留在"✅ 已登录"状态, 不自动消失
+        // 让用户能看清楚 + 知道接下来该点哪
+        setStage('✅ 登录成功', 'Cookies 已自动填好, 下方可继续点「生成 AI 报告」', 100);
+        // 停掉 spinner, 进度条变色
+        const _sp = $('pwSpin'); if (_sp) _sp.classList.add('hidden');
+        const _bar = $('pwBar');
+        if (_bar) { _bar.classList.remove('bg-emerald-500'); _bar.classList.add('bg-emerald-600'); }
+        // 隐藏取消按钮 (已经成功, 不需要)
+        if (cancel) cancel.classList.add('hidden');
+        // 登录按钮变成"再次授权", 方便用户想换号
+        const _btn = $('pwLoginBtn');
+        if (_btn) {
+          _btn.disabled = false;
+          _btn.classList.remove('opacity-50', 'cursor-not-allowed');
+          _btn.textContent = '🔁 重新授权登录';
+        }
+        // 重要: 不调用 finishLogin 里的 setTimeout-hide, 让成功态一直保留
         finishLogin();
         break;
       case 'failed':
@@ -7976,7 +8601,21 @@ GENERATE_FORM_HTML = """
         clearInterval(PW_TIMER);
         hideProgress();
         setLoginBtnDisabled(false);
-        showError((d.state === 'failed' ? '登录失败: ' : '会话已过期: ') + (d.error || d.message || '未知错误'));
+        const _errMsg = d.error || d.message || '未知错误';
+        showError((d.state === 'failed' ? '登录失败: ' : '会话已过期: ') + _errMsg);
+        // v3.9.67 · 6 次验证码连续失败 → 特殊提示 + 自动展开手动 cookie 折叠区
+        if (/连续\s*\d+\s*次.*失败|验证码.*识别不了|识别验证码连续/.test(_errMsg)) {
+          const _hint = $('captchaFailHint');
+          if (_hint) _hint.classList.remove('hidden');
+          const _box = $('manualCookieBox');
+          if (_box) {
+            _box.open = true;
+            try { _box.scrollIntoView({behavior:'smooth', block:'start'}); } catch (e) {}
+          }
+        } else {
+          const _hint = $('captchaFailHint');
+          if (_hint) _hint.classList.add('hidden');
+        }
         break;
       default:
         $('pwMsg').textContent = d.message || d.state || '';
@@ -7997,12 +8636,15 @@ GENERATE_FORM_HTML = """
           const statusD = await statusR.json();
           if (statusD.cookies) {
             fillCookies(statusD.cookies);
-            setStage('完成', 'Cookies 已自动填好, 可直接点「生成 AI 报告」', 100);
-            setTimeout(() => hideProgress(), 1800);
-            setLoginBtnDisabled(false);
+            // v3.9.67 · 登录成功停留: 不再 setTimeout 1.8s 自动隐藏
+            // 进度框维持在"✅ 已登录"状态, 让用户清楚知道登录已成功
+            // 隐藏 spinner (handleState 已加), 更新文案更明确
+            $('pwTitle').textContent = '✅ 登录成功';
+            $('pwMsg').textContent = 'Cookies 已自动填好, 下方可继续点「生成 AI 报告」';
             return;
           }
         } catch (e) {}
+        // 兜底: 拿不到 cookies 就刷新页面让服务端渲染新状态
         window.location.reload();
       } else {
         setLoginBtnDisabled(false);
@@ -8093,6 +8735,14 @@ GENERATE_FORM_HTML = """
     PW_SID = null;
     hideProgress();
     setLoginBtnDisabled(false);
+    // v3.9.67 · 取消登录时清掉 6 次失败提示, 重置按钮文案
+    const _hint = $('captchaFailHint'); if (_hint) _hint.classList.add('hidden');
+    const _err = $('pwError'); if (_err) _err.classList.add('hidden');
+    const _sp = $('pwSpin'); if (_sp) _sp.classList.remove('hidden');
+    const _bar = $('pwBar');
+    if (_bar) { _bar.classList.add('bg-emerald-500'); _bar.classList.remove('bg-emerald-600'); }
+    const _btn = $('pwLoginBtn');
+    if (_btn) _btn.textContent = '🔑 授权登录洛谷';
   };
 
   // v3.9.57 fix · 直接给 button 绑定 click handler, 完全绕过 form submit 机制
@@ -10428,19 +11078,31 @@ def student_me(luogu_uid: str):
         app.logger.debug(f"[student_me] my_rank 计算失败: {_e_rank}")
 
     # v3.9.64 · 把按类型最新一份报告打包成模板卡片
+    # v3.9.68 · 家长订阅版: 文件名是 parent_subscribe.{html,md}, 缓存海报 share-card_parent.png
     def _pack_report_card(_d, _type: str) -> dict:
         if not _d:
             return {"exists": False, "type": _type}
-        _suffix = "_gesp" if _type == "gesp" else "_noi_csp"
-        _html = _d / f"report{_suffix}.html"
-        _pdf = _d / f"report{_suffix}.pdf"
-        _md = _d / f"report{_suffix}.md"
-        if not _html.exists():
-            _html = _d / "report.html"
-        if not _md.exists():
-            _md = _d / "report.md"
-        if not _pdf.exists():
-            _pdf = _d / "report.pdf"
+        if _type == "parent_subscribe":
+            _html = _d / "parent_subscribe.html"
+            _md = _d / "parent_subscribe.md"
+            _pdf = None  # 家长订阅版不出 PDF
+            _share_suffix = "_parent"
+        elif _type == "gesp":
+            _html = _d / "report_gesp.html"
+            _md = _d / "report_gesp.md"
+            _pdf = _d / "report_gesp.pdf"
+            _share_suffix = "_gesp"
+        else:
+            _html = _d / "report_noi_csp.html"
+            _pdf = _d / "report_noi_csp.pdf"
+            _md = _d / "report_noi_csp.md"
+            if not _html.exists():
+                _html = _d / "report.html"
+            if not _md.exists():
+                _md = _d / "report.md"
+            if not _pdf.exists():
+                _pdf = _d / "report.pdf"
+            _share_suffix = "_noi_csp"
         try:
             import datetime as _dt
             _BJ = _dt.timezone(_dt.timedelta(hours=8))
@@ -10454,15 +11116,74 @@ def student_me(luogu_uid: str):
             "dir_name": _d.name,
             "mtime_display": _mtime_str,
             "html_url": f"/reports/{_d.name}/{_html.name}" if _html.exists() else "",
-            "pdf_url": f"/reports/{_d.name}/{_pdf.name}" if _pdf.exists() else "",
+            "pdf_url": f"/reports/{_d.name}/{_pdf.name}" if (_pdf and _pdf.exists()) else "",
             "md_url": f"/reports/{_d.name}/{_md.name}" if _md.exists() else "",
             "has_html": _html.exists(),
-            "has_pdf": _pdf.exists(),
-            "share_url": f"/me/{luogu_uid}/share-card.png",
-            "has_poster": (_d / "share-card.png").exists(),
+            "has_pdf": bool(_pdf and _pdf.exists()),
+            # v3.9.67 · 海报按报告类型分文件 (share-card_gesp.png vs share-card_noi_csp.png)
+            "share_url": f"/me/{luogu_uid}/share-card.png?exam_type={_type}",
+            "has_poster": (_d / f"share-card{_share_suffix}.png").exists() or (_d / "share-card.png").exists(),
         }
     latest_noi_csp_card = _pack_report_card(latest_noi_csp_dir, "noi_csp")
     latest_gesp_card = _pack_report_card(latest_gesp_dir, "gesp")
+
+    # v3.9.68 · 决定 /me 页分享海报的 exam_type（按"最新一次生成的报告"决定）
+    # 优先级: parent_subscribe > gesp > noi_csp
+    # 优先级逻辑: 家长订阅版是"最近订阅的成果"，最新且最稀有，应当最优先分享；
+    #            GESP 是"用户主动选过的报告类型"，次优先；
+    #            NOI/CSP 是默认/兜底。
+    # 但更严谨的做法：按各类型产物的 mtime 取最新一份，让"最近一次生成"作主。
+    def _mt(_d, _fname: str) -> float:
+        try:
+            f = _d / _fname
+            return f.stat().st_mtime if f.exists() else 0
+        except Exception:
+            return 0
+
+    _ps_dir = None
+    try:
+        for d in (Path(__file__).parent / "reports").iterdir():
+            if not d.is_dir():
+                continue
+            if not ((d / "parent_subscribe.html").exists() or (d / "parent_subscribe.md").exists()):
+                continue
+            # 该 dir 属于该学员？
+            matched = False
+            if luogu_uid:
+                try:
+                    if (d / "luogu_uid.txt").read_text(encoding="utf-8", errors="replace").strip() == str(luogu_uid).strip():
+                        matched = True
+                except Exception:
+                    pass
+            if not matched and luogu_uid and str(luogu_uid) in d.name:
+                matched = True
+            if not matched and student_dict.get("real_name") and d.name.endswith("_" + "".join(c for c in student_dict["real_name"] if c.isalnum())):
+                matched = True
+            if matched:
+                if _ps_dir is None or d.stat().st_mtime > _ps_dir.stat().st_mtime:
+                    _ps_dir = d
+    except Exception:
+        _ps_dir = None
+    latest_parent_subscribe_dir = _ps_dir
+    latest_parent_subscribe_card = _pack_report_card(latest_parent_subscribe_dir, "parent_subscribe") if latest_parent_subscribe_dir else {"exists": False, "type": "parent_subscribe"}
+
+    # 按 mtime 选 primary_exam_type
+    _mt_parent = _mt(latest_parent_subscribe_dir, "parent_subscribe.html") if latest_parent_subscribe_dir else 0
+    _mt_gesp = _mt(latest_gesp_dir, "report_gesp.html") if latest_gesp_dir else 0
+    _mt_noi = _mt(latest_noi_csp_dir, "report.html") if latest_noi_csp_dir else 0
+    # 兜底：用 report_gesp.md / report.md
+    if not _mt_gesp and latest_gesp_dir:
+        _mt_gesp = _mt(latest_gesp_dir, "report_gesp.md")
+    if not _mt_noi and latest_noi_csp_dir:
+        _mt_noi = _mt(latest_noi_csp_dir, "report.md")
+
+    if _mt_parent and _mt_parent >= max(_mt_gesp, _mt_noi):
+        primary_exam_type = "parent_subscribe"
+    elif _mt_gesp and _mt_gesp >= _mt_noi:
+        primary_exam_type = "gesp"
+    else:
+        primary_exam_type = "noi_csp"
+    primary_exam_type_for_share = primary_exam_type
 
     return render_template_string(
         STUDENT_ME_HTML,
@@ -10483,9 +11204,13 @@ def student_me(luogu_uid: str):
         report_htmls=_list_student_report_htmls(luogu_uid, (student.get("real_name") or "") if student else "", limit=8),
         # v3.9.46 · 我的排名（C 形态卡片用）
         my_rank=my_rank,
-        # v3.9.64 · 按报告类型分别的"最新报告"卡片（NOI-CSP / GESP）
+        # v3.9.64 · 按报告类型分别的"最新报告"卡片（NOI-CSP / GESP / 家长订阅）
         latest_noi_csp_card=latest_noi_csp_card,
         latest_gesp_card=latest_gesp_card,
+        latest_parent_subscribe_card=latest_parent_subscribe_card,
+        # v3.9.67 · 分享海报 / QR 码都按 primary_exam_type 切
+        primary_exam_type=primary_exam_type,
+        primary_exam_type_for_share=primary_exam_type_for_share,
     )
 
 
@@ -10662,8 +11387,28 @@ def _render_student_me_lite(luogu_uid: str):
         except Exception:
             _lite_name = ""
         latest = _find_latest_report_dir(luogu_uid, _lite_name)
-        if latest and (latest / "report.md").exists():
-            report_md = (latest / "report.md").read_text(encoding="utf-8", errors="replace")
+        # v3.9.67 · lite 路径也加 exam_type 兜底（GESP 海报 QR 码可能进 lite）
+        # v3.9.68 · 家长订阅版的请求直接 302 到 parent_subscribe.html（不进 lite）
+        _lite_qr_exam_type = (request.args.get("exam_type") or "").strip().lower()
+        if _lite_qr_exam_type == "parent_subscribe":
+            _ps_dir = _find_latest_report_dir_by_type(luogu_uid, _lite_name, "parent_subscribe")
+            if _ps_dir and (_ps_dir / "parent_subscribe.html").exists():
+                from flask import redirect as _flask_redirect
+                return _flask_redirect(f"/reports/{_ps_dir.name}/parent_subscribe.html", code=302)
+        if not latest and _lite_qr_exam_type in ("noi_csp", "gesp"):
+            latest = _find_latest_report_dir_by_type(luogu_uid, _lite_name, _lite_qr_exam_type)
+        if latest:
+            # v3.9.68 · lite 路径：按 exam_type 选对应报告文件（gesp → report_gesp.md / parent_subscribe → parent_subscribe.md）
+            _lite_md_name = "report.md"
+            if _lite_qr_exam_type == "gesp":
+                _lite_md_name = "report_gesp.md"
+            elif _lite_qr_exam_type == "parent_subscribe":
+                _lite_md_name = "parent_subscribe.md"
+            _lite_md_path = latest / _lite_md_name
+            if not _lite_md_path.exists() and (latest / "report.md").exists():
+                _lite_md_path = latest / "report.md"  # 兜底
+            if _lite_md_path.exists():
+                report_md = _lite_md_path.read_text(encoding="utf-8", errors="replace")
             if len(report_md.strip()) > 100:
                 ext = _extract_achievements_from_report(report_md)
                 achievements.update(ext)
@@ -11099,7 +11844,7 @@ def _is_valid_ai_level(s: str) -> bool:
         return False
     # 必须包含至少一个等级关键词
     keywords = [
-        "CSP", "入门", "熟练", "精通", "提高", "省选", "省一",
+        "CSP", "GESP", "入门", "熟练", "精通", "提高", "省选", "省一",
         "NOI", "NOIP", "普及", "门槛", "过渡", "基础", "零基础",
     ]
     return any(kw in s for kw in keywords)
@@ -11159,6 +11904,47 @@ def _extract_ai_evaluation_from_report(report_md: str) -> dict:
     # ─── 1) AI 定级 ────────────────────────────────────
     # 优先：粗体括号 【xxx】（格式 1）
     patterns = [
+        # v3.9.68 · GESP 报告：开头第一行 "目标级别：**GESP 6 级**"
+        r"目标级别[：:]\s*\*\*\s*(GESP\s*\d+\s*级)\s*\*\*",
+        r"目标级别[：:]\s*\*\*(GESP\s*\d+\s*级)\*\*",
+        # v3.9.68 · GESP 报告"AI 评级" / "AI 定级" 块
+        r"AI\s*(?:评级|定级)[：:]\s*\*\*\s*([^*\n]{2,80}?)\s*\*\*",
+        # v3.9.68 · GESP 报告：学员当前实力块（`**学员当前实力**：GESP 5 级通过`）
+        r"学员当前实力\*{0,2}[：:]\s*\*?\*?\s*((?:GESP\s*\d+\s*级)[^*\n]{0,30}?)\*?\*?",
+        r"学员当前实力.{0,30}?(GESP\s*\d+\s*级)",
+        # v3.9.68 · GESP 报告：表格"学员已通过最高级别 | ✅ **GESP 5 级**"
+        r"学员已通过最高级别.{0,40}?\*\*\s*(GESP\s*\d+\s*级)\s*\*\*",
+        # v3.9.68 · GESP 报告：通用"已通过 GESP X 级"句式
+        r"已通过[^。\n]{0,15}?\*\*\s*(GESP\s*\d+\s*级)\s*\*\*",
+        # v3.9.68 · GESP 报告：报告开头"目标直接锁定在 **GESP 8 级（高级算法）**"
+        r"目标[^。\n]{0,15}?\*\*\s*(GESP\s*\d+\s*级)[^*<>\n]{0,15}?\*\*",
+        # v3.9.68 · GESP 报告：标题里的"目标级别（X 级）"
+        r"目标级别（\s*(\d+)\s*级\s*）",
+        # v3.9.68 · CSP 新模板（当前等级水平——去掉了"对应"）：
+        # `**当前等级水平**：**CSP-J（入门级）**`
+        r"当前等级水平\*\*[:：]\s*\*\*([^*\n]{2,80}?)\*\*",
+        r"当前等级水平[：:]?\s*\*\*([^*\n]{2,80}?)\*\*",
+        # v3.9.68 · CSP 新模板：当前对应等级水平后接散文/列表，level 在后文 `**...**` 中
+        # `**当前对应等级水平**：综合来看...你的实力稳定在 **CSP-S 一等奖顶端**...`
+        # `#### **当前对应等级水平**\n该选手当前水平明确对应 **CSP-S 提高级**...`
+        # `### 当前对应等级水平\n\n根据...选手当前处于 **CSP-J 入门段前期**。...`（v3.9.68 无冒号版）
+        r"当前对应等级水平[\s\S]{0,1500}?\*\*\s*((?:CSP-[JS]|GESP)[^*\n]{1,60}?)\s*\*\*",
+        # v3.9.68 · CSP 新模板：当前对应等级水平 \n - **核心等级**: **LEVEL**（注意 - 在新行，** 是 markdown 粗体结束符）
+        r"当前对应等级水平[\s\S]{0,40}?-\s*\*\*核心等级\*\*\s*[:：]\s*\*\*\s*((?:CSP-[JS]|GESP)[^*\n]{0,40}?)\s*\*\*",
+        # v3.9.68 · CSP 新模板：**核心等级**：**LEVEL**（更通用，** 在关键字前后）
+        r"\*\*核心等级\*\*\s*[:：]\s*\*\*\s*((?:CSP-[JS]|GESP)[^*\n]{0,40}?)\s*\*\*",
+        # v3.9.68 · CSP 新模板：定级：xxx 后接 level 关键词
+        r"定级[：:][\s\S]{0,500}?\*\*\s*((?:CSP-[JS]|GESP)[^*\n]{1,60}?)\s*\*\*",
+        # v3.9.68 · CSP 新模板：定级：xxx 后接 <strong>LEVEL</strong>（HTML 包裹）
+        r"定级[：:][\s\S]{0,500}?<strong[^>]*>\s*((?:CSP-[JS]|GESP)[^<]{1,60}?)\s*</strong>",
+        # v3.9.68 · CSP 新模板：当前对应等级水平后接 <strong>LEVEL</strong>
+        r"当前对应等级水平[^\n]*\n+[\s\S]{0,800}?<strong[^>]*>\s*((?:CSP-[JS]|GESP)[^<]{1,60}?)\s*</strong>",
+        # v3.9.68 · CSP 新模板：当前对应等级水平后接 CSP-X（...） 形式（无 ** 包裹）
+        r"当前对应等级水平[：:][\s\S]{0,500}?(CSP-[JS][（(][^）)\n]{1,15}[)）])",
+        r"定级[：:][\s\S]{0,500}?(CSP-[JS][（(][^）)\n]{1,15}[)）])",
+        # v3.9.68 · CSP 新模板：当前对应等级水平后接 "CSP-J 入门组/CSP-S 一等..." 形式
+        r"当前对应等级水平[：:][\s\S]{0,500}?(CSP-[JS][\s（(][^\n。,，<>]{1,40})",
+        r"定级[：:][\s\S]{0,500}?(CSP-[JS][\s（(][^\n。,，<>]{1,40})",
         r"你的真实水平为：\*\*【(.+?)】\*\*",                # 格式 1
         r"你目前的真实水平[，,。：:].{0,50}?【(.+?)】",       # 格式 2
         r"定级[：:].{0,80}?【(.+?)】",                         # 格式 2 alt
@@ -11595,8 +12381,13 @@ def _extract_achievements_from_report(report_md: str) -> dict:
 
 
 
-def _build_share_card_data(luogu_uid: str) -> dict | None:
+def _build_share_card_data(luogu_uid: str, exam_type: str = "noi_csp") -> dict | None:
     """组装"9 月我家孩子位置"分享卡所需数据
+
+    v3.9.68 · 新增 exam_type 参数：
+      - "noi_csp"（默认）: 读 report.md / report_noi_csp.md
+      - "gesp": 读 report_gesp.md（GESP 报告里 AI 定级是 GESP 体系，不能套 CSP）
+      - "parent_subscribe": 读 parent_subscribe.md（家长订阅报告）
 
     字段：
       · name: 学员姓名（缺省 "学员"）
@@ -11609,6 +12400,9 @@ def _build_share_card_data(luogu_uid: str) -> dict | None:
       · last_exam: 最近一次 GESP 真考 (level, score, year)
       · asof: "最后更新" 日期
     """
+    _exam_type = (exam_type or "noi_csp").strip().lower()
+    if _exam_type not in ("noi_csp", "gesp", "parent_subscribe"):
+        _exam_type = "noi_csp"
     from datetime import date as _date
     try:
         from docs.gesp_estimator import compute_exemptions
@@ -11789,6 +12583,17 @@ def _build_share_card_data(luogu_uid: str) -> dict | None:
         pass
 
     # ── v3.6 关键：从最新 report.md 抽取 AI 测评（用户原话："测评结果应该来源于报告"） ──
+    # v3.9.68 · 按 exam_type 选对应的 md 文件 + 报告目录
+    #   - gesp → report_gesp.md（GESP 报告的 AI 定级是 GESP 体系，不能套 CSP）
+    #   - parent_subscribe → parent_subscribe.md（家长订阅报告）
+    #   - noi_csp → report.md（默认，兼容旧版）
+    if _exam_type == "gesp":
+        _md_candidates = ("report_gesp.md", "report.md")
+    elif _exam_type == "parent_subscribe":
+        _md_candidates = ("parent_subscribe.md", "report.md")
+    else:
+        _md_candidates = ("report_noi_csp.md", "report.md")
+
     ai_eval = {
         "ai_level": None,
         "core_reading": None,
@@ -11798,13 +12603,18 @@ def _build_share_card_data(luogu_uid: str) -> dict | None:
     report_assets: dict = {}  # 性格雷达 / 标签图（用于海报主视觉替代 AI 核心解读）
     report_dir_path = None
     try:
-        report_dir = _find_latest_report_dir(luogu_uid, name)
+        # v3.9.68 · 先按 exam_type 找该类型专属报告目录；找不到再回退到通用最新目录
+        report_dir = _find_latest_report_dir_by_type(luogu_uid, name, _exam_type)
+        if report_dir is None:
+            report_dir = _find_latest_report_dir(luogu_uid, name)
         if report_dir is not None:
             report_dir_path = report_dir
-            md_path = report_dir / "report.md"
-            if md_path.exists():
-                report_md = md_path.read_text(encoding="utf-8", errors="replace")
-                ai_eval = _extract_ai_evaluation_from_report(report_md)
+            for _md_name in _md_candidates:
+                md_path = report_dir / _md_name
+                if md_path.exists():
+                    report_md = md_path.read_text(encoding="utf-8", errors="replace")
+                    ai_eval = _extract_ai_evaluation_from_report(report_md)
+                    break
             # v3.6.1 · 海报要展示的图表（来自报告 assets/）
             for key, fname in [
                 ("personality_radar", "personality_radar.png"),
@@ -11960,7 +12770,7 @@ def _fallback_ai_level(ai_score_thousand: int, six_dim: dict, gesp_level: int, g
     return "起步级（兜底）"
 
 
-def _render_share_card_png(data: dict, qr_url: str) -> bytes:
+def _render_share_card_png(data: dict, qr_url: str, exam_type: str = "noi_csp") -> bytes:
     """v3.6 传播期 · 信息学 AI 测评结果海报（PNG）· 重设计版
 
     视觉定位：**信息学 AI 测评结果** 卡片（不是赛事日历）
@@ -11970,6 +12780,17 @@ def _render_share_card_png(data: dict, qr_url: str) -> bytes:
       · 主内容：测评结果改为来自 report.md 的 AI 定级 + 核心解读
         · GESP 等级 / 分数 降级为小事实（"事实"标签）
       · 删除学员信息行中多余的紫色头像占位
+
+    v3.9.67 · 新增 exam_type 分支：
+      · "noi_csp"（默认）：紫色主题，标题 "信息学AI测评结果"
+      · "gesp"：琥珀色主题，标题 "GESP 8 级备考测评"，副标 "基于 GESP 真考 + 洛谷做题数据"
+        段位条强调"G1-G8" 标签，徽章用 GESP 真考分（80+ ✦ 强 / 60-79 ★ 中 / <60 ✗ 弱 / □ 未学）
+    v3.9.68 · 家长订阅版（翠绿主题）：
+      · 标题 "家长订阅版 AI 决策支持"
+      · 副标 "家长关心的 3 件事：路径 / 节奏 / 风险"
+      · 事实条改为"陪跑要点"，段位条改为"信息学陪跑关键节点"
+      · 左侧事实改为"目标 GESP X 级"，右侧事实为"距免初赛"
+
     布局（自上而下）：
       ① 顶部渐变带："信息学 AI 测评结果" 大标题 + 副标题
       ② 学员信息行（姓名 + UID）
@@ -11986,6 +12807,10 @@ def _render_share_card_png(data: dict, qr_url: str) -> bytes:
     import matplotlib.pyplot as plt
     from matplotlib.patches import FancyBboxPatch, Circle
     import matplotlib.patheffects as pe
+    # v3.9.67 · 三主题: noi_csp(紫) / gesp(琥珀) / parent_subscribe(翠绿)
+    _exam = str(exam_type or "noi_csp").strip().lower()
+    _is_gesp = _exam == "gesp"
+    _is_parent = _exam == "parent_subscribe"
     # v3.8 · qrcode + PIL 缺失时降级（不抛 500），QR 位置显示纯文字 URL
     # 优先用 pillow 后端（PilImage），失败再回退 PyPNGImage（需 pypng 库）
     _HAS_QRCODE = False
@@ -12028,20 +12853,53 @@ def _render_share_card_png(data: dict, qr_url: str) -> bytes:
     plt.rcParams["axes.unicode_minus"] = False
 
     # ── 主色板 ──────────────
-    COLOR_BG = "#F5F3FF"          # 整张背景：淡紫
-    COLOR_PRIMARY = "#6366F1"     # 主紫
-    COLOR_PRIMARY_DK = "#4F46E5"  # 深紫
-    COLOR_PRIMARY_LT = "#A5B4FC"  # 浅紫
-    COLOR_ACCENT = "#8B5CF6"      # 辅紫
-    COLOR_GREEN = "#10B981"       # 免初赛
-    COLOR_AMBER = "#F59E0B"       # 中评
-    COLOR_RED = "#EF4444"         # 弱评
-    COLOR_GRAY = "#6B7280"        # 起步
-    COLOR_TEXT = "#0F172A"        # 主文字
-    COLOR_TEXT_LT = "#64748B"     # 次文字
-    COLOR_TEXT_XL = "#94A3B8"     # 浅文字
-    COLOR_CARD = "#FFFFFF"        # 卡片白
-    COLOR_CARD_EDGE = "#E0E7FF"   # 卡片边
+    # v3.9.67 · GESP 版换琥珀色（橙黄）主题, NOI 版保留紫色
+    # v3.9.68 · 家长订阅版用翠绿色（绿色 = 安全 / 决策 / 陪跑）
+    if _is_parent:
+        COLOR_BG = "#ECFDF5"          # 整张背景：淡绿
+        COLOR_PRIMARY = "#10B981"     # 主色：翠绿
+        COLOR_PRIMARY_DK = "#047857"  # 深色
+        COLOR_PRIMARY_LT = "#6EE7B7"  # 浅色
+        COLOR_ACCENT = "#059669"      # 辅色
+        COLOR_GREEN = "#10B981"       # 强
+        COLOR_AMBER = "#F59E0B"       # 中
+        COLOR_RED = "#DC2626"         # 弱
+        COLOR_GRAY = "#6B7280"        # 起步
+        COLOR_TEXT = "#064E3B"
+        COLOR_TEXT_LT = "#065F46"
+        COLOR_TEXT_XL = "#6B7280"
+        COLOR_CARD = "#FFFFFF"
+        COLOR_CARD_EDGE = "#A7F3D0"   # 卡片边：淡绿
+    elif _is_gesp:
+        COLOR_BG = "#FFF7ED"          # 整张背景：淡橙
+        COLOR_PRIMARY = "#F59E0B"     # 主色：琥珀
+        COLOR_PRIMARY_DK = "#D97706"  # 深色
+        COLOR_PRIMARY_LT = "#FDE68A"  # 浅色
+        COLOR_ACCENT = "#EA580C"      # 辅色
+        COLOR_GREEN = "#16A34A"       # 强
+        COLOR_AMBER = "#F59E0B"       # 中
+        COLOR_RED = "#DC2626"         # 弱
+        COLOR_GRAY = "#6B7280"        # 起步
+        COLOR_TEXT = "#0F172A"
+        COLOR_TEXT_LT = "#64748B"
+        COLOR_TEXT_XL = "#94A3B8"
+        COLOR_CARD = "#FFFFFF"
+        COLOR_CARD_EDGE = "#FED7AA"   # 卡片边：淡橙
+    else:
+        COLOR_BG = "#F5F3FF"          # 整张背景：淡紫
+        COLOR_PRIMARY = "#6366F1"     # 主紫
+        COLOR_PRIMARY_DK = "#4F46E5"  # 深紫
+        COLOR_PRIMARY_LT = "#A5B4FC"  # 浅紫
+        COLOR_ACCENT = "#8B5CF6"      # 辅紫
+        COLOR_GREEN = "#10B981"       # 免初赛
+        COLOR_AMBER = "#F59E0B"       # 中评
+        COLOR_RED = "#EF4444"         # 弱评
+        COLOR_GRAY = "#6B7280"        # 起步
+        COLOR_TEXT = "#0F172A"        # 主文字
+        COLOR_TEXT_LT = "#64748B"     # 次文字
+        COLOR_TEXT_XL = "#94A3B8"     # 浅文字
+        COLOR_CARD = "#FFFFFF"        # 卡片白
+        COLOR_CARD_EDGE = "#E0E7FF"   # 卡片边
 
     # 画布 9 × 16，竖版海报
     fig = plt.figure(figsize=(9, 16), dpi=110)
@@ -12071,17 +12929,28 @@ def _render_share_card_png(data: dict, qr_url: str) -> bytes:
                           (1.5, 14.9, 0.06, 0.35), (7.6, 15.5, 0.08, 0.25)]:
         ax.add_patch(Circle((cx, cy), r, facecolor="white", alpha=a, edgecolor="none"))
 
-    # 主标题"信息学AI测评结果"（最大字号）
-    ax.text(4.5, 15.0, "信息学AI测评结果", ha="center", va="center",
+    # 主标题（最大字号）
+    if _is_parent:
+        title_text = "家长订阅版 AI 决策支持"
+        sub_text = "家长关心的 3 件事：路径 / 节奏 / 风险 -信息学陪跑"
+    elif _is_gesp:
+        title_text = "GESP 8 级备考测评"
+        sub_text = "基于GESP真考+洛谷做题数据-8级知识地图诊断"
+    else:
+        title_text = "信息学AI测评结果"
+        sub_text = "AI测评编程能力报告-基于选手洛谷数据"
+    ax.text(4.5, 15.0, title_text, ha="center", va="center",
             fontsize=32, color="white", fontweight="bold",
             path_effects=[pe.withStroke(linewidth=1.5, foreground=COLOR_PRIMARY_DK)])
-    # 副标题：AI 测评编程能力报告 · 基于选手洛谷数据
-    ax.text(4.5, 14.45, "AI测评编程能力报告-基于选手洛谷数据",
+    # 副标题
+    ax.text(4.5, 14.45, sub_text,
             ha="center", va="center", fontsize=12, color="#E0E7FF")
 
     # ── 学员信息行 ──────────────
+    # v3.9.69 · 姓名脱敏：海报是公开传播物料，姓名只显示姓氏
+    _masked_name = _mask_name_for_public(data.get("name"))
     ax.add_patch(_rounded(0.5, 13.55, 8.0, 0.55, COLOR_CARD, ec=COLOR_CARD_EDGE, lw=1, r=0.25))
-    ax.text(0.85, 13.83, data['name'], ha="left", va="center",
+    ax.text(0.85, 13.83, _masked_name, ha="left", va="center",
             fontsize=14, color=COLOR_TEXT, fontweight="bold")
     ax.text(8.2, 13.83, f"UID  {data['uid']}", ha="right", va="center",
             fontsize=11, color=COLOR_TEXT_LT, family="monospace")
@@ -12151,8 +13020,13 @@ def _render_share_card_png(data: dict, qr_url: str) -> bytes:
     # 小标签（断行后下移一点，避免与大字的 2 行重叠）
     _sub_y = 11.20 if char_count <= 16 else 10.95
     if ai_level:
-        ax.text(0.85, _sub_y, "（基于 NOI 2025 大纲 · AI 综合判定）",
-                ha="left", va="center", fontsize=9.5, color=COLOR_TEXT_XL, style="italic")
+        # v3.9.67 · GESP 版副标: GESP 真考事实 + 8 级知识地图诊断
+        if _is_gesp:
+            ax.text(0.85, 11.20, "（基于 GESP 1-8 级官方考纲 · 真实做题数据校验）",
+                    ha="left", va="center", fontsize=9.5, color=COLOR_TEXT_XL, style="italic")
+        else:
+            ax.text(0.85, _sub_y, "（基于 NOI 2025 大纲 · AI 综合判定）",
+                    ha="left", va="center", fontsize=9.5, color=COLOR_TEXT_XL, style="italic")
 
     # 分隔线
     ax.plot([0.85, 8.15], [10.80, 10.80], color=COLOR_CARD_EDGE, linewidth=1, linestyle="--")
@@ -12205,32 +13079,55 @@ def _render_share_card_png(data: dict, qr_url: str) -> bytes:
                 "（尚未生成报告，无算法标签）", ha="center", va="center",
                 fontsize=9.5, color=COLOR_TEXT_XL, style="italic")
 
-    # ── GESP 真考事实条（v3.6 · 降级为"事实"，不再作为测评结果） ──────────────
-    # 黄色信息条，标识 GESP 仅为真考事实数据，非 AI 测评结论
-    ax.add_patch(_rounded(0.7, 8.00, 7.6, 0.20, "#FEF3C7", r=0.10))
-    ax.text(4.5, 8.00, "事实数据  ·  GESP 真考成绩",
-            ha="center", va="center", fontsize=9, color="#92400E", fontweight="bold")
+    # ── 事实条（v3.6 · 降级为"事实"） ──────────────
+    # v3.9.68 · 三主题差异化: NOI/GESP 显 GESP 真考事实, 家长订阅显陪跑信息
+    if _is_parent:
+        # 家长订阅版: 强调"陪跑"信息（节奏 / 路径 / 风险）
+        ax.add_patch(_rounded(0.7, 8.00, 7.6, 0.20, "#D1FAE5", r=0.10))
+        ax.text(4.5, 8.00, "陪跑要点  ·  路径 / 节奏 / 风险",
+                ha="center", va="center", fontsize=9, color="#065F46", fontweight="bold")
+    else:
+        ax.add_patch(_rounded(0.7, 8.00, 7.6, 0.20, "#FEF3C7", r=0.10))
+        ax.text(4.5, 8.00, "事实数据  ·  GESP 真考成绩",
+                ha="center", va="center", fontsize=9, color="#92400E", fontweight="bold")
 
     # 两条事实
-    if data["gesp_level"] > 0:
-        fact_l = f"已通过 GESP {data['gesp_level']} 级"
-        fact_l_color = COLOR_TEXT
-    else:
-        fact_l = "尚未参加 GESP"
-        fact_l_color = COLOR_TEXT_XL
-    if data["gesp_level"] > 0:
-        if data["gesp_score"] >= 80:
-            fact_r = f"最近分 {data['gesp_score']} / 100（高分）"
-            fact_r_color = COLOR_GREEN
-        elif data["gesp_score"] >= 60:
-            fact_r = f"最近分 {data['gesp_score']} / 100（通过）"
-            fact_r_color = COLOR_AMBER
+    # v3.9.68 · 家长订阅版显示"陪跑关键事实"（目标 / 差距）而非 GESP 真考分
+    if _is_parent:
+        # 家长订阅：左 = 目标 / 右 = 距离免初赛
+        try:
+            from docs.gesp_estimator import compute_exemptions as _ce
+            _cex = _ce(int(data.get("gesp_level") or 0), int(data.get("gesp_score") or 0))
+        except Exception:
+            _cex = {}
+        if (data.get("gesp_level") or 0) >= 8:
+            fact_l = "目标：信息学奥赛决赛"
+            fact_l_color = COLOR_PRIMARY_DK
         else:
-            fact_r = f"最近分 {data['gesp_score']} / 100（未达 60）"
-            fact_r_color = COLOR_RED
+            fact_l = f"目标：GESP {(data.get('gesp_level') or 0) + 1} 级"
+            fact_l_color = COLOR_TEXT
+        fact_r = data.get("gap_j") or "—"
+        fact_r_color = COLOR_TEXT
     else:
-        fact_r = "—"
-        fact_r_color = COLOR_TEXT_XL
+        if data["gesp_level"] > 0:
+            fact_l = f"已通过 GESP {data['gesp_level']} 级"
+            fact_l_color = COLOR_TEXT
+        else:
+            fact_l = "尚未参加 GESP"
+            fact_l_color = COLOR_TEXT_XL
+        if data["gesp_level"] > 0:
+            if data["gesp_score"] >= 80:
+                fact_r = f"最近分 {data['gesp_score']} / 100（高分）"
+                fact_r_color = COLOR_GREEN
+            elif data["gesp_score"] >= 60:
+                fact_r = f"最近分 {data['gesp_score']} / 100（通过）"
+                fact_r_color = COLOR_AMBER
+            else:
+                fact_r = f"最近分 {data['gesp_score']} / 100（未达 60）"
+                fact_r_color = COLOR_RED
+        else:
+            fact_r = "—"
+            fact_r_color = COLOR_TEXT_XL
     ax.text(0.85, 7.65, fact_l, ha="left", va="center",
             fontsize=11, color=fact_l_color, fontweight="bold")
     ax.text(8.15, 7.65, fact_r, ha="right", va="center",
@@ -12264,9 +13161,15 @@ def _render_share_card_png(data: dict, qr_url: str) -> bytes:
             fontsize=11, color=s_color, fontweight="bold")
 
     # ── 段位图（圆点 + 连接线） ──────────────
-    # 用紫色方块代替 emoji
+    # v3.9.67/68 · 三主题: GESP=GESP 1-8 级备考进度 / NOI=8 段位进度 / 家长=关键路径节点
+    if _is_gesp:
+        seg_title = "GESP 1-8 级备考进度"
+    elif _is_parent:
+        seg_title = "信息学陪跑关键节点"
+    else:
+        seg_title = "GESP 8 段位进度"
     ax.add_patch(_rounded(4.5 - 1.20, 5.20, 0.16, 0.20, COLOR_PRIMARY_DK, r=0.05))
-    ax.text(4.5 + 0.10, 5.30, "GESP 8 段位进度", ha="center", va="center",
+    ax.text(4.5 + 0.10, 5.30, seg_title, ha="center", va="center",
             fontsize=12, color=COLOR_PRIMARY_DK, fontweight="bold")
     seg_y = 4.55
     seg_left, seg_right = 0.7, 8.3
@@ -12429,22 +13332,58 @@ def share_card_png(luogu_uid: str):
     """
     # 1) 优先从最新 report 目录读取已预渲染的 PNG
     student = _admin_students.get_student_by_uid(luogu_uid)
+    _q_exam_type = (request.args.get("exam_type") or "noi_csp").strip().lower()
+    if _q_exam_type not in ("noi_csp", "gesp", "parent_subscribe"):
+        _q_exam_type = "noi_csp"
+    # v3.9.68 · 三种类型的后缀: _noi_csp / _gesp / _parent
+    _SUFFIX_MAP = {
+        "noi_csp": "_noi_csp",
+        "gesp": "_gesp",
+        "parent_subscribe": "_parent",
+    }
+    _q_suffix = _SUFFIX_MAP[_q_exam_type]
     if student:
         report_dir = _find_latest_report_dir(luogu_uid, student.get("real_name") or "")
         if report_dir:
-            cached = report_dir / "share-card.png"
+            # v3.9.67 · 按 exam_type 取专属缓存 (share-card_gesp.png vs share-card_noi_csp.png)
+            cached = report_dir / f"share-card{_q_suffix}.png"
             if cached.exists():
                 resp = send_file(str(cached), mimetype="image/png", conditional=True)
                 resp.headers["Cache-Control"] = "public, max-age=600"
                 return resp
+            # 兜底取最新一份（兼容老路径：仅 share-card.png）
+            # v3.9.67 · 但仅当 exam_type 与老缓存一致时才用 —— 否则按新 exam_type 重新渲染
+            # （老 share-card.png 可能是 NOI 主题, 用户要求 GESP 时不能用老缓存顶替）
+            cached_legacy = report_dir / "share-card.png"
+            if cached_legacy.exists() and _q_exam_type == "noi_csp":
+                resp = send_file(str(cached_legacy), mimetype="image/png", conditional=True)
+                resp.headers["Cache-Control"] = "public, max-age=600"
+                return resp
+            # 另一种兜底：当前是 GESP/parent 请求但只有老 share-card.png,
+            # 看看 share-card.png 是不是比 route 启动时间还老（来自 v3.9.67 之前）,
+            # 是 → 强制重渲染（保证主题正确）
+            if cached_legacy.exists() and _q_exam_type in ("gesp", "parent_subscribe"):
+                # 走下面的兜底渲染分支（强制重渲, 不复用老 PNG）
+                app.logger.info(
+                    f"v3.9.68 share-card.png 主题不一致 ({_q_exam_type} 请求, 老 NOI 缓存), 强制重渲: {cached_legacy}"
+                )
     # 2) 兜底：现场渲染（5-15s），并把结果落盘到 reports/<uid>/share-card.png
-    data = _build_share_card_data(luogu_uid)
+    # v3.9.68 · 按 exam_type 找报告（避免 GESP 报告的 AI 定级被回退到 CSP 兜底）
+    data = _build_share_card_data(luogu_uid, exam_type=_q_exam_type)
     if not data:
         return "UID 未注册", 404
-    base = request.host_url.rstrip("/")
-    qr_url = f"{base}/r/{luogu_uid}"  # v3.7 · 指向新建的报告预览中转页
+    # v3.9.68 · QR 码基础 URL：优先用环境变量 PUBLIC_BASE_URL（公网域名），
+    # 否则 fallback 到 request.host_url（可能是 localhost，扫码后打不开）
+    _public_base = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
+    if _public_base:
+        base = _public_base
+    else:
+        base = request.host_url.rstrip("/")
+    # v3.9.67 · QR 码按 exam_type 带参,扫码后 /r/<uid> 路由能找到对应类型报告
+    qr_url = f"{base}/r/{luogu_uid}?exam_type={_q_exam_type}"  # v3.7 · 指向新建的报告预览中转页
     try:
-        png_bytes = _render_share_card_png(data, qr_url)
+        # v3.9.67 · 兜底渲染也按 exam_type 切主题
+        png_bytes = _render_share_card_png(data, qr_url, exam_type=_q_exam_type)
     except Exception as _e:
         app.logger.exception(f"v3.9.37 share-card.png 兜底渲染失败: UID={luogu_uid}: {_e}")
         return f"海报生成失败: {_e}", 500
@@ -12457,19 +13396,25 @@ def share_card_png(luogu_uid: str):
             _dir = _find_latest_report_dir(luogu_uid, data.get("name") or "")
         if _dir:
             _dir.mkdir(parents=True, exist_ok=True)
-            (_dir / "share-card.png").write_bytes(png_bytes)
-            app.logger.info(f"v3.9.37 share-card.png 兜底渲染并缓存: {_dir / 'share-card.png'} ({len(png_bytes)} bytes)")
+            (_dir / f"share-card{_q_suffix}.png").write_bytes(png_bytes)
+            (out_dir_legacy := _dir / "share-card.png").write_bytes(png_bytes)
+            app.logger.info(
+                f"v3.9.67 share-card.png 兜底渲染并缓存: {_dir / f'share-card{_q_suffix}.png'} ({len(png_bytes)} bytes)"
+            )
         else:
             # 没有任何 report 目录：建一个 reports/<uid>/share-card.png 占位
             _fallback = Path(__file__).parent / "reports" / luogu_uid
             _fallback.mkdir(parents=True, exist_ok=True)
+            (_fallback / f"share-card{_q_suffix}.png").write_bytes(png_bytes)
             (_fallback / "share-card.png").write_bytes(png_bytes)
-            app.logger.info(f"v3.9.37 share-card.png 兜底渲染并缓存到新目录: {_fallback / 'share-card.png'} ({len(png_bytes)} bytes)")
+            app.logger.info(
+                f"v3.9.67 share-card.png 兜底渲染并缓存到新目录: {_fallback / f'share-card{_q_suffix}.png'} ({len(png_bytes)} bytes)"
+            )
     except Exception as _cache_e:
         # 缓存失败不影响本次返回
         app.logger.warning(f"v3.9.37 share-card.png 落盘缓存失败（不影响本次返回）: {_cache_e}")
     return Response(png_bytes, mimetype="image/png", headers={
-        "Content-Disposition": f'inline; filename="share-card-{luogu_uid}.png"',
+        "Content-Disposition": f'inline; filename="share-card-{_q_exam_type}-{luogu_uid}.png"',
         "Cache-Control": "public, max-age=600",
     })
 
@@ -12767,7 +13712,42 @@ def report_preview(luogu_uid: str):
     # （旧逻辑只传 luogu_uid，找不到没有 luogu_uid.txt 侧车文件的报告目录）
     student = _admin_students.get_student_by_uid(luogu_uid)
     student_name = (student.get("real_name") or "").strip() if student else ""
-    latest = _find_latest_report_dir(luogu_uid, student_name)
+    # v3.9.69 · /r/<uid> 是公开扫码落地页：展示真名会暴露学员身份
+    # 一律用「姓氏 + UID」避免泄露全名
+    _public_student_name = _mask_name_for_public(student.get("real_name") if student else None)
+    # v3.9.67 · 读 ?exam_type= 参数（GESP 海报的 QR 码会带 exam_type=gesp），
+    # 按测评类型找对应报告。缺省时用 NOI-CSP（保留旧行为）。
+    # v3.9.68 · 加 parent_subscribe（家长订阅版）
+    _qr_exam_type = (request.args.get("exam_type") or "").strip().lower()
+    if _qr_exam_type not in ("noi_csp", "gesp", "parent_subscribe"):
+        _qr_exam_type = ""
+
+    # v3.9.68 · 家长订阅版的"报告"就是 parent_subscribe.html 文件本身，
+    # 它的内容是完整的 AI 决策支持报告（不是摘要），
+    # 所以扫码后直接 302 到 reports/<dir>/parent_subscribe.html，
+    # 跳过 /r/<uid> 的"摘要"中转页（避免重复展示）
+    if _qr_exam_type == "parent_subscribe":
+        _ps_dir = _find_latest_report_dir_by_type(luogu_uid, student_name, "parent_subscribe")
+        if _ps_dir and (_ps_dir / "parent_subscribe.html").exists():
+            from flask import redirect as _flask_redirect
+            return _flask_redirect(f"/reports/{_ps_dir.name}/parent_subscribe.html", code=302)
+        # 找不到家长订阅版：回退到 NOI-CSP 报告预览（保留旧行为）
+        _qr_exam_type = ""
+
+    if _qr_exam_type == "gesp":
+        latest = _find_latest_report_dir_by_type(luogu_uid, student_name, "gesp")
+    elif _qr_exam_type == "noi_csp":
+        latest = _find_latest_report_dir_by_type(luogu_uid, student_name, "noi_csp")
+    else:
+        # 兜底: 找最新一份（不分类型, mtime 倒序）
+        latest = _find_latest_report_dir(luogu_uid, student_name)
+    # v3.9.67 · 兜底链：若指定类型没报告, 试另一类型
+    if not latest:
+        _alt_type = "noi_csp" if _qr_exam_type == "gesp" else "gesp"
+        latest = _find_latest_report_dir_by_type(luogu_uid, student_name, _alt_type)
+    if not latest:
+        # 最后兜底: 任意最新一份
+        latest = _find_latest_report_dir(luogu_uid, student_name)
     empty_achievements = {
         "six_dim": {},
         "ai_score_thousand": None,
@@ -12779,8 +13759,11 @@ def report_preview(luogu_uid: str):
     # latest 是 Path 对象，目录名形如 "d794a8b0_付胤睿" / "25c937b3_付胤睿"
     latest_dir_name = latest.name if latest else ""
 
-    if not latest or not (latest / "report.md").exists():
+    # v3.9.68 · 主报告文件按 exam_type 选（gesp → report_gesp.md）
+    _main_md_name = "report_gesp.md" if _qr_exam_type == "gesp" else "report.md"
+    if not latest or not (latest / _main_md_name).exists():
         # v3.9.29 · 即使没 report.md，也走 export_data 兜底（之前直接 has_report=False）
+        # v3.9.68 · gesp 也检查 report_gesp.md
         _ext_fb = {}
         try:
             if latest and (latest / "export_data.json").exists():
@@ -12789,19 +13772,27 @@ def report_preview(luogu_uid: str):
                     _ext_fb["six_dim_source"] = "export_data"
                 if _ext_fb.get("ai_score_thousand"):
                     _ext_fb["ai_score_source"] = "export_data"
-                    _ext_fb["ai_score_label"] = f"预估 {_ext_fb['ai_score_thousand']}/1000（AI 报告未生成，6 维+评分来自 export_data.json）"
-                if not (latest / "report.md").exists():
+                    # v3.9.68 · 区分 GESP 报告（GESP 报告无 6 维表，6 维本来就不在
+                    # report_gesp.md 里，所以"未生成"是误导性文案。改为"6 维暂无
+                    # GESP 模板，评分来自 export_data.json"）
+                    if _qr_exam_type == "gesp":
+                        _ext_fb["ai_score_label"] = f"预估 {_ext_fb['ai_score_thousand']}/1000（GESP 报告未含 6 维，评分来自 export_data.json）"
+                    else:
+                        _ext_fb["ai_score_label"] = f"预估 {_ext_fb['ai_score_thousand']}/1000（AI 报告未生成，6 维+评分来自 export_data.json）"
+                if not (latest / _main_md_name).exists():
                     _ext_fb["is_partial"] = True
                 _ext_fb["report_dir"] = latest.name if latest else ""
         except Exception:
             pass
         # v3.9.29 · 3 层 GESP 兜底（student 表 → gesp_exams 表）
         _gh, _gs = _resolve_gesp_level_score(student)
+        # v3.9.68 · 模板按钮 URL：先按 exam_type 选，文件不存在时回退到 report.html
+        _full_url = _resolve_full_report_url(latest_dir_name, _qr_exam_type or "noi_csp")
         return render_template_string(
             REPORT_PREVIEW_HTML,
             luogu_uid=luogu_uid,
             token=luogu_uid,  # v3.9.29 · 模板 header 用 {{ token }} 渲染 UID
-            student_name=(student.get("real_name") or f"UID {luogu_uid}"),
+            student_name=_public_student_name,
             achievements=_ext_fb or empty_achievements,
             ai_summary="",
             suggestions=[],
@@ -12810,10 +13801,16 @@ def report_preview(luogu_uid: str):
             latest_dir_name=latest_dir_name,
             gesp_level=_gh,
             gesp_score=_gs,
+            exam_type=_qr_exam_type or "noi_csp",  # v3.9.68 · 报告类型
+            full_report_url=_full_url,  # v3.9.68 · 兼容旧报告的回退 URL
         ), 200
 
     try:
-        report_md = (latest / "report.md").read_text(encoding="utf-8", errors="replace")
+        # v3.9.68 · 主报告文件按 exam_type 选（gesp → report_gesp.md / parent_subscribe → parent_subscribe.md）
+        _main_md_p = latest / _main_md_name
+        if not _main_md_p.exists() and (latest / "report.md").exists():
+            _main_md_p = latest / "report.md"
+        report_md = _main_md_p.read_text(encoding="utf-8", errors="replace")
         achievements = _extract_achievements_from_report(report_md) or empty_achievements
         ai_summary = _extract_ai_summary(report_md) or ""
         suggestions = _extract_top_suggestions(report_md) or []
@@ -12834,6 +13831,9 @@ def report_preview(luogu_uid: str):
                     if achievements.get("six_dim_source") == "report_md":
                         _mean = sum(achievements["six_dim"].values()) / max(1, len(achievements["six_dim"]))
                         achievements["ai_score_label"] = f"预估 {int(round(_mean * 10))}/1000（AI 报告 6 维已抽取；评分由 6 维均值 × 10 兜底）"
+                    elif _qr_exam_type == "gesp":
+                        # v3.9.68 · GESP 报告不含 6 维表，"未生成"是误导
+                        achievements["ai_score_label"] = f"预估 {_ext_fb['ai_score_thousand']}/1000（GESP 报告未含 6 维，评分来自 export_data.json）"
                     else:
                         achievements["ai_score_label"] = f"预估 {_ext_fb['ai_score_thousand']}/1000（AI 报告 6 维 regex 未匹配，评分来自 export_data.json）"
                 if (not achievements.get("six_dim") and not achievements.get("mistakes")):
@@ -12883,11 +13883,12 @@ def report_preview(luogu_uid: str):
                 app.logger.warning(f"[v3.9.6 /r/{luogu_uid}] 来源 D 兜底失败: {_de}")
     except Exception:
         _gh2, _gs2 = _resolve_gesp_level_score(student)
+        _full_url2 = _resolve_full_report_url(latest_dir_name, _qr_exam_type or "noi_csp")
         return render_template_string(
             REPORT_PREVIEW_HTML,
             luogu_uid=luogu_uid,
             token=luogu_uid,
-            student_name=(student.get("real_name") or f"UID {luogu_uid}"),
+            student_name=_public_student_name,
             achievements=empty_achievements,
             ai_summary="",
             suggestions=[],
@@ -12896,14 +13897,18 @@ def report_preview(luogu_uid: str):
             latest_dir_name=latest_dir_name,
             gesp_level=_gh2,
             gesp_score=_gs2,
+            exam_type=_qr_exam_type or "noi_csp",  # v3.9.68 · 报告类型
+            full_report_url=_full_url2,  # v3.9.68 · 兼容旧报告的回退 URL
         ), 200
 
     _gh3, _gs3 = _resolve_gesp_level_score(student)
+    # v3.9.68 · 把 exam_type 传给预览模板，让"看完整 AI 报告"按钮跳对位置
+    _full_url3 = _resolve_full_report_url(latest_dir_name, _qr_exam_type or "noi_csp")
     return render_template_string(
         REPORT_PREVIEW_HTML,
         luogu_uid=luogu_uid,
         token=luogu_uid,
-        student_name=(student.get("real_name") or f"UID {luogu_uid}"),
+        student_name=_public_student_name,
         achievements=achievements,
         ai_summary=ai_summary,
         suggestions=suggestions,
@@ -12912,6 +13917,8 @@ def report_preview(luogu_uid: str):
         latest_dir_name=latest_dir_name,
         gesp_level=_gh3,
         gesp_score=_gs3,
+        exam_type=_qr_exam_type or "noi_csp",  # v3.9.68 · 报告类型
+        full_report_url=_full_url3,  # v3.9.68 · 兼容旧报告的回退 URL
     ), 200
 
 
@@ -12930,6 +13937,9 @@ def _build_parent_subscribe_data(student: dict, luogu_uid: str) -> dict:
     student_d = dict(student)
     student_d["province"] = _city_to_province(student_d.get("city"))
     student_d["grade_label"] = _grade_to_label(student_d.get("grade"))
+    # v3.9.69 · 报告 / 海报公开显示的脱敏字段：仅姓氏 + 学校 hash 匿称
+    student_d["masked_name"] = _mask_name_for_public(student_d.get("real_name"))
+    student_d["masked_school"] = _mask_school(student_d.get("school"))
 
     gesp_level = int(student_d.get("gesp_highest_passed") or 0)
     gesp_score = int(student_d.get("gesp_latest_score") or 0)
@@ -13006,38 +14016,81 @@ def _build_parent_subscribe_data(student: dict, luogu_uid: str) -> dict:
     progress = _admin_students.get_student_gesp_progress(sid) or {}
     exams = progress.get("exams") or progress.get("history") or []
     last_exam = exams[-1] if exams else None
-    # 难度分布（从最近一份 report.md 抓，不强求）
-    diff_dist = {}
+
+    # 难度分布（从最近一份 report.md 抓，区分 GESP / NOI 两套体系）
+    # v3.9.66 · 旧正则只认老版 NOI ASCII 数字行，GESP 8 级版/新版 NOI 表格
+    # 全部抓空。现在按报告类型分别解析。
+    diff_dist: dict = {}
+    diff_kind: str = ""   # "gesp" | "noi" | ""（识别不出就不展示）
+    diff_levels: list = []  # 等级标签，给模板用
     try:
-        # 找该学员最近一份报告
-        reports_root = Path(__file__).parent / "reports"
-        candidates = sorted(
-            [d for d in reports_root.iterdir() if d.is_dir() and str(luogu_uid) in d.name],
-            key=lambda d: d.stat().st_mtime,
-            reverse=True,
-        ) if reports_root.exists() else []
-        if candidates:
-            md = (candidates[0] / "report.md").read_text(encoding="utf-8") if (candidates[0] / "report.md").exists() else ""
-            import re as _re
-            m = _re.search(r"难度分布[^\n]*\n.*?\n([\d/\s]+)", md)
-            if m:
-                nums = _re.findall(r"\d+", m.group(1))
-                for i, lvl in enumerate(["入门", "普及", "提高", "省选", "NOI"], 0):
-                    if i < len(nums):
-                        diff_dist[lvl] = int(nums[i])
+        _reports_root = Path(__file__).parent / "reports"
+        if _reports_root.exists():
+            _candidates = sorted(
+                [d for d in _reports_root.iterdir() if d.is_dir() and str(luogu_uid) in d.name],
+                key=lambda d: d.stat().st_mtime,
+                reverse=True,
+            )
+            if _candidates:
+                _md = (_candidates[0] / "report.md").read_text(encoding="utf-8", errors="replace") \
+                    if (_candidates[0] / "report.md").exists() else ""
+                # 识别报告类型
+                if "GESP 8 级版" in _md or "GESP 8 级知识地图" in _md:
+                    diff_kind = "gesp"
+                    diff_levels = ["G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8"]
+                else:
+                    diff_kind = "noi"
+                    diff_levels = ["入门", "普及", "提高", "省选", "NOI"]
+                # 抓难度分布数据
+                import re as _re
+                if diff_kind == "gesp":
+                    # 抓 GESP 8 级知识地图表里的"覆盖题数"或"做题数"列
+                    # 典型行：| GESP 一级 | ... | 12 | ... |
+                    _rows = _re.findall(
+                        r"\|.*?GESP\s*[一二三四五六七八][级級].*?\|\s*([0-9]+)\s*\|",
+                        _md,
+                    )
+                    if not _rows:
+                        # 兜底：抓"难度分布（GESP 版）"小节中的题数（HTML 表格或文本）
+                        _rows = _re.findall(
+                            r"(?:G\s*1|难度\s*1|1\s*级)[^\d]{0,40}?([0-9]+)",
+                            _md,
+                        )
+                    for i, lvl in enumerate(diff_levels):
+                        if i < len(_rows):
+                            diff_dist[lvl] = int(_rows[i])
+                else:
+                    # 旧 NOI ASCII 行 / 表格数字行
+                    m = _re.search(r"难度分布[^\n]*\n.*?\n([\d/\s]+)", _md)
+                    if m:
+                        nums = _re.findall(r"\d+", m.group(1))
+                        for i, lvl in enumerate(diff_levels):
+                            if i < len(nums):
+                                diff_dist[lvl] = int(nums[i])
     except Exception:
         pass
 
-    # ---- 维度 5 · 教练沟通清单（7 个开放问题，模板填充） ----
-    questions = [
-        f"我家孩子（UID {luogu_uid}）目前在 CSP-J 普及组中处于第几梯队？",
-        f"按当前做题曲线，未来 6 个月达到 GESP {min(8, next_lv + 1)} 级 80+ 的概率有多大？",
-        f"如果想冲省一，应该在哪个时间点切换赛道路线（CSP-J → CSP-S）？",
-        f"最近 30 天错题主要集中在哪些算法标签？这是否反映系统性薄弱？",
-        f"我们家长是否需要报名某个专项集训（贪心/DP/图论）来补强？",
-        f"按 GESP/CSP/NOIP 节奏，孩子的 OI 路径与中考/高考时间是否冲突？",
-        f"教练建议的每周训练时长和刷题量是多少？我们在家如何配合？",
-    ]
+    # ---- 维度 5 · 教练沟通清单（GESP/NOI 报告用不同问题） ----
+    if diff_kind == "gesp":
+        questions = [
+            f"我家孩子（UID {luogu_uid}）当前 GESP 已过最高级 {gesp_level or 0} 级、最近分 {gesp_score or '—'}，按这个进度距离 GESP {min(8, next_lv)} 级通过还差多少？",
+            f"GESP 1-4 级的真考分构成里，编程题 vs 选择题分别是怎样的薄弱点？需要重点补哪一类？",
+            f"孩子当前刷题难度档位集中在 G{gesp_level or 1} 还是 G{min(8, (gesp_level or 0)+1)}？是否需要往上 / 往下调整刷题档位？",
+            f"按 GESP 8 级路线，孩子是否能在下一次 GESP 真考（{_date.today().year + 1 if _date.today().month >= 12 else _date.today().year} 年）报名时达到目标级？",
+            f"家长是否需要配合报名专项训练（顺序/分支/循环/数组/函数/结构体/递推/递归）来补 GESP 真考的薄弱章节？",
+            f"孩子校内文化课 + GESP 备考的时间分配建议？一周训练多少小时合适？",
+            f"如果孩子目标定为 GESP 6 级 80+ 免 CSP-J 初赛，未来 6 个月的里程碑应该如何拆？",
+        ]
+    else:
+        questions = [
+            f"我家孩子（UID {luogu_uid}）目前在 CSP-J 普及组中处于第几梯队？",
+            f"按当前做题曲线，未来 6 个月达到 GESP {min(8, next_lv + 1)} 级 80+ 的概率有多大？",
+            f"如果想冲省一，应该在哪个时间点切换赛道路线（CSP-J → CSP-S）？",
+            f"最近 30 天错题主要集中在哪些算法标签？这是否反映系统性薄弱？",
+            f"我们家长是否需要报名某个专项集训（贪心/DP/图论）来补强？",
+            f"按 GESP/CSP/NOIP 节奏，孩子的 OI 路径与中考/高考时间是否冲突？",
+            f"教练建议的每周训练时长和刷题量是多少？我们在家如何配合？",
+        ]
 
     return {
         "student": student_d,
@@ -13053,6 +14106,8 @@ def _build_parent_subscribe_data(student: dict, luogu_uid: str) -> dict:
         "timeline": timeline,
         "policy_events": policy_events[:8],
         "diff_dist": diff_dist,
+        "diff_kind": diff_kind,
+        "diff_levels": diff_levels,
         "last_exam": last_exam,
         "questions": questions,
     }
@@ -13116,6 +14171,7 @@ def parent_subscribe(luogu_uid: str):
         return render_template_string(
             PARENT_SUBSCRIBE_RESULT_HTML,
             student_name=student.get("real_name") or "您家孩子",
+            masked_name=_mask_name_for_public(student.get("real_name")),
             luogu_uid=luogu_uid,
             md_url=f"/reports/{report_dir.name}/parent_subscribe.md" if ps_md and ps_md.exists() else "",
             generated_at=mtime,
@@ -13125,7 +14181,10 @@ def parent_subscribe(luogu_uid: str):
 
     # 还没生成 → 渲染触发生成页
     data = _build_parent_subscribe_data(student, luogu_uid)
-    has_report = bool(report_dir and (report_dir / "report.md").exists())
+    # v3.9.68 · 兼容 GESP 用户（只有 report_gesp.md 没有 report.md）
+    has_report = bool(report_dir and (
+        (report_dir / "report.md").exists() or (report_dir / "report_gesp.md").exists()
+    ))
     return render_template_string(
         PARENT_SUBSCRIBE_HTML,
         **data,
@@ -13196,6 +14255,11 @@ def start_parent_subscribe(luogu_uid: str):
     student = _admin_students.get_student_by_uid(luogu_uid)
     if not student:
         return render_template_string(REGISTER_INVALID_HTML, message=f"UID {luogu_uid} 未注册"), 404
+
+    # v3.9.69 · 报告 / 海报公开显示的脱敏字段：仅姓氏 + 学校 hash 匿称
+    student = dict(student)
+    student["masked_name"] = _mask_name_for_public(student.get("real_name"))
+    student["masked_school"] = _mask_school(student.get("school"))
 
     # v3.9 · 邀请码校验（在 404 之后、找 report 之前）
     # v3.9.2 · 改为查数据库 admin.activation_codes 表（sku='parent_invite'），
@@ -13351,8 +14415,12 @@ def start_parent_subscribe(luogu_uid: str):
         except Exception:
             pass  # 日志失败不影响主流程
 
+    # v3.9.68 · 兼容 GESP 用户（只有 report_gesp.md 没有 report.md）。
+    # 旧逻辑直接 return 错误页，导致 GESP 用户明明已订阅却看不到内容。
     report_dir = _find_latest_report_dir(luogu_uid, student.get("real_name") or "")
-    if not report_dir or not (report_dir / "report.md").exists():
+    if not report_dir or not (
+        (report_dir / "report.md").exists() or (report_dir / "report_gesp.md").exists()
+    ):
         gesp_level = int(student.get("gesp_highest_passed") or 0)
         gesp_score = int(student.get("gesp_latest_score") or 0)
         return render_template_string(
@@ -13528,19 +14596,57 @@ def _find_latest_report_dir(luogu_uid: str, student_name: str = "") -> "Path | N
     return pool[0]
 
 
+def _resolve_full_report_url(latest_dir_name: str, exam_type: str) -> str:
+    """v3.9.68 · 解析"看完整 AI 报告"按钮的目标 URL。
+
+    优先级：exam_type 专属文件 > 旧 report.html。
+    报告目录可能只有 report.html（v3.9.67 之前），按钮不能 404。
+    """
+    if not latest_dir_name:
+        return ""
+    base = Path(__file__).parent / "reports" / latest_dir_name
+    if not base.exists():
+        return f"/reports/{latest_dir_name}/report.html"
+    # 1) 家长订阅优先
+    if (base / "parent_subscribe.html").exists() and exam_type == "parent_subscribe":
+        return f"/reports/{latest_dir_name}/parent_subscribe.html"
+    # 2) 显式类型文件
+    if exam_type == "gesp" and (base / "report_gesp.html").exists():
+        return f"/reports/{latest_dir_name}/report_gesp.html"
+    if exam_type in ("noi_csp", "") and (base / "report_noi_csp.html").exists():
+        return f"/reports/{latest_dir_name}/report_noi_csp.html"
+    # 3) 兜底：旧版 report.html
+    if (base / "report.html").exists():
+        return f"/reports/{latest_dir_name}/report.html"
+    # 4) 终极兜底：选个存在的
+    for fn in ("report_gesp.html", "parent_subscribe.html"):
+        if (base / fn).exists():
+            return f"/reports/{latest_dir_name}/{fn}"
+    return f"/reports/{latest_dir_name}/report.html"
+
+
 def _find_latest_report_dir_by_type(luogu_uid: str, student_name: str, exam_type: str) -> "Path | None":
     """v3.9.64 · 按报告类型分别找最新一份（noi_csp / gesp）。
 
     判定规则（按优先级降序）：
       1. 目录内存在 report_gesp.md / report_noi_csp.md → 类型明确
       2. 兼容旧报告：存在 report.md 且无 _noi_csp/_gesp 后缀文件 → 视为 NOI-CSP（默认类型）
+
+    v3.9.68 · 家长订阅（parent_subscribe）也支持：
+      1. 目录内存在 parent_subscribe.html / .md → 视为家长订阅版
+      2. 注意：家长订阅是"基于" NOI-CSP 报告（读 report.md 生成），
+         所以一个 dir 可能有 report.md + parent_subscribe.html 同时存在。
+         当 exam_type=parent_subscribe 时只匹配有 parent_subscribe 的 dir；
+         不影响 exam_type=noi_csp（无后缀）继续匹配旧报告。
     """
     reports_root = Path(__file__).parent / "reports"
     if not reports_root.exists():
         return None
     target_uid = str(luogu_uid or "").strip()
     safe_name = "".join(c for c in (student_name or "") if c.isalnum() or c in "_-").strip()
-    want_gesp = (exam_type or "noi_csp") == "gesp"
+    _etype = (exam_type or "noi_csp").strip().lower()
+    want_gesp = _etype == "gesp"
+    want_parent = _etype == "parent_subscribe"
 
     exact: list = []
     legacy: list = []
@@ -13551,14 +14657,27 @@ def _find_latest_report_dir_by_type(luogu_uid: str, student_name: str, exam_type
         # 1) 该目录"是否属于目标类型"
         has_gesp = (d / "report_gesp.md").exists() or (d / "report_gesp.html").exists()
         has_noi = (d / "report_noi_csp.md").exists() or (d / "report_noi_csp.html").exists()
-        # 兼容旧报告（只有 report.md / export_data.json，视为 noi_csp）
-        if not (has_gesp or has_noi):
-            has_old = (d / "report.md").exists() or (d / "export_data.json").exists()
-            if not has_old:
-                continue
-            is_target = (not want_gesp)  # 旧报告默认算 noi_csp
+        has_parent = (d / "parent_subscribe.html").exists() or (d / "parent_subscribe.md").exists()
+        # 该 dir 是否属于该学员（先用 _dir_owner_match 标记）
+        # （下面的 matched 块会处理，先仅做类型判定）
+        # 类型判定：
+        #   - want_parent: 仅匹配有 parent_subscribe 的 dir
+        #   - want_gesp: 仅匹配有 report_gesp 的 dir
+        #   - want_noi_csp: 匹配 a) 有 report_noi_csp, 或 b) 无任何 _gesp/_parent 后缀但有 report.md
+        if want_parent:
+            is_target = has_parent
+        elif want_gesp:
+            is_target = has_gesp
         else:
-            is_target = (has_gesp if want_gesp else has_noi)
+            # NOI-CSP: 既要匹配显式 _noi_csp, 也要匹配"无后缀的旧版 report.md"
+            if has_noi:
+                is_target = True
+            elif not has_gesp and not has_parent:
+                # 纯旧版 dir（无后缀文件）→ 视为 noi_csp
+                is_target = (d / "report.md").exists() or (d / "export_data.json").exists()
+            else:
+                # dir 有 gesp 或 parent 后缀, 但没 _noi_csp → 不算 noi_csp
+                is_target = False
         if not is_target:
             continue
         # 2) 该目录"是否属于该学员"
@@ -13698,7 +14817,11 @@ def _run_parent_subscribe(
     try:
         with TASKS_LOCK:
             update_task(task_id, message=f"正在读取基础报告...", ai_progress=10)
-        report_md = (report_dir / "report.md").read_text(encoding="utf-8", errors="replace")
+        # v3.9.68 · 兼容 GESP 用户：优先 report.md，没有就用 report_gesp.md
+        _main_md = report_dir / "report.md"
+        if not _main_md.exists():
+            _main_md = report_dir / "report_gesp.md"
+        report_md = _main_md.read_text(encoding="utf-8", errors="replace")
         export_data_path = report_dir / "export_data.json"
         export_data = {}
         if export_data_path.exists():
@@ -13749,9 +14872,12 @@ def _run_parent_subscribe(
             student_name = report_dir.name.split("_", 1)[-1] if "_" in report_dir.name else "选手"
 
         with app.app_context():
+            # v3.9.69 · 家长订阅版对外分享的 HTML 也要脱敏：用「姓氏 + UID」替代真名
+            _masked_ps_name = _mask_name_for_public(student_name)
             ps_html_full = render_template_string(
                 _PARENT_SUBSCRIBE_SHELL_HTML,
-                student_name=student_name,
+                student_name=student_name,  # 留旧字段名兼容旧代码
+                masked_name=_masked_ps_name,  # 模板里公开展示用这个
                 luogu_uid=luogu_uid,
                 generated_at=_time.strftime("%Y-%m-%d %H:%M"),
                 ai_body=ps_html_body,
@@ -13759,6 +14885,28 @@ def _run_parent_subscribe(
             )
         ps_html_path = report_dir / "parent_subscribe.html"
         ps_html_path.write_text(ps_html_full, encoding="utf-8")
+        # v3.9.68 · 家长订阅版生成后, 预渲染 share-card_parent.png (翠绿主题)
+        # 这样 /me 页和扫码进 /r/<uid>?exam_type=parent_subscribe 都能直接拿到缓存
+        try:
+            from flask import has_request_context as _hrc
+            with app.app_context():
+                _ps_data = _build_share_card_data(luogu_uid, exam_type="parent_subscribe")
+                if _ps_data:
+                    _ps_base = "https://oi.aijiangti.cn"  # v3.8 · 部署默认域名
+                    try:
+                        if _hrc():
+                            from flask import request as _req
+                            _ps_base = _req.host_url.rstrip("/") or _ps_base
+                    except Exception:
+                        pass
+                    _ps_qr = f"{_ps_base}/r/{luogu_uid}?exam_type=parent_subscribe"
+                    _ps_png = _render_share_card_png(_ps_data, _ps_qr, exam_type="parent_subscribe")
+                    (report_dir / "share-card_parent.png").write_bytes(_ps_png)
+                    app.logger.info(
+                        f"v3.9.68 家长订阅版海报预渲染: {report_dir / 'share-card_parent.png'} ({len(_ps_png)} bytes)"
+                    )
+        except Exception as _ps_e:
+            app.logger.warning(f"v3.9.68 家长订阅版海报预渲染失败（不影响主流程）: {_ps_e}")
         elapsed = int(_time.time() - started)
         with TASKS_LOCK:
             update_task(
@@ -14224,6 +15372,134 @@ STUDENT_ME_HTML = """
             {% endif %}
         </div>
 
+        <!-- v3.9.64 · 我的报告（按测评类型 tab 切换：NOI-CSP / GESP）· 个人中心入口 -->
+        <div class="bg-white rounded-2xl card-shadow p-5">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-base font-bold text-gray-800">📊 我的报告</h2>
+                <span class="text-xs text-gray-400">按测评类型分卡片</span>
+            </div>
+            <!-- tab 切换器 -->
+            <div class="flex gap-2 mb-4">
+                <button type="button" onclick="switchReportTab('noi_csp')" id="tabNoiCsp"
+                        class="flex-1 px-3 py-2 rounded-lg text-sm font-bold transition
+                               bg-emerald-500 text-white shadow">
+                    🏆 NOI-CSP 测评
+                </button>
+                <button type="button" onclick="switchReportTab('gesp')" id="tabGesp"
+                        class="flex-1 px-3 py-2 rounded-lg text-sm font-bold transition
+                               bg-gray-100 text-gray-600 hover:bg-gray-200">
+                    📘 GESP 备考报告
+                </button>
+            </div>
+            <!-- NOI-CSP 报告卡片 -->
+            <div id="cardNoiCsp" class="report-type-card">
+                {% if latest_noi_csp_card.exists %}
+                <div class="border-2 border-emerald-200 bg-emerald-50/40 rounded-xl p-4">
+                    <div class="flex items-start justify-between gap-2 mb-2">
+                        <div>
+                            <div class="text-sm font-bold text-emerald-800">🏆 NOI-CSP 测评报告</div>
+                            <div class="text-[11px] text-gray-500 mt-0.5">📅 {{ latest_noi_csp_card.mtime_display }} · {{ latest_noi_csp_card.dir_name }}</div>
+                        </div>
+                        <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold whitespace-nowrap">最新</span>
+                    </div>
+                    <p class="text-xs text-gray-600 mb-3">6 维能力雷达 + 风险诊断 + 段位评估（基于洛谷做题数据）</p>
+                    <div class="flex flex-wrap gap-2">
+                        {% if latest_noi_csp_card.has_html %}
+                        <a href="{{ latest_noi_csp_card.html_url }}" target="_blank"
+                           class="px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold">🔍 查看 HTML 报告</a>
+                        {% endif %}
+                        {% if latest_noi_csp_card.has_pdf %}
+                        <a href="{{ latest_noi_csp_card.pdf_url }}" target="_blank"
+                           class="px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold">📄 下载 PDF</a>
+                        {% endif %}
+                        <a href="{{ latest_noi_csp_card.share_url }}" target="_blank"
+                           class="px-3 py-1.5 rounded-md bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold">📤 生成分享海报</a>
+                        <a href="/generate-form?exam_type=noi_csp"
+                           class="px-3 py-1.5 rounded-md bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold">🔄 重新生成</a>
+                    </div>
+                </div>
+                {% else %}
+                <div class="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center">
+                    <div class="text-4xl mb-2">🏆</div>
+                    <p class="text-sm text-gray-500">还没有 NOI-CSP 报告</p>
+                    <a href="/generate-form?exam_type=noi_csp" class="inline-block mt-3 px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold">📝 立即生成</a>
+                </div>
+                {% endif %}
+            </div>
+            <!-- GESP 报告卡片 -->
+            <div id="cardGesp" class="report-type-card" style="display:none;">
+                {% if latest_gesp_card.exists %}
+                <div class="border-2 border-blue-200 bg-blue-50/40 rounded-xl p-4">
+                    <div class="flex items-start justify-between gap-2 mb-2">
+                        <div>
+                            <div class="text-sm font-bold text-blue-800">📘 GESP 备考报告</div>
+                            <div class="text-[11px] text-gray-500 mt-0.5">📅 {{ latest_gesp_card.mtime_display }} · {{ latest_gesp_card.dir_name }}</div>
+                        </div>
+                        <span class="text-[10px] px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold whitespace-nowrap">最新</span>
+                    </div>
+                    <p class="text-xs text-gray-600 mb-3">GESP 1-8 级考纲对照 + 备考路线图 + 弱项诊断</p>
+                    <div class="flex flex-wrap gap-2">
+                        {% if latest_gesp_card.has_html %}
+                        <a href="{{ latest_gesp_card.html_url }}" target="_blank"
+                           class="px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold">🔍 查看 GESP 报告</a>
+                        {% endif %}
+                        {% if latest_gesp_card.has_pdf %}
+                        <a href="{{ latest_gesp_card.pdf_url }}" target="_blank"
+                           class="px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold">📄 下载 PDF</a>
+                        {% endif %}
+                        <a href="{{ latest_gesp_card.share_url }}" target="_blank"
+                           class="px-3 py-1.5 rounded-md bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold">📤 生成分享海报</a>
+                        <a href="/generate-form?exam_type=gesp"
+                           class="px-3 py-1.5 rounded-md bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold">🔄 重新生成</a>
+                    </div>
+                </div>
+                {% else %}
+                <div class="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center">
+                    <div class="text-4xl mb-2">📘</div>
+                    <p class="text-sm text-gray-500">还没有 GESP 备考报告</p>
+                    <a href="/generate-form?exam_type=gesp" class="inline-block mt-3 px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold">📝 立即生成 GESP 报告</a>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        <script>
+        // v3.9.64 · 报告类型 tab 切换
+        function switchReportTab(type) {
+            try {
+                var noiBtn = document.getElementById('tabNoiCsp');
+                var gespBtn = document.getElementById('tabGesp');
+                var noiCard = document.getElementById('cardNoiCsp');
+                var gespCard = document.getElementById('cardGesp');
+                if (!noiBtn || !gespBtn || !noiCard || !gespCard) return;
+                if (type === 'gesp') {
+                    gespBtn.className = 'flex-1 px-3 py-2 rounded-lg text-sm font-bold transition bg-blue-500 text-white shadow';
+                    noiBtn.className  = 'flex-1 px-3 py-2 rounded-lg text-sm font-bold transition bg-gray-100 text-gray-600 hover:bg-gray-200';
+                    gespCard.style.display = 'block';
+                    noiCard.style.display  = 'none';
+                } else {
+                    noiBtn.className  = 'flex-1 px-3 py-2 rounded-lg text-sm font-bold transition bg-emerald-500 text-white shadow';
+                    gespBtn.className = 'flex-1 px-3 py-2 rounded-lg text-sm font-bold transition bg-gray-100 text-gray-600 hover:bg-gray-200';
+                    noiCard.style.display  = 'block';
+                    gespCard.style.display = 'none';
+                }
+                try { localStorage.setItem('me_report_tab', type); } catch (e) {}
+            } catch (e) { console.error('switchReportTab err:', e); }
+        }
+        // 记住用户上次选的 tab
+        (function() {
+            try {
+                var saved = localStorage.getItem('me_report_tab') || 'noi_csp';
+                if (saved === 'gesp' && !{{ 'true' if latest_gesp_card.exists else 'false' }}) {
+                    saved = 'noi_csp';
+                }
+                if (saved === 'noi_csp' && !{{ 'true' if latest_noi_csp_card.exists else 'false' }} && {{ 'true' if latest_gesp_card.exists else 'false' }}) {
+                    saved = 'gesp';
+                }
+                switchReportTab(saved);
+            } catch (e) { console.error('tab restore err:', e); }
+        })();
+        </script>
+
         {# v3.9.46 · 学员中心「我的排名」卡片（C 形态 · 深空玻璃质感）
             设计要点：
               1) 背景采用深色 glass（与排行榜 Top 3 视觉同源），与"个人成就"白卡形成节奏对比
@@ -14688,12 +15964,14 @@ REPORT_PREVIEW_HTML = r"""<!doctype html>
   </section>
   {% endif %}
 
+  {% set _full_report_url = full_report_url or ('/reports/' ~ latest_dir_name ~ '/report.html') %}
+
   <section class="mt-5 grid grid-cols-1 md:grid-cols-2 gap-3">
-    <a href="/reports/{{ latest_dir_name }}/report.html" target="_blank"
+    <a href="{{ _full_report_url }}" target="_blank"
        class="block bg-white border-2 border-emerald-600 rounded-xl p-4 text-center hover:bg-emerald-50">
       <div class="text-2xl mb-1">🔍</div>
       <div class="text-sm font-bold text-emerald-700">看完整 AI 报告</div>
-      <div class="text-[10px] text-gray-500 mt-1">在新窗口打开 · HTML 版</div>
+      <div class="text-[10px] text-gray-500 mt-1">在新窗口打开 · {{ (exam_type or 'noi_csp') | replace('noi_csp', 'NOI-CSP') | replace('gesp', 'GESP') | replace('parent_subscribe', '家长订阅版') }} 版</div>
     </a>
     <a href="/?ref={{ ref or luogu_uid }}"
        class="block bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl p-4 text-center text-white shadow-lg hover:from-emerald-600">

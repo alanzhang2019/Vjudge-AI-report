@@ -233,8 +233,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.9.71"
-APP_VERSION_BUILD = "20260619_v3p9p71"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.9.72"
+APP_VERSION_BUILD = "20260619_v3p9p72"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -1496,6 +1496,9 @@ INDEX_HTML = """
                 三份报告：助力选手精准训练、家长生涯规划、教练科学指导。
             </p>
         </div>
+
+        {# v3.9.72 · 洛谷接入一键开关：关闭时首页隐藏主 CTA 和"看历史报告"以外的入口 #}
+        {% if luogu_killswitch_enabled %}
         <a href="/generate-form" class="btn-primary">
             🚀 立即生成我的学习报告
             <span class="font-mono text-[12px] opacity-80 ml-1">↵</span>
@@ -1507,6 +1510,34 @@ INDEX_HTML = """
 
         {# v3.9.71 · 关闭首页 UID 快速入口（合规要求：不再公开"输入 UID 直达个人中心"通道）#}
         {# 旧 form /me-entry 路由保留，老用户已收藏的链接仍可用；新用户必须走"立即生成"或"看历史报告"#}
+        {% else %}
+        {# 接入已关闭：隐藏"立即生成"主 CTA，但保留"我已注册 · 看历史报告"（只读浏览）#}
+        <div class="rounded-xl border-2 border-rose-400/50 bg-rose-500/10 p-4 mb-2">
+            <div class="flex items-start gap-3">
+                <div class="text-3xl leading-none">🚧</div>
+                <div class="flex-1">
+                    <div class="text-white font-bold text-base mb-1">洛谷接入已暂时关闭</div>
+                    <div class="text-[var(--ink-2)] text-sm leading-relaxed">
+                        当前暂不开放新报告生成（后台管理已暂停洛谷数据抓取）。
+                        已生成的报告、海报、家长订阅照常查看；如需恢复请等待管理员通知。
+                    </div>
+                    {% if luogu_killswitch_state and luogu_killswitch_state.get('reason') %}
+                    <div class="mt-2 text-[11px] text-[var(--ink-3)] font-mono">
+                        // 关闭原因：{{ luogu_killswitch_state.get('reason') }}
+                    </div>
+                    {% endif %}
+                    {% if luogu_killswitch_state and luogu_killswitch_state.get('updated_at') %}
+                    <div class="text-[11px] text-[var(--ink-3)] font-mono">
+                        // 更新于：{{ luogu_killswitch_state.get('updated_at') }}{% if luogu_killswitch_state.get('updated_by') %} · by {{ luogu_killswitch_state.get('updated_by') }}{% endif %}
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="mt-3 flex items-center justify-end text-[12px] flex-wrap gap-2">
+            <a href="/select-mode" class="text-[var(--accent)] hover:underline font-medium">👀 我已注册 · 仍可查看历史报告 →</a>
+        </div>
+        {% endif %}
     </section>
 
     <!-- 3 大特性 -->
@@ -2379,6 +2410,9 @@ def render_index(
         # v3.9.52 · 传递 info/error 给首页模板（密码登录成功提示等）
         info=info,
         error=error,
+        # v3.9.72 · 洛谷接入一键开关状态 · 首页主 CTA 需按此状态切换
+        luogu_killswitch_enabled=_is_luogu_access_enabled(),
+        luogu_killswitch_state=_read_luogu_killswitch(),
     )
 
 
@@ -7494,6 +7528,9 @@ def generate_form():
         gesp_default_year=date.today().year,
         validation_result=request.args.get("validation_result"),
         info=info,
+        # v3.9.72 · 洛谷接入一键开关状态 · 模板据此隐藏"授权登录 + 手动 Cookie"两块
+        luogu_killswitch_enabled=_is_luogu_access_enabled(),
+        luogu_killswitch_state=_read_luogu_killswitch(),
     )
 
 
@@ -7925,6 +7962,9 @@ GENERATE_FORM_HTML = """
 
     <form action="/generate-form" method="post" class="bg-white rounded-2xl card-shadow p-6 space-y-5">
 
+        {# v3.9.72 · 洛谷接入一键开关：关闭时整块隐藏"授权登录 + 手动 Cookie"，代之以友好提示 #}
+        {% if luogu_killswitch_enabled %}
+
         {# v3.9.62 · 1. 授权登录洛谷（首要登录方式）#}
         <div class="bg-gradient-to-br from-emerald-50 to-teal-50 border-2 border-emerald-300 rounded-xl p-4 space-y-3 shadow-sm">
             <div class="flex items-start gap-2">
@@ -8102,6 +8142,36 @@ GENERATE_FORM_HTML = """
                 </div>
             </div>
         </details>
+
+        {% else %}
+        {# 洛谷接入已关闭：隐藏"授权登录 + 手动 Cookie"两块，代之以提示 #}
+        <div class="bg-rose-50 border-2 border-rose-300 rounded-xl p-5 space-y-3">
+            <div class="flex items-start gap-3">
+                <div class="text-3xl leading-none">🚧</div>
+                <div class="flex-1">
+                    <p class="font-bold text-rose-900 text-base">洛谷接入已暂时关闭</p>
+                    <p class="text-sm text-rose-800 mt-1.5 leading-relaxed">
+                        后台管理已暂停洛谷数据抓取，当前不接受新报告生成。
+                        已生成的报告、海报、家长订阅照常查看；如需恢复请等待管理员通知。
+                    </p>
+                    {% if luogu_killswitch_state and luogu_killswitch_state.get('reason') %}
+                    <p class="text-xs text-rose-700 mt-2 font-mono">
+                        // 关闭原因：{{ luogu_killswitch_state.get('reason') }}
+                    </p>
+                    {% endif %}
+                    {% if luogu_killswitch_state and luogu_killswitch_state.get('updated_at') %}
+                    <p class="text-xs text-rose-600 font-mono">
+                        // 更新于：{{ luogu_killswitch_state.get('updated_at') }}{% if luogu_killswitch_state.get('updated_by') %} · by {{ luogu_killswitch_state.get('updated_by') }}{% endif %}
+                    </p>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="flex flex-wrap gap-2 pt-2">
+                <a href="/select-mode" class="inline-flex items-center px-4 py-2 rounded-md bg-white border border-rose-300 text-rose-700 hover:bg-rose-100 text-sm font-semibold">👀 查看历史报告</a>
+                <a href="/" class="inline-flex items-center px-4 py-2 rounded-md bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-semibold">🏠 回首页</a>
+            </div>
+        </div>
+        {% endif %}
 
         <!-- 1. 报告核心信息（融合注册字段） -->
         <div class="field-section">

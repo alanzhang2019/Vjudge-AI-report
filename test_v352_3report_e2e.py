@@ -23,7 +23,8 @@ if r.status_code == 200:
     checks = {
         "v3.5.2 主入口 chip": "v3.5.2 主入口" in body,
         "AI 生成学习报告标题": "AI 生成学习报告" in body,
-        "主 CTA 按钮": "立即生成我的学习报告" in body,
+        # v3.9.72 · kill switch 默认开启,首页主 CTA 正常显示;若已关会显示"洛谷接入已关闭"
+        "主 CTA 或关闭提示二选一": ("立即生成我的学习报告" in body) or ("洛谷接入已暂时关闭" in body),
         "3 身份入口保留": "我是选手" in body and "我是家长" in body and "我是教练" in body,
         # v3.9.71 · 首页 UID 快速入口已关闭，/me-entry 仍可走 picker 页
         "首页 UID 入口已关闭": "meUid" not in body,

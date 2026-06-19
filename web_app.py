@@ -233,8 +233,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.9.70"
-APP_VERSION_BUILD = "20260619_v3p9p70"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.9.71"
+APP_VERSION_BUILD = "20260619_v3p9p71"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -1505,16 +1505,8 @@ INDEX_HTML = """
             <a href="/select-mode" class="text-[var(--accent)] hover:underline font-medium">👀 我已注册 · 直接看历史报告 →</a>
         </div>
 
-        <!-- 老用户 UID 快速进入（嵌入主 CTA 内，更显眼） -->
-        <div class="mt-5 pt-5 border-t border-dashed border-[var(--line-2)]">
-            <div class="font-mono text-[10.5px] text-[var(--ink-3)] mb-2">// 已注册用户 · 直接进个人中心</div>
-            <!-- v3.9.62 fix · 改用 POST /me-entry，由服务端签发签名 token 后再跳转 /me/<uid>?t=... -->
-            <!-- v3.9.65 fix · JS 正则里的 d 在 Python 字符串里需要写两个反斜杠，否则 SyntaxWarning -->
-            <form id="me-entry" action="/me-entry" method="post" class="flex gap-2" onsubmit="var u=document.getElementById('meUid').value.trim(); if(u && /^\\d{6,10}$/.test(u)) return true; alert('请输入 6-10 位洛谷 UID'); return false;">
-                <input id="meUid" name="luogu_uid" type="text" inputmode="numeric" pattern="\\d{6,10}" placeholder="洛谷 UID（6-10 位数字）" class="field flex-1" required>
-                <button type="submit" class="btn-secondary whitespace-nowrap font-mono">进入 ›</button>
-            </form>
-        </div>
+        {# v3.9.71 · 关闭首页 UID 快速入口（合规要求：不再公开"输入 UID 直达个人中心"通道）#}
+        {# 旧 form /me-entry 路由保留，老用户已收藏的链接仍可用；新用户必须走"立即生成"或"看历史报告"#}
     </section>
 
     <!-- 3 大特性 -->

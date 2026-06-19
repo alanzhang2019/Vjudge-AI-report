@@ -25,7 +25,8 @@ if r.status_code == 200:
         "AI 生成学习报告标题": "AI 生成学习报告" in body,
         "主 CTA 按钮": "立即生成我的学习报告" in body,
         "3 身份入口保留": "我是选手" in body and "我是家长" in body and "我是教练" in body,
-        "UID 快速入口保留": "meUid" in body,
+        # v3.9.71 · 首页 UID 快速入口已关闭，/me-entry 仍可走 picker 页
+        "首页 UID 入口已关闭": "meUid" not in body,
     }
     all_ok = all(checks.values())
     for k, v in checks.items():

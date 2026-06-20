@@ -1,0 +1,11 @@
+status=200
+headers={
+  "Server": "openresty",
+  "Date": "Fri, 19 Jun 2026 19:57:14 GMT",
+  "Content-Type": "application/json; charset=utf-8",
+  "Content-Length": "110",
+  "Connection": "close",
+  "Cache-Control": "no-cache",
+  "Strict-Transport-Security": "max-age=31536000"
+}
+body={"version": "v3.10.0", "build": "20260620_v3p10p0_email_register", "git": "dev", "ts": "2026-06-19T19:57:14Z"}

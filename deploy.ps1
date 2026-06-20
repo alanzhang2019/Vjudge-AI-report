@@ -1,174 +1,54 @@
-﻿# ============================================================================
-# luogu-AI-report 一键部署脚本（Windows 客户端）
-# 用法（在 PowerShell 里）：
-#   .\deploy.ps1                                 # 默认：打包+scp+调用服务器 deploy.sh
-#   .\deploy.ps1 -SkipBuild                      # 跳过打包（用现有 deploy-pkg.zip）
-#   .\deploy.ps1 -OnlyZip                        # 只打包，不传
-#   .\deploy.ps1 -Server user@1.2.3.4            # 指定服务器
-#   .\deploy.ps1 -Status                         # 查看服务器状态
-#   .\deploy.ps1 -Logs                           # 跟踪服务器日志
-#   .\deploy.ps1 -Restart                        # 改 .env 后重启
-#   .\deploy.ps1 -ResetPassword                  # 重置 admin 密码
-#   .\deploy.ps1 -Rollback                       # 回滚
-# ============================================================================
+﻿# 部署脚本
+$ErrorActionPreference = "Continue"
+$LocalFile = "c:\Users\zpy20\Desktop\项目\luoguAI\luogu-api-python\web_app.py"
+$LogFile = "c:\Users\zpy20\Desktop\项目\luoguAI\luogu-api-python\deploy.log"
+$RemoteHost = "ubuntu@43.163.26.115"
+$RemoteTmp = "/tmp/_DEPLOY_TEST.py"
+$Container = "luogu-ai-report-luogu-coach"
 
-[CmdletBinding()]
-param(
-    [string]$Server = "ubuntu@43.163.26.115",
-    [string]$RemoteDir = "/home/ubuntu/luogu-ai-report",
-    [switch]$SkipBuild,
-    [switch]$OnlyZip,
-    [switch]$Status,
-    [switch]$Logs,
-    [switch]$Restart,
-    [switch]$ResetPassword,
-    [switch]$Rollback
-)
+"" | Out-File $LogFile
+Add-Content $LogFile "===== 部署开始 $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ====="
 
-$ErrorActionPreference = "Stop"
-$ProjectRoot = $PSScriptRoot
-$ZipPath = Join-Path $env:USERPROFILE "Desktop\luogu-ai-report-pkg.zip"
+# Step 1: 本地 grep
+$localCount = (Get-Content $LocalFile | Select-String "DEPLOY-CHECK").Count
+Add-Content $LogFile "STEP1 本地 DEPLOY-CHECK 出现次数: $localCount"
 
-# ---------- 颜色 ----------
-function Write-Step($msg) { Write-Host "[$(Get-Date -Format 'HH:mm:ss')] $msg" -ForegroundColor Cyan }
-function Write-OK($msg)   { Write-Host "✓ $msg" -ForegroundColor Green }
-function Write-Warn($msg) { Write-Host "⚠ $msg" -ForegroundColor Yellow }
-function Write-Err($msg)  { Write-Host "✗ $msg" -ForegroundColor Red }
+# Step 2: SCP
+Add-Content $LogFile "STEP2 开始 SCP..."
+$scpResult = scp -o StrictHostKeyChecking=no -O $LocalFile "${RemoteHost}:${RemoteTmp}" 2>&1
+Add-Content $LogFile "SCP 输出: $scpResult"
+Add-Content $LogFile "SCP exit: $LASTEXITCODE"
 
-# ---------- 工具函数 ----------
-function Test-Ssh {
-    Write-Step "检查 ssh/scp 可用性..."
-    $ssh = Get-Command ssh -ErrorAction SilentlyContinue
-    $scp = Get-Command scp -ErrorAction SilentlyContinue
-    if (-not $ssh -or -not $scp) {
-        Write-Err "需要 ssh 和 scp（Windows 10 1809+ 自带）"
-        Write-Warn "升级到 Windows 10 1809+ 或安装 OpenSSH：Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0"
-        exit 1
-    }
+# Step 3: 远程 md5
+Add-Content $LogFile "STEP3 远程验证..."
+$ssh3 = ssh -o StrictHostKeyChecking=no $RemoteHost "ls -la $RemoteTmp && md5sum $RemoteTmp" 2>&1
+Add-Content $LogFile "REMOTE: $ssh3"
+Add-Content $LogFile "ssh3 exit: $LASTEXITCODE"
+
+# Step 4: docker cp
+Add-Content $LogFile "STEP4 docker cp..."
+$ssh4 = ssh -o StrictHostKeyChecking=no $RemoteHost "docker cp $RemoteTmp $Container`:/app/web_app.py && docker exec -i $Container md5sum /app/web_app.py && docker exec -i $Container grep -c 'DEPLOY-CHECK' /app/web_app.py" 2>&1
+Add-Content $LogFile "DOCKER: $ssh4"
+Add-Content $LogFile "ssh4 exit: $LASTEXITCODE"
+
+# Step 5: restart
+Add-Content $LogFile "STEP5 restart..."
+$ssh5 = ssh -o StrictHostKeyChecking=no $RemoteHost "docker restart $Container" 2>&1
+Add-Content $LogFile "RESTART: $ssh5"
+Add-Content $LogFile "restart exit: $LASTEXITCODE"
+
+# Step 6: sleep
+Add-Content $LogFile "STEP6 等待 10s..."
+Start-Sleep -Seconds 10
+
+# Step 7: 验证 /api/version
+Add-Content $LogFile "STEP7 测试 /api/version..."
+try {
+    $resp = Invoke-WebRequest -Uri "http://43.163.26.115/api/version" -UseBasicParsing -TimeoutSec 15
+    Add-Content $LogFile "STATUS: $($resp.StatusCode)"
+    Add-Content $LogFile "BODY: $($resp.Content)"
+} catch {
+    Add-Content $LogFile "ERR: $($_.Exception.Message)"
 }
 
-function Invoke-Remote {
-    param([string]$Cmd)
-    Write-Step "ssh $Server → $Cmd"
-    ssh $Server $Cmd
-    if ($LASTEXITCODE -ne 0) {
-        Write-Err "远程命令失败（exit=$LASTEXITCODE）"
-        exit 1
-    }
-}
-
-function New-Package {
-    if ($SkipBuild) {
-        if (-not (Test-Path $ZipPath)) {
-            Write-Err "SkipBuild 模式但找不到 $ZipPath"
-            exit 1
-        }
-        Write-OK "复用现有 zip: $ZipPath"
-        return
-    }
-
-    Write-Step "清理旧 zip..."
-    Remove-Item $ZipPath -ErrorAction SilentlyContinue
-
-    Write-Step "打包项目（自动排除 .git / .env / 缓存 / 报告 / pdf）..."
-    # 用临时目录 + robocopy 排除（更可靠）
-    $staging = Join-Path $env:TEMP "luogu-staging-$(Get-Random)"
-    New-Item -ItemType Directory -Path $staging | Out-Null
-
-    # robocopy 镜像，/XD 排除目录，/XF 排除文件
-    $excludeDirs = @('.git', '.source_cache', 'reports', '__pycache__', '.dbg', 'node_modules', '.idea', '.vscode')
-    $excludeFiles = @('.env', 'tasks.db', 'luogu-ai-report-pkg.zip', 'deploy-pkg.zip', 'cookies.json')
-
-    $robocopyArgs = @(
-        "`"$ProjectRoot`"",
-        "`"$staging`"",
-        "/MIR", "/NJH", "/NJS", "/NC", "/NDL", "/NFL", "/NP"
-    )
-    foreach ($d in $excludeDirs) { $robocopyArgs += "/XD"; $robocopyArgs += "`"$d`"" }
-    foreach ($f in $excludeFiles) { $robocopyArgs += "/XF"; $robocopyArgs += "`"$f`"" }
-
-    # robocopy 退出码 0-7 是成功
-    & robocopy @robocopyArgs | Out-Null
-    if ($LASTEXITCODE -ge 8) { Write-Err "robocopy 失败"; exit 1 }
-
-    # 删大文件（PDF 等），仅当存在时
-    Get-ChildItem -Path $staging -Recurse -Include *.pdf -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
-    Get-ChildItem -Path $staging -Recurse -Include *.pyc -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
-
-    # 打包（用 tar.gz 替代 zip：路径分隔符永远是 /，Windows / Linux 通用，体积更小）
-    $tarExe = (Get-Command tar -ErrorAction SilentlyContinue).Source
-    if (-not $tarExe) {
-        $gitTar = "$env:ProgramFiles\Git\usr\bin\tar.exe"
-        if (Test-Path $gitTar) { $tarExe = $gitTar }
-    }
-    if ($tarExe) {
-        $PkgPath = [System.IO.Path]::ChangeExtension($ZipPath, '.tar.gz')
-        $oldLocation = Get-Location
-        Set-Location $staging
-        & $tarExe -czf $PkgPath -- *
-        Set-Location $oldLocation
-        Remove-Item -Recurse -Force $staging
-        $script:ZipPath = $PkgPath   # 改用 .tar.gz 路径（v3.9.42+：用 $script: 写回外层作用域）
-    } else {
-        Compress-Archive -Path "$staging\*" -DestinationPath $ZipPath -CompressionLevel Optimal
-        Remove-Item -Recurse -Force $staging
-    }
-
-    $size = [math]::Round((Get-Item $ZipPath).Length / 1MB, 2)
-    Write-OK "打包完成: $ZipPath ($size MB)"
-}
-
-function Send-Package {
-    Write-Step "scp $ZipPath → ${Server}:${RemoteDir}/"
-    ssh $Server "mkdir -p $RemoteDir" | Out-Null
-    # v3.9.42: 远程文件名跟本地一致（tar.gz 或 zip）
-    $remoteName = Split-Path $ZipPath -Leaf
-    scp $ZipPath "${Server}:${RemoteDir}/${remoteName}"
-    if ($LASTEXITCODE -ne 0) { Write-Err "scp 失败"; exit 1 }
-    Write-OK "传输完成"
-}
-
-# ---------- 主流程 ----------
-
-if ($Status) {
-    Test-Ssh
-    Invoke-Remote "cd $RemoteDir && chmod +x deploy.sh && ./deploy.sh --status"
-    exit 0
-}
-
-if ($Logs) {
-    Test-Ssh
-    Invoke-Remote "cd $RemoteDir && ./deploy.sh --logs"
-    exit 0
-}
-
-if ($Restart) {
-    Test-Ssh
-    Invoke-Remote "cd $RemoteDir && ./deploy.sh --restart"
-    exit 0
-}
-
-if ($ResetPassword) {
-    Test-Ssh
-    Invoke-Remote "cd $RemoteDir && ./deploy.sh --reset-password"
-    exit 0
-}
-
-if ($Rollback) {
-    Test-Ssh
-    Invoke-Remote "cd $RemoteDir && ./deploy.sh --rollback"
-    exit 0
-}
-
-# 默认：完整部署
-Test-Ssh
-New-Package
-
-if ($OnlyZip) {
-    Write-OK "只打包，不上传：$ZipPath"
-    exit 0
-}
-
-Send-Package
-Invoke-Remote "cd $RemoteDir && chmod +x deploy.sh && ./deploy.sh --from-zip"
-Write-OK "Deploy done. Open http://YOUR_SERVER_IP:5000/ to verify."
+Add-Content $LogFile "===== 部署结束 $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ====="

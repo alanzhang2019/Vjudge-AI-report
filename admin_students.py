@@ -13,6 +13,7 @@ admin_students.py — v3.5 Phase 1
 """
 from __future__ import annotations
 
+import os                  # v3.10.0.2 · hash_password 兜底 PBKDF2 用 os.urandom,顶部 import 才能看见
 import sqlite3
 import sys
 from datetime import date, datetime
@@ -33,7 +34,7 @@ from task_store import _get_conn  # noqa: E402
 # ========== 学员 CRUD ==========
 
 def create_student(
-    luogu_uid: str,
+    luogu_uid: str = "",
     *,
     real_name: str | None = None,
     school: str | None = None,
@@ -45,8 +46,11 @@ def create_student(
     gender: str | None = None,
     birth_date: str | None = None,
     registered_via: str = "admin",
+    email: str | None = None,            # v3.10.0 · 邮箱
+    short_id: str | None = None,         # v3.10.0 · 8 位短 ID
+    password_hash: str | None = None,    # v3.10.0 · BCrypt 哈希
 ) -> int:
-    """创建学员，返回新 id。luogu_uid 必填且唯一。
+    """创建学员，返回新 id。
 
     v3.5.2 新增（学而思图 1 模式）：
       - city / gender / birth_date / registered_via 4 字段
@@ -54,26 +58,39 @@ def create_student(
 
     v3.8 新增：
       - province 字段（用于本地升学政策匹配）
+
+    v3.10.0 重构：
+      - luogu_uid 改为可选(邮箱注册后,新学员不再填)
+      - 必填 email + short_id + password_hash(后两个不传时自动生成)
     """
-    if not str(luogu_uid or "").strip():
-        raise ValueError("luogu_uid 必填")
+    # v3.10.0 · 校验:至少要有 email 或 luogu_uid 之一
+    has_email = bool(email and str(email).strip())
+    has_luogu = bool(luogu_uid and str(luogu_uid).strip())
+    if not has_email and not has_luogu:
+        raise ValueError("email 和 luogu_uid 至少要有一个")
     # 14 岁以下 + 无授权 → real_name 强制 NULL（PIPL §5.2 防护）
     if is_minor and real_name:
         real_name = None
     # gender 限制在 M/F/空
     if gender not in (None, "", "M", "F"):
         raise ValueError("gender 必须是 M / F / 空")
+
+    # v3.10.0 · 自动生成 short_id
+    if not short_id:
+        short_id = _generate_short_id(conn_db=None)  # 不依赖 conn,内部自己开
+
     conn = _get_conn()
     try:
         cur = conn.execute(
             """
             INSERT INTO students
               (luogu_uid, real_name, school, grade, is_minor, note,
-               city, gender, birth_date, registered_via)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               city, gender, birth_date, registered_via,
+               email, short_id, password_hash, province)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                str(luogu_uid).strip(),
+                (str(luogu_uid).strip() if has_luogu else None),
                 (real_name or None),
                 (school or None),
                 (grade or None),
@@ -83,24 +100,48 @@ def create_student(
                 (gender or None),
                 (birth_date or None),
                 registered_via or "admin",
+                (str(email).strip() if has_email else None),
+                short_id,
+                password_hash,
+                (province or None),
             ),
         )
-        # v3.8 · 单独 UPDATE province（兼容老 schema 中可能不存在的列）
-        if province:
-            try:
-                conn.execute(
-                    "UPDATE students SET province = ? WHERE id = ?",
-                    ((province or "").strip(), int(cur.lastrowid)),
-                )
-            except Exception:
-                pass
         conn.commit()
         return int(cur.lastrowid)
     finally:
         conn.close()
 
 
+def _generate_short_id(conn_db=None) -> str:
+    """v3.10.0 · 生成 8 位短 ID(用于 /me/<x> URL)
+
+    排除易混淆字符(0/o/1/l/i),用大小写区分。
+    冲突时重试 20 次,失败兜底用 token_hex(3)。
+    """
+    import secrets
+    pool = "abcdefghijkmnpqrstuvwxyz23456789"
+    if conn_db is None:
+        conn = _get_conn()
+        own = True
+    else:
+        conn = conn_db
+        own = False
+    try:
+        existing = {r[0] for r in conn.execute(
+            "SELECT short_id FROM students WHERE short_id IS NOT NULL"
+        ).fetchall()}
+        for _ in range(20):
+            sid = "".join(secrets.choice(pool) for _ in range(8))
+            if sid not in existing:
+                return sid
+        return "u" + secrets.token_hex(3)
+    finally:
+        if own:
+            conn.close()
+
+
 def get_student(student_id: int) -> dict | None:
+    _ensure_is_banned_column()  # v3.10.0.4
     conn = _get_conn()
     try:
         row = conn.execute(
@@ -122,7 +163,143 @@ def get_student_by_uid(luogu_uid: str) -> dict | None:
         conn.close()
 
 
+def get_student_by_email(email: str) -> dict | None:
+    """v3.10.0 · 用邮箱查学员(登录用)"""
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            "SELECT * FROM students WHERE LOWER(email) = LOWER(?)",
+            (str(email or "").strip(),),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def get_student_by_short_id(short_id: str) -> dict | None:
+    """v3.10.0 · 用 8 位 short_id 查学员(URL 用)"""
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            "SELECT * FROM students WHERE short_id = ?",
+            (str(short_id or "").strip(),),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+# ========== v3.10.0 · 密码 ==========
+
+def hash_password(password: str) -> str:
+    """BCrypt 哈希(优先),没装 bcrypt 时降级 PBKDF2-HMAC-SHA256"""
+    import hashlib
+    # 1) 优先 BCrypt
+    try:
+        import bcrypt
+        return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
+    except ImportError:
+        pass
+    # 2) 兜底 PBKDF2(stretch 200k 次)
+    salt = os.urandom(16).hex()
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode(), 200_000).hex()
+    return f"pbkdf2_sha256$200000${salt}${dk}"
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    """验证密码(支持 BCrypt 和 PBKDF2 两种格式)"""
+    if not password_hash:
+        return False
+    # PBKDF2
+    if password_hash.startswith("pbkdf2_sha256$"):
+        try:
+            import hashlib
+            _, _, salt, dk = password_hash.split("$", 3)
+            new_dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode(), 200_000).hex()
+            return _const_eq(new_dk, dk)
+        except Exception:
+            return False
+    # BCrypt($2a$ / $2b$ / $2y$)
+    if password_hash.startswith(("$2a$", "$2b$", "$2y$")):
+        try:
+            import bcrypt
+            return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+        except Exception:
+            return False
+    return False
+
+
+def _const_eq(a: str, b: str) -> bool:
+    """constant-time 字符串比较(防时序攻击)"""
+    import hmac
+    return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
+
+
+# v3.10.0.4 · 学员表加 is_banned 字段(封禁/解封)
+def _ensure_is_banned_column():
+    conn = _get_conn()
+    try:
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(students)").fetchall()]
+        if "is_banned" not in cols:
+            conn.execute("ALTER TABLE students ADD COLUMN is_banned INTEGER DEFAULT 0")
+            conn.execute("ALTER TABLE students ADD COLUMN banned_reason TEXT DEFAULT ''")
+            conn.execute("ALTER TABLE students ADD COLUMN banned_at DATETIME")
+            conn.commit()
+    finally:
+        conn.close()
+
+
+def set_student_banned(student_id: int, banned: bool, reason: str = "") -> bool:
+    """v3.10.0.4 · 封禁/解封学员(不影响历史报告,只禁止登录 + 操作)
+    返回是否真的更新了行
+    """
+    _ensure_is_banned_column()
+    conn = _get_conn()
+    try:
+        cur = conn.execute(
+            "UPDATE students SET is_banned = ?, banned_reason = ?, banned_at = ? WHERE id = ?",
+            (1 if banned else 0, reason or "", datetime.now().isoformat(timespec="seconds") if banned else None, int(student_id)),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def is_student_banned(student_id: int) -> bool:
+    _ensure_is_banned_column()
+    conn = _get_conn()
+    try:
+        row = conn.execute("SELECT is_banned FROM students WHERE id = ?", (int(student_id),)).fetchone()
+        return bool(row and row[0])
+    finally:
+        conn.close()
+
+
+def reset_student_password(student_id: int, new_password: str | None = None) -> str:
+    """v3.10.0.4 · 教练重置学员密码(返回新密码明文,只显示一次)
+    不传 new_password 时生成 12 位随机密码
+    """
+    import secrets
+    if not new_password:
+        # 12 位:大小写 + 数字,去掉容易混淆的 0/O/1/l
+        alphabet = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789"
+        new_password = "".join(secrets.choice(alphabet) for _ in range(12))
+    new_hash = hash_password(new_password)
+    conn = _get_conn()
+    try:
+        conn.execute(
+            "UPDATE students SET password_hash = ? WHERE id = ?",
+            (new_hash, int(student_id)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return new_password
+
+
 def list_students(*, limit: int = 50, offset: int = 0) -> list[dict]:
+    _ensure_is_banned_column()  # v3.10.0.4 · 兜底建 is_banned 列
     conn = _get_conn()
     try:
         rows = conn.execute(

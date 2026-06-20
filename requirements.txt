@@ -9,6 +9,7 @@ playwright>=1.45
 ddddocr>=1.5              # v3.9.52 · 密码登录自动识别图形验证码
 qrcode>=7.4              # v3.8 海报二维码（漏写会导致 500）
 pillow>=10.0             # qrcode 依赖 PIL 渲染 PNG
+bcrypt>=4.1              # v3.10.0.2 · 学员注册密码哈希,未装则降级 PBKDF2 (admin_students.hash_password)
 
 # 洛谷 API 依赖（pyLuogu）
 httpx>=0.27

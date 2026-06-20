@@ -2972,6 +2972,7 @@ def _build_gesp_prompt(
     target_level: int,
     profile_block: str,
     gesp_history_block: str,
+    vjudge_block: str = "（学员未绑定 VJudge,无跨平台数据。AtCoder 已弃用。）",
 ) -> str:
     """v3.9.64 · 构建 GESP 报告的 prompt（聚焦 8 级知识体系 + 备考路线图）"""
     import datetime as _dt
@@ -2997,6 +2998,23 @@ def _build_gesp_prompt(
     summary = export_data.get("summary", {}) or {}
     diff_hist = summary.get("difficulty_histogram") or {}
     top_tags = summary.get("top_algorithm_tags") or summary.get("top_tags") or []
+
+    # v3.9.74 · VJudge 跨平台数据块(取代 AtCoder)
+    vjudge_data = export_data.get("vjudge_data") or {}
+    if vjudge_data.get("linked"):
+        vjudge_block = (
+            f"- VJudge username: {vjudge_data.get('username','')}\n"
+            f"- 昵称: {vjudge_data.get('nick','') or '(未设置)'}\n"
+            f"- 已解决题数: {vjudge_data.get('solved_count', 0)}\n"
+            f"- 总提交: {vjudge_data.get('total_submissions', 0)} | "
+            f"AC {vjudge_data.get('total_ac', 0)} | "
+            f"AC 率: {float(vjudge_data.get('ac_rate', 0))*100:.1f}%\n"
+            f"- 各 OJ 分布: {vjudge_data.get('oj_distribution', '无')}\n"
+            f"- 最近 5 个已解决题: {vjudge_data.get('recent_solved', '无')}\n"
+            f"（说明: VJudge 跨平台汇总,用于评估多 OJ 活跃度,非 GESP 真考成绩。）"
+        )
+    else:
+        vjudge_block = "（学员未绑定 VJudge,无跨平台数据。AtCoder 已弃用。）"
 
     # 学员已通过的级别（从 gesp_history_block 文本里用正则抽）
     import re as _re
@@ -3031,6 +3049,9 @@ def _build_gesp_prompt(
 - 本次导出未通过/卡住题数：{failed}
 - 难度分布直方图：{json.dumps(diff_hist, ensure_ascii=False)}
 - 偏好的算法标签 TOP：{json.dumps(top_tags, ensure_ascii=False)}
+
+### 学员的跨平台做题画像（v3.9.74 · VJudge 取代 AtCoder,只读公开数据）
+{vjudge_block}
 
 ### 重要：洛谷标签覆盖与 GESP 考纲的对应关系（v3.9.65 用户反馈）
 - 洛谷上的题目标签主要围绕算法（DP / 图论 / 数论 / 数据结构）展开，**不是按 GESP 1-8 级考纲一一对应的**。
@@ -3204,9 +3225,27 @@ def generate_gesp_report(
                 exc_info=True,
             )
 
+    # v3.9.74 · VJudge 跨平台数据块(取代 AtCoder)→ 喂给 GESP 报告
+    vjudge_data = export_data.get("vjudge_data") or {}
+    if vjudge_data.get("linked"):
+        vjudge_block = (
+            f"- VJudge username: {vjudge_data.get('username','')}\n"
+            f"- 昵称: {vjudge_data.get('nick','') or '(未设置)'}\n"
+            f"- 已解决题数: {vjudge_data.get('solved_count', 0)}\n"
+            f"- 总提交: {vjudge_data.get('total_submissions', 0)} | "
+            f"AC {vjudge_data.get('total_ac', 0)} | "
+            f"AC 率: {float(vjudge_data.get('ac_rate', 0))*100:.1f}%\n"
+            f"- 各 OJ 分布: {vjudge_data.get('oj_distribution', '无')}\n"
+            f"- 最近 5 个已解决题: {vjudge_data.get('recent_solved', '无')}\n"
+            f"（说明: VJudge 跨平台汇总,用于评估多 OJ 活跃度,非 GESP 真考成绩。）"
+        )
+    else:
+        vjudge_block = "（学员未绑定 VJudge,无跨平台数据。AtCoder 已弃用。）"
+
     # 构建 prompt
     prompt = _build_gesp_prompt(
-        export_data, luogu_uid, target_level, profile_block, gesp_history_block
+        export_data, luogu_uid, target_level, profile_block, gesp_history_block,
+        vjudge_block=vjudge_block,
     )
 
     # 续写模式追加
@@ -3511,6 +3550,27 @@ def generate_ai_report(
         except Exception as _prof_e:
             profile_block = f"（档案拉取失败：{_prof_e}）"
 
+    # v3.9.74 · VJudge 跨平台数据块(取代 AtCoder)→ 喂给 AI 的 prompt 片段
+    vjudge_data = export_data.get("vjudge_data") or {}
+    if vjudge_data.get("linked"):
+        vjudge_block = (
+            f"- VJudge username: {vjudge_data.get('username','')}\n"
+            f"- 昵称: {vjudge_data.get('nick','') or '(未设置)'}\n"
+            f"- 已解决题数: {vjudge_data.get('solved_count', 0)}\n"
+            f"- 总提交: {vjudge_data.get('total_submissions', 0)} | "
+            f"AC {vjudge_data.get('total_ac', 0)} | WA {vjudge_data.get('total_wa', 0)} | "
+            f"AC 率: {float(vjudge_data.get('ac_rate', 0))*100:.1f}%\n"
+            f"- 各 OJ 分布: {vjudge_data.get('oj_distribution', '无')}\n"
+            f"- 最近 5 个已解决题: {vjudge_data.get('recent_solved', '无')}\n"
+            f"（说明: VJudge 跨平台汇总数据,只反映公开的 recent 提交,"
+            f"用于评估选手在多 OJ 上的综合活跃度,而非权威成绩。)"
+        )
+    else:
+        vjudge_block = (
+            "（学员未绑定 VJudge,无跨平台数据。建议在报告中提示学员去"
+            "/me 页面绑定,以便后续报告能提供多 OJ 视角。AtCoder 已弃用。）"
+        )
+
     prompt = f"""
 你是一位顶级的算法竞赛金牌教练。我导出了一位选手的近期洛谷做题记录（包括已通过和尝试但未通过的题目代码）。
 请你根据我提供的【能力评估参考框架】以及【官方考纲】，对他进行深度的诊断，并针对他【未做完/做错的题目】给出极具启发性的题解。
@@ -3528,6 +3588,9 @@ def generate_ai_report(
 
 ### 当地升学政策 + 目标学校政策（v3.8 增强）
 {policy_block or "（无政策匹配数据）"}
+
+### 选手的跨平台做题画像（v3.9.74 · VJudge 取代 AtCoder,只读公开数据）
+{vjudge_block}
 
 ### 选手的全局数据统计
 - 本次导出中已通过题数: {solved_count}
@@ -3756,6 +3819,246 @@ def generate_ai_report(
     )
     content = response.choices[0].message.content or ""
     return normalize_report_markdown(content, export_data)
+
+
+# ============================================================
+# v3.10.0.4 · VJudge 主轴 AI 报告生成(全 vjudge 模式)
+#   - 不依赖洛谷 practice / passed_items / failed_items / behavior_analysis
+#   - 仅用 vjudge_data + 学员基础信息 + solved 列表
+#   - prompt 模板专为跨平台 OJ 画像设计
+#   - 输出 MD (流式,可断连续写)
+# ============================================================
+
+# v3.10.0.4 · VJudge 报告 prompt 框架
+VJUDGE_DIAGNOSTIC_FRAMEWORK = """
+【VJudge 跨平台能力评估框架】
+
+VJudge (https://vjudge.net) 是一个"虚拟判题平台",会聚拢 100+ OJ
+(Codeforces、AtCoder、洛谷、POJ、HDU、SPOJ、UVa …) 的提交记录,
+对一名算法竞赛选手的"真实"竞技画像,比单一 OJ 更有代表性。
+
+请基于学员的 VJudge 公开数据,做以下维度的评估：
+
+1. **跨平台活跃度**:
+   - 总 AC 数 vs 总提交数 → AC 率(判断"尝试后能否独立做对"的核心信号)
+   - 注册时长 vs 总提交 → 反映"刷题密度"(高密度 = 备赛期;低密度 = 兴趣型)
+
+2. **OJ 分布画像**:
+   - 如果已解决题集中在 Codeforces/AtCoder:偏"国际赛路径",英语题干理解 OK
+   - 如果集中在洛谷/POJ/HDU:偏"国内路径",更熟悉中文题干
+   - 单一 OJ 占 >80% = 单一生态;≥3 个 OJ = 跨平台型,适应力强
+
+3. **难度与稳定性**:
+   - 提交/AC 比 > 3.0 = 死磕型(可能缺方法论,建议学套路)
+   - 提交/AC 比 1.0-2.0 = 高效型(读题准,一两次就能 AC)
+   - 提交/AC 比 < 1.5 且 AC 数 < 10 = 新手期,需引导正确起步方向
+
+4. **成长性判断**:
+   - 7d/30d/all AC 数(若可获取) → 是否有近期的爬升
+   - 已解决题列表的 OJ 来源多样性 → 视野宽度
+
+【输出要求】
+请使用 Markdown 表格 / HTML 徽章 / 颜色,保持报告的可视化风格。
+"""
+
+
+def _build_vjudge_report_messages(
+    export_data: dict,
+    resume_prefix: str | None = None,
+) -> list[dict]:
+    """v3.10.0.4 · 构造 VJudge 报告的 messages(给 OpenAI Chat API)。
+
+    不读洛谷 practice / behavior / syllabus,只读:
+      - export_data['student_info']   {real_name, grade, city, school, ...}
+      - export_data['vjudge_data']    {username, nick, total_submissions, total_ac,
+                                       ac_rate, solved_count, oj_distribution,
+                                       recent_solved, ...}
+    """
+    from datetime import datetime as _dt
+
+    si = export_data.get("student_info") or {}
+    vj = export_data.get("vjudge_data") or {}
+
+    # 学员基础信息
+    profile_lines = [
+        f"- 姓名：{si.get('real_name') or '未填'}",
+        f"- 短 ID：{si.get('short_id') or '未生成'}",
+        f"- 学校：{si.get('school') or '未填'}",
+        f"- 城市/年级：{si.get('city') or '未填'} / {si.get('grade') or '未填'}",
+        f"- GESP 已通过最高级：{si.get('gesp_highest_passed') or '未参加'}",
+    ]
+    profile_block = "\n".join(profile_lines)
+
+    # VJudge 数据块(取代洛谷的"全局统计"段)
+    # v3.10.0.5 · recent_solved 已是 markdown 表格字符串(由 web_app 端拼接),
+    # oj_distribution 也已带真实分布,不再回退到"未公开"占位。
+    vjudge_block = (
+        f"- VJudge username: {vj.get('username','')}\n"
+        f"- 昵称: {vj.get('nick','') or '(未设置)'}\n"
+        f"- 注册时间: {vj.get('register_time','') or '未知(新版本 VJudge 不再直接暴露注册日期)'}\n"
+        f"- 总 AC 数: {vj.get('total_ac', 0)}\n"
+        f"- 总提交数: {vj.get('total_submissions', 0)}\n"
+        f"- 总尝试 OJ 数: {vj.get('oj_count', 0)}\n"
+        f"- AC 率: {float(vj.get('ac_rate', 0))*100:.1f}%\n"
+        f"- 各 OJ 解决数分布: {vj.get('oj_distribution') or '（暂无 OJ 维度数据）'}\n"
+        f"- 最近已解决题(最多 20 条,直接来自 VJudge 已抓取列表):\n{vj.get('recent_solved') or '（暂未抓到已解决题列表,请检查 VJudge 抓取是否完成）'}"
+    )
+
+    # 学员类型判定(让 AI 知道这是"低数据"还是"丰富数据")
+    ac_n = int(vj.get("total_ac", 0) or 0)
+    if ac_n == 0:
+        data_tier = "**🆕 全新学员(VJudge 0 AC)** · 报告侧重『起步方向建议』和『刷题策略入门』"
+    elif ac_n < 10:
+        data_tier = f"**🌱 入门期学员(VJudge {ac_n} AC)** · 报告侧重『基础巩固』+『易错题套路』"
+    elif ac_n < 50:
+        data_tier = f"**🌿 进阶期学员(VJudge {ac_n} AC)** · 报告侧重『专题突破』+『难度跃迁』建议"
+    else:
+        data_tier = f"**🌳 资深学员(VJudge {ac_n} AC)** · 报告侧重『冲刺瓶颈』+『高质量训练』建议"
+
+    current_time = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    system_prompt = (
+        "你是一位顶级的算法竞赛金牌教练,熟悉国内(NOI/CSP/GESP)与国际"
+        "(ICPC/Codeforces/AtCoder)多 OJ 体系。你的报告风格:数据驱动、表格化、"
+        "可直接打印给家长与学员本人。"
+    )
+
+    user_prompt = f"""
+请基于以下**VJudge 跨平台公开数据**,为这位学员生成一份**完整的 VJudge 跨平台 AI 测评报告**。
+
+**报告生成时间**：{current_time}
+
+{VJUDGE_DIAGNOSTIC_FRAMEWORK}
+
+{data_tier}
+
+### 学员基础档案
+{profile_block}
+
+### 学员 VJudge 跨平台数据(全量)
+{vjudge_block}
+
+### 输出结构要求(必须按顺序输出,不允许缺漏)
+
+1. **【学员概览】**
+   - 用 Markdown 表格汇总:姓名、年级、VJudge username、总 AC、总提交、AC 率、活跃 OJ 数
+
+2. **【VJudge 跨平台画像】**
+   - 用 Markdown 表格展示各 OJ 解决数(用 HTML 徽章,OJ 名做超链接到 vjudge.net/user/{vj.get('username','')})
+   - 解读:这个分布反映了什么训练路径偏好?
+
+3. **【提交效率分析】**
+   - 提交/AC 比 = total_submissions / total_ac(若 total_ac=0,标 N/A)
+   - 解读:高效型 / 死磕型 / 新手期?
+   - 给出 1-2 条针对性建议
+
+4. **【已解决题列表(精选 10-20 条)】**
+   - 用 Markdown 表格展示(列:OJ | 题号 | 标题 | AC 时间)
+   - 直接复用上方"学员 VJudge 跨平台数据"段给出的"最近已解决题"表(已是 markdown 表格)
+   - **重要:绝对不要写"未公开 / 暂未获取 / 待补充"**,数据已在 prompt 里完整给出
+   - 解读:这些题透露了学员的"兴趣方向"和"难度上限"
+     (按 OJ/题号/标题做类型/难度推测;若不熟悉某道题,只基于"已 AC 事实"做中性结论,
+      例如"已完成 N 道题,说明该学员已稳定进入 X 难度区间",不要瞎编具体知识点)
+
+5. **【水平研判】**
+   - 根据 AC 数 + OJ 分布 + 题难度,给出"当前阶段"判断(入门/普及/提高/省选)
+   - 给出 1 条最值得投入的方向建议
+
+6. **【后续 4 周训练计划(可执行版)】**
+   - 表格列:周次 | 主题 | 目标 OJ | 题目数量 | 推荐题型 | 验收标准
+   - 4 行(W1-W4)
+   - 必须有"验收标准"(可量化的:AC 率、通过题数、难度上限)
+
+7. **【家长可见的总结】**
+   - 一段 200 字内的总结,直白易懂,无术语
+   - 末尾:"📌 家长下一步":可执行的家庭行动(2-3 条)
+
+### 视觉规范
+ - 评分/进度用 🟢🟡🟠🔴🔵 色块
+ - 难度名称用洛谷官方口径:入门 / 普及- / 普及+/提高 / 提高+/省选- / 省选/NOI-
+ - 不要用长段落,所有结论用表格 + 短解读
+ - 解读段落用 `<p class="text-blue-700 font-semibold">解读：...</p>` 包装
+ - 报告全程中文
+"""
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+    ]
+    if resume_prefix:
+        # 续写模式:把已生成的开头作为 assistant 已写部分
+        messages.append({"role": "assistant", "content": resume_prefix})
+        messages.append({
+            "role": "user",
+            "content": "继续。请从上一段结尾直接续写,不要重复,不要重新生成标题。"
+        })
+    else:
+        messages.append({"role": "user", "content": user_prompt})
+
+    return messages
+
+
+def generate_vjudge_report(
+    export_data: dict,
+    api_key: str,
+    base_url: str | None,
+    model_name: str,
+    *,
+    output_path: str | None = None,
+    resume_prefix: str | None = None,
+) -> str:
+    """v3.10.0.4 · 生成 VJudge 跨平台 AI 报告(全 vjudge 模式)。
+
+    与 generate_ai_report 的区别:
+      - 不依赖洛谷 practice / passed_items / failed_items / behavior_analysis / syllabus
+      - prompt 框架专为 VJudge 公开数据设计
+      - 流式写入 output_path(可断连续写)
+      - 输入仅需 export_data['student_info'] + export_data['vjudge_data']
+    """
+    from openai import OpenAI
+
+    if not str(api_key or "").strip():
+        raise ValueError("未配置 OpenAI API Key")
+
+    client_kwargs = {
+        "api_key": api_key,
+        "timeout": 1800.0,
+    }
+    if base_url:
+        client_kwargs["base_url"] = base_url
+    client = OpenAI(**client_kwargs)
+
+    messages = _build_vjudge_report_messages(export_data, resume_prefix=resume_prefix)
+
+    # 流式
+    if output_path:
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        full_content_parts: list[str] = []
+        try:
+            stream = client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+                stream=True,
+                timeout=1800.0,
+            )
+            for chunk in stream:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    piece = chunk.choices[0].delta.content
+                    full_content_parts.append(piece)
+                    with open(output_path, "a", encoding="utf-8") as f:
+                        f.write(piece)
+        except Exception as e:
+            # partial 留在文件里,方便 resume
+            print(f"[v3.10.0.4] vjudge report stream interrupted: {e}", file=sys.stderr)
+        full_content = "".join(full_content_parts)
+        return full_content
+
+    # 非流式
+    response = client.chat.completions.create(
+        model=model_name,
+        messages=messages,
+        timeout=1800.0,
+    )
+    return response.choices[0].message.content or ""
 
 
 def generate_parent_subscribe(

@@ -1,0 +1,2128 @@
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>学员注册 · v3.10.0</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+<style id="app-skin">
+.app-body{background:linear-gradient(135deg,#f0fdf4 0%,#ecfeff 100%);min-height:100vh;
+  font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans","PingFang SC","Microsoft YaHei",sans-serif;
+  color:#1f2937;}
+.app-card{background:#fff;border-radius:16px;box-shadow:0 10px 25px rgba(0,0,0,.06);padding:32px;width:100%;}
+.app-title{font-size:26px;font-weight:800;color:#064e3b;margin:0 0 4px;letter-spacing:-0.5px;}
+.app-subtitle{color:#0f766e;margin:0 0 4px;font-size:14px;font-weight:600;}
+.app-tag{color:#6b7280;margin:0 0 18px;font-size:12px;}
+.app-muted{color:#9ca3af;font-size:12px;margin:0 0 18px;}
+.app-box{border-radius:10px;padding:12px 12px;border:1px solid #e5e7eb;}
+.app-box-yellow{background:#fffbeb;border-color:#fde68a;color:#92400e;}
+.app-box-blue{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;}
+.app-box-green{background:#ecfdf5;border-color:#a7f3d0;color:#065f46;}
+.app-box-red{background:#fef2f2;border-color:#fecaca;color:#991b1b;}
+.app-box-amber{background:#fffbeb;border-color:#fde68a;color:#92400e;}
+.app-label{display:block;font-size:13px;font-weight:700;color:#374151;}
+.app-input{margin-top:6px;display:block;width:100%;border-radius:10px;border:1px solid #d1d5db;padding:10px 12px;box-shadow:0 1px 2px rgba(0,0,0,.04);background:#fff;}
+.app-input:focus{outline:none;border-color:#10b981;box-shadow:0 0 0 3px rgba(16,185,129,.2);}
+.app-btn{display:inline-flex;align-items:center;justify-content:center;width:100%;border-radius:10px;padding:10px 14px;font-weight:800;transition:all .15s ease;cursor:pointer;border:0;}
+.app-btn-primary{background:linear-gradient(135deg,#059669 0%,#0d9488 100%);color:#fff;}
+.app-btn-primary:hover{background:linear-gradient(135deg,#047857 0%,#0f766e 100%);transform:translateY(-1px);box-shadow:0 4px 12px rgba(5,150,105,.3);}
+.app-btn-secondary{background:#fff;color:#047857;border:1px solid #6ee7b7;}
+.app-btn-secondary:hover{background:#ecfdf5;}
+.app-btn-amber{background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);color:#fff;}
+.app-btn-amber:hover{background:linear-gradient(135deg,#d97706 0%,#b45309 100%);transform:translateY(-1px);box-shadow:0 4px 12px rgba(245,158,11,.3);}
+.app-btn:disabled{opacity:.5;cursor:not-allowed;}
+.app-link{color:#047857;text-decoration:none;}
+.app-link:hover{text-decoration:underline;}
+/* 状态 pill：完成/失败/进行中 统一改为 emerald/amber/rose 系 */
+.app-pill{display:inline-block;padding:3px 10px;border-radius:9999px;font-size:12px;font-weight:600;}
+.app-pill-done{background:#d1fae5;color:#065f46;}
+.app-pill-error{background:#fee2e2;color:#991b1b;}
+.app-pill-running{background:#fef3c7;color:#92400e;}
+.app-pill-muted{background:#f3f4f6;color:#374151;}
+/* 进度条 */
+.app-progress{width:100%;background:#e5e7eb;border-radius:9999px;height:10px;overflow:hidden;}
+.app-progress > .app-progress-fill{height:100%;background:linear-gradient(90deg,#10b981,#0d9488);transition:width .4s ease;}
+/* 表格 */
+.app-table{width:100%;border-collapse:collapse;font-size:14px;}
+.app-table thead{background:#ecfdf5;color:#065f46;}
+.app-table th{padding:10px 14px;text-align:left;font-weight:700;border-bottom:1px solid #d1fae5;}
+.app-table td{padding:10px 14px;border-bottom:1px solid #f3f4f6;color:#374151;}
+.app-table tr:hover td{background:#f9fafb;}
+</style>
+
+</head>
+<body class="app-body min-h-screen flex items-center justify-center p-4">
+    <div class="app-card max-w-md w-full">
+        <div class="text-center mb-4">
+            <div class="app-pill app-pill-done mb-2">v3.10.0</div>
+            <h1 class="app-title">学员注册</h1>
+            <p class="app-subtitle">邮箱注册 · 6 字段</p>
+        </div>
+
+        
+
+        <form method="POST" class="space-y-3">
+            <div>
+                <label class="app-label"><span class="text-red-500">*</span> 城市</label>
+                <select name="city" required class="app-input">
+                    <option value="">请选择城市</option>
+                    
+                    <optgroup label="📍 直辖市">
+                        
+                        <option value="北京" >北京</option>
+                        
+                        <option value="上海" >上海</option>
+                        
+                        <option value="天津" >天津</option>
+                        
+                        <option value="重庆" >重庆</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 港澳台">
+                        
+                        <option value="香港" >香港</option>
+                        
+                        <option value="澳门" >澳门</option>
+                        
+                        <option value="台北" >台北</option>
+                        
+                        <option value="高雄" >高雄</option>
+                        
+                        <option value="台中" >台中</option>
+                        
+                        <option value="台南" >台南</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 新疆">
+                        
+                        <option value="乌鲁木齐" >乌鲁木齐</option>
+                        
+                        <option value="克拉玛依" >克拉玛依</option>
+                        
+                        <option value="吐鲁番" >吐鲁番</option>
+                        
+                        <option value="哈密" >哈密</option>
+                        
+                        <option value="阿克苏" >阿克苏</option>
+                        
+                        <option value="喀什" >喀什</option>
+                        
+                        <option value="和田" >和田</option>
+                        
+                        <option value="伊宁" >伊宁</option>
+                        
+                        <option value="塔城" >塔城</option>
+                        
+                        <option value="阿勒泰" >阿勒泰</option>
+                        
+                        <option value="石河子" >石河子</option>
+                        
+                        <option value="阿拉尔" >阿拉尔</option>
+                        
+                        <option value="图木舒克" >图木舒克</option>
+                        
+                        <option value="五家渠" >五家渠</option>
+                        
+                        <option value="北屯" >北屯</option>
+                        
+                        <option value="铁门关" >铁门关</option>
+                        
+                        <option value="双河" >双河</option>
+                        
+                        <option value="可克达拉" >可克达拉</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 西藏">
+                        
+                        <option value="拉萨" >拉萨</option>
+                        
+                        <option value="日喀则" >日喀则</option>
+                        
+                        <option value="昌都" >昌都</option>
+                        
+                        <option value="林芝" >林芝</option>
+                        
+                        <option value="山南" >山南</option>
+                        
+                        <option value="那曲" >那曲</option>
+                        
+                        <option value="阿里" >阿里</option>
+                        
+                        <option value="江孜" >江孜</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 内蒙古">
+                        
+                        <option value="呼和浩特" >呼和浩特</option>
+                        
+                        <option value="包头" >包头</option>
+                        
+                        <option value="乌海" >乌海</option>
+                        
+                        <option value="赤峰" >赤峰</option>
+                        
+                        <option value="通辽" >通辽</option>
+                        
+                        <option value="鄂尔多斯" >鄂尔多斯</option>
+                        
+                        <option value="呼伦贝尔" >呼伦贝尔</option>
+                        
+                        <option value="巴彦淖尔" >巴彦淖尔</option>
+                        
+                        <option value="乌兰察布" >乌兰察布</option>
+                        
+                        <option value="兴安盟" >兴安盟</option>
+                        
+                        <option value="锡林郭勒" >锡林郭勒</option>
+                        
+                        <option value="阿拉善" >阿拉善</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 广西">
+                        
+                        <option value="南宁" >南宁</option>
+                        
+                        <option value="柳州" >柳州</option>
+                        
+                        <option value="桂林" >桂林</option>
+                        
+                        <option value="梧州" >梧州</option>
+                        
+                        <option value="北海" >北海</option>
+                        
+                        <option value="防城港" >防城港</option>
+                        
+                        <option value="钦州" >钦州</option>
+                        
+                        <option value="贵港" >贵港</option>
+                        
+                        <option value="玉林" >玉林</option>
+                        
+                        <option value="百色" >百色</option>
+                        
+                        <option value="贺州" >贺州</option>
+                        
+                        <option value="河池" >河池</option>
+                        
+                        <option value="来宾" >来宾</option>
+                        
+                        <option value="崇左" >崇左</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 宁夏">
+                        
+                        <option value="银川" >银川</option>
+                        
+                        <option value="石嘴山" >石嘴山</option>
+                        
+                        <option value="吴忠" >吴忠</option>
+                        
+                        <option value="固原" >固原</option>
+                        
+                        <option value="中卫" >中卫</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 河北">
+                        
+                        <option value="石家庄" >石家庄</option>
+                        
+                        <option value="唐山" >唐山</option>
+                        
+                        <option value="秦皇岛" >秦皇岛</option>
+                        
+                        <option value="邯郸" >邯郸</option>
+                        
+                        <option value="邢台" >邢台</option>
+                        
+                        <option value="保定" >保定</option>
+                        
+                        <option value="张家口" >张家口</option>
+                        
+                        <option value="承德" >承德</option>
+                        
+                        <option value="沧州" >沧州</option>
+                        
+                        <option value="廊坊" >廊坊</option>
+                        
+                        <option value="衡水" >衡水</option>
+                        
+                        <option value="辛集" >辛集</option>
+                        
+                        <option value="藁城" >藁城</option>
+                        
+                        <option value="晋州" >晋州</option>
+                        
+                        <option value="新乐" >新乐</option>
+                        
+                        <option value="鹿泉" >鹿泉</option>
+                        
+                        <option value="遵化" >遵化</option>
+                        
+                        <option value="迁安" >迁安</option>
+                        
+                        <option value="武安" >武安</option>
+                        
+                        <option value="南宫" >南宫</option>
+                        
+                        <option value="沙河" >沙河</option>
+                        
+                        <option value="涿州" >涿州</option>
+                        
+                        <option value="定州" >定州</option>
+                        
+                        <option value="安国" >安国</option>
+                        
+                        <option value="高碑店" >高碑店</option>
+                        
+                        <option value="泊头" >泊头</option>
+                        
+                        <option value="任丘" >任丘</option>
+                        
+                        <option value="黄骅" >黄骅</option>
+                        
+                        <option value="河间" >河间</option>
+                        
+                        <option value="霸州" >霸州</option>
+                        
+                        <option value="三河" >三河</option>
+                        
+                        <option value="冀州" >冀州</option>
+                        
+                        <option value="深州" >深州</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 山西">
+                        
+                        <option value="太原" >太原</option>
+                        
+                        <option value="大同" >大同</option>
+                        
+                        <option value="阳泉" >阳泉</option>
+                        
+                        <option value="长治" >长治</option>
+                        
+                        <option value="晋城" >晋城</option>
+                        
+                        <option value="朔州" >朔州</option>
+                        
+                        <option value="晋中" >晋中</option>
+                        
+                        <option value="运城" >运城</option>
+                        
+                        <option value="忻州" >忻州</option>
+                        
+                        <option value="临汾" >临汾</option>
+                        
+                        <option value="吕梁" >吕梁</option>
+                        
+                        <option value="古交" >古交</option>
+                        
+                        <option value="介休" >介休</option>
+                        
+                        <option value="永济" >永济</option>
+                        
+                        <option value="河津" >河津</option>
+                        
+                        <option value="原平" >原平</option>
+                        
+                        <option value="侯马" >侯马</option>
+                        
+                        <option value="霍州" >霍州</option>
+                        
+                        <option value="孝义" >孝义</option>
+                        
+                        <option value="汾阳" >汾阳</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 辽宁">
+                        
+                        <option value="沈阳" >沈阳</option>
+                        
+                        <option value="大连" >大连</option>
+                        
+                        <option value="鞍山" >鞍山</option>
+                        
+                        <option value="抚顺" >抚顺</option>
+                        
+                        <option value="本溪" >本溪</option>
+                        
+                        <option value="丹东" >丹东</option>
+                        
+                        <option value="锦州" >锦州</option>
+                        
+                        <option value="营口" >营口</option>
+                        
+                        <option value="阜新" >阜新</option>
+                        
+                        <option value="辽阳" >辽阳</option>
+                        
+                        <option value="盘锦" >盘锦</option>
+                        
+                        <option value="铁岭" >铁岭</option>
+                        
+                        <option value="朝阳" >朝阳</option>
+                        
+                        <option value="葫芦岛" >葫芦岛</option>
+                        
+                        <option value="瓦房店" >瓦房店</option>
+                        
+                        <option value="普兰店" >普兰店</option>
+                        
+                        <option value="庄河" >庄河</option>
+                        
+                        <option value="海城" >海城</option>
+                        
+                        <option value="东港" >东港</option>
+                        
+                        <option value="凤城" >凤城</option>
+                        
+                        <option value="凌海" >凌海</option>
+                        
+                        <option value="北镇" >北镇</option>
+                        
+                        <option value="大石桥" >大石桥</option>
+                        
+                        <option value="盖州" >盖州</option>
+                        
+                        <option value="灯塔" >灯塔</option>
+                        
+                        <option value="调兵山" >调兵山</option>
+                        
+                        <option value="开原" >开原</option>
+                        
+                        <option value="北票" >北票</option>
+                        
+                        <option value="凌源" >凌源</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 吉林">
+                        
+                        <option value="长春" >长春</option>
+                        
+                        <option value="吉林" >吉林</option>
+                        
+                        <option value="四平" >四平</option>
+                        
+                        <option value="辽源" >辽源</option>
+                        
+                        <option value="通化" >通化</option>
+                        
+                        <option value="白山" >白山</option>
+                        
+                        <option value="松原" >松原</option>
+                        
+                        <option value="白城" >白城</option>
+                        
+                        <option value="延边" >延边</option>
+                        
+                        <option value="延吉" >延吉</option>
+                        
+                        <option value="图们" >图们</option>
+                        
+                        <option value="敦化" >敦化</option>
+                        
+                        <option value="珲春" >珲春</option>
+                        
+                        <option value="龙井" >龙井</option>
+                        
+                        <option value="和龙" >和龙</option>
+                        
+                        <option value="公主岭" >公主岭</option>
+                        
+                        <option value="梅河口" >梅河口</option>
+                        
+                        <option value="集安" >集安</option>
+                        
+                        <option value="桦甸" >桦甸</option>
+                        
+                        <option value="舒兰" >舒兰</option>
+                        
+                        <option value="磐石" >磐石</option>
+                        
+                        <option value="洮南" >洮南</option>
+                        
+                        <option value="大安" >大安</option>
+                        
+                        <option value="临江" >临江</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 黑龙江">
+                        
+                        <option value="哈尔滨" >哈尔滨</option>
+                        
+                        <option value="齐齐哈尔" >齐齐哈尔</option>
+                        
+                        <option value="鸡西" >鸡西</option>
+                        
+                        <option value="鹤岗" >鹤岗</option>
+                        
+                        <option value="双鸭山" >双鸭山</option>
+                        
+                        <option value="大庆" >大庆</option>
+                        
+                        <option value="伊春" >伊春</option>
+                        
+                        <option value="佳木斯" >佳木斯</option>
+                        
+                        <option value="七台河" >七台河</option>
+                        
+                        <option value="牡丹江" >牡丹江</option>
+                        
+                        <option value="黑河" >黑河</option>
+                        
+                        <option value="绥化" >绥化</option>
+                        
+                        <option value="大兴安岭" >大兴安岭</option>
+                        
+                        <option value="绥芬河" >绥芬河</option>
+                        
+                        <option value="海林" >海林</option>
+                        
+                        <option value="宁安" >宁安</option>
+                        
+                        <option value="穆棱" >穆棱</option>
+                        
+                        <option value="东宁" >东宁</option>
+                        
+                        <option value="五大连池" >五大连池</option>
+                        
+                        <option value="北安" >北安</option>
+                        
+                        <option value="铁力" >铁力</option>
+                        
+                        <option value="同江" >同江</option>
+                        
+                        <option value="富锦" >富锦</option>
+                        
+                        <option value="虎林" >虎林</option>
+                        
+                        <option value="密山" >密山</option>
+                        
+                        <option value="萝北" >萝北</option>
+                        
+                        <option value="绥滨" >绥滨</option>
+                        
+                        <option value="肇东" >肇东</option>
+                        
+                        <option value="安达" >安达</option>
+                        
+                        <option value="肇源" >肇源</option>
+                        
+                        <option value="海伦" >海伦</option>
+                        
+                        <option value="望奎" >望奎</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 江苏">
+                        
+                        <option value="南京" >南京</option>
+                        
+                        <option value="无锡" >无锡</option>
+                        
+                        <option value="徐州" >徐州</option>
+                        
+                        <option value="常州" >常州</option>
+                        
+                        <option value="苏州" >苏州</option>
+                        
+                        <option value="南通" >南通</option>
+                        
+                        <option value="连云港" >连云港</option>
+                        
+                        <option value="淮安" >淮安</option>
+                        
+                        <option value="盐城" >盐城</option>
+                        
+                        <option value="扬州" >扬州</option>
+                        
+                        <option value="镇江" >镇江</option>
+                        
+                        <option value="泰州" >泰州</option>
+                        
+                        <option value="宿迁" >宿迁</option>
+                        
+                        <option value="江阴" >江阴</option>
+                        
+                        <option value="宜兴" >宜兴</option>
+                        
+                        <option value="邳州" >邳州</option>
+                        
+                        <option value="新沂" >新沂</option>
+                        
+                        <option value="金坛" >金坛</option>
+                        
+                        <option value="溧阳" >溧阳</option>
+                        
+                        <option value="常熟" >常熟</option>
+                        
+                        <option value="张家港" >张家港</option>
+                        
+                        <option value="昆山" >昆山</option>
+                        
+                        <option value="太仓" >太仓</option>
+                        
+                        <option value="启东" >启东</option>
+                        
+                        <option value="如皋" >如皋</option>
+                        
+                        <option value="海门" >海门</option>
+                        
+                        <option value="东台" >东台</option>
+                        
+                        <option value="仪征" >仪征</option>
+                        
+                        <option value="高邮" >高邮</option>
+                        
+                        <option value="扬中" >扬中</option>
+                        
+                        <option value="句容" >句容</option>
+                        
+                        <option value="兴化" >兴化</option>
+                        
+                        <option value="靖江" >靖江</option>
+                        
+                        <option value="泰兴" >泰兴</option>
+                        
+                        <option value="沭阳" >沭阳</option>
+                        
+                        <option value="泗阳" >泗阳</option>
+                        
+                        <option value="泗洪" >泗洪</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 浙江">
+                        
+                        <option value="杭州" >杭州</option>
+                        
+                        <option value="宁波" >宁波</option>
+                        
+                        <option value="温州" >温州</option>
+                        
+                        <option value="嘉兴" >嘉兴</option>
+                        
+                        <option value="湖州" >湖州</option>
+                        
+                        <option value="绍兴" >绍兴</option>
+                        
+                        <option value="金华" >金华</option>
+                        
+                        <option value="衢州" >衢州</option>
+                        
+                        <option value="舟山" >舟山</option>
+                        
+                        <option value="台州" >台州</option>
+                        
+                        <option value="丽水" >丽水</option>
+                        
+                        <option value="建德" >建德</option>
+                        
+                        <option value="余姚" >余姚</option>
+                        
+                        <option value="慈溪" >慈溪</option>
+                        
+                        <option value="瑞安" >瑞安</option>
+                        
+                        <option value="乐清" >乐清</option>
+                        
+                        <option value="海宁" >海宁</option>
+                        
+                        <option value="平湖" >平湖</option>
+                        
+                        <option value="桐乡" >桐乡</option>
+                        
+                        <option value="诸暨" >诸暨</option>
+                        
+                        <option value="嵊州" >嵊州</option>
+                        
+                        <option value="兰溪" >兰溪</option>
+                        
+                        <option value="义乌" >义乌</option>
+                        
+                        <option value="东阳" >东阳</option>
+                        
+                        <option value="永康" >永康</option>
+                        
+                        <option value="江山" >江山</option>
+                        
+                        <option value="温岭" >温岭</option>
+                        
+                        <option value="临海" >临海</option>
+                        
+                        <option value="玉环" >玉环</option>
+                        
+                        <option value="龙泉" >龙泉</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 安徽">
+                        
+                        <option value="合肥" >合肥</option>
+                        
+                        <option value="芜湖" >芜湖</option>
+                        
+                        <option value="蚌埠" >蚌埠</option>
+                        
+                        <option value="淮南" >淮南</option>
+                        
+                        <option value="马鞍山" >马鞍山</option>
+                        
+                        <option value="淮北" >淮北</option>
+                        
+                        <option value="铜陵" >铜陵</option>
+                        
+                        <option value="安庆" >安庆</option>
+                        
+                        <option value="黄山" >黄山</option>
+                        
+                        <option value="滁州" >滁州</option>
+                        
+                        <option value="阜阳" >阜阳</option>
+                        
+                        <option value="宿州" >宿州</option>
+                        
+                        <option value="六安" >六安</option>
+                        
+                        <option value="亳州" >亳州</option>
+                        
+                        <option value="池州" >池州</option>
+                        
+                        <option value="宣城" >宣城</option>
+                        
+                        <option value="界首" >界首</option>
+                        
+                        <option value="天长" >天长</option>
+                        
+                        <option value="明光" >明光</option>
+                        
+                        <option value="桐城" >桐城</option>
+                        
+                        <option value="宁国" >宁国</option>
+                        
+                        <option value="广德" >广德</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 福建">
+                        
+                        <option value="福州" >福州</option>
+                        
+                        <option value="厦门" >厦门</option>
+                        
+                        <option value="莆田" >莆田</option>
+                        
+                        <option value="三明" >三明</option>
+                        
+                        <option value="泉州" >泉州</option>
+                        
+                        <option value="漳州" >漳州</option>
+                        
+                        <option value="南平" >南平</option>
+                        
+                        <option value="龙岩" >龙岩</option>
+                        
+                        <option value="宁德" >宁德</option>
+                        
+                        <option value="福清" >福清</option>
+                        
+                        <option value="长乐" >长乐</option>
+                        
+                        <option value="永安" >永安</option>
+                        
+                        <option value="石狮" >石狮</option>
+                        
+                        <option value="晋江" >晋江</option>
+                        
+                        <option value="南安" >南安</option>
+                        
+                        <option value="龙海" >龙海</option>
+                        
+                        <option value="邵武" >邵武</option>
+                        
+                        <option value="武夷山" >武夷山</option>
+                        
+                        <option value="建瓯" >建瓯</option>
+                        
+                        <option value="漳平" >漳平</option>
+                        
+                        <option value="福鼎" >福鼎</option>
+                        
+                        <option value="福安" >福安</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 江西">
+                        
+                        <option value="南昌" >南昌</option>
+                        
+                        <option value="景德镇" >景德镇</option>
+                        
+                        <option value="萍乡" >萍乡</option>
+                        
+                        <option value="九江" >九江</option>
+                        
+                        <option value="新余" >新余</option>
+                        
+                        <option value="鹰潭" >鹰潭</option>
+                        
+                        <option value="赣州" >赣州</option>
+                        
+                        <option value="吉安" >吉安</option>
+                        
+                        <option value="宜春" >宜春</option>
+                        
+                        <option value="抚州" >抚州</option>
+                        
+                        <option value="上饶" >上饶</option>
+                        
+                        <option value="瑞昌" >瑞昌</option>
+                        
+                        <option value="乐平" >乐平</option>
+                        
+                        <option value="瑞金" >瑞金</option>
+                        
+                        <option value="井冈山" >井冈山</option>
+                        
+                        <option value="高安" >高安</option>
+                        
+                        <option value="樟树" >樟树</option>
+                        
+                        <option value="丰城" >丰城</option>
+                        
+                        <option value="德兴" >德兴</option>
+                        
+                        <option value="庐山" >庐山</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 山东">
+                        
+                        <option value="济南" >济南</option>
+                        
+                        <option value="青岛" >青岛</option>
+                        
+                        <option value="淄博" >淄博</option>
+                        
+                        <option value="枣庄" >枣庄</option>
+                        
+                        <option value="东营" >东营</option>
+                        
+                        <option value="烟台" >烟台</option>
+                        
+                        <option value="潍坊" >潍坊</option>
+                        
+                        <option value="济宁" >济宁</option>
+                        
+                        <option value="泰安" >泰安</option>
+                        
+                        <option value="威海" >威海</option>
+                        
+                        <option value="日照" >日照</option>
+                        
+                        <option value="临沂" >临沂</option>
+                        
+                        <option value="德州" >德州</option>
+                        
+                        <option value="聊城" >聊城</option>
+                        
+                        <option value="滨州" >滨州</option>
+                        
+                        <option value="菏泽" >菏泽</option>
+                        
+                        <option value="章丘" >章丘</option>
+                        
+                        <option value="胶州" >胶州</option>
+                        
+                        <option value="即墨" >即墨</option>
+                        
+                        <option value="平度" >平度</option>
+                        
+                        <option value="莱西" >莱西</option>
+                        
+                        <option value="滕州" >滕州</option>
+                        
+                        <option value="龙口" >龙口</option>
+                        
+                        <option value="莱阳" >莱阳</option>
+                        
+                        <option value="莱州" >莱州</option>
+                        
+                        <option value="蓬莱" >蓬莱</option>
+                        
+                        <option value="招远" >招远</option>
+                        
+                        <option value="栖霞" >栖霞</option>
+                        
+                        <option value="海阳" >海阳</option>
+                        
+                        <option value="青州" >青州</option>
+                        
+                        <option value="诸城" >诸城</option>
+                        
+                        <option value="寿光" >寿光</option>
+                        
+                        <option value="安丘" >安丘</option>
+                        
+                        <option value="高密" >高密</option>
+                        
+                        <option value="昌邑" >昌邑</option>
+                        
+                        <option value="曲阜" >曲阜</option>
+                        
+                        <option value="邹城" >邹城</option>
+                        
+                        <option value="新泰" >新泰</option>
+                        
+                        <option value="肥城" >肥城</option>
+                        
+                        <option value="乳山" >乳山</option>
+                        
+                        <option value="文登" >文登</option>
+                        
+                        <option value="荣成" >荣成</option>
+                        
+                        <option value="乐陵" >乐陵</option>
+                        
+                        <option value="禹城" >禹城</option>
+                        
+                        <option value="临清" >临清</option>
+                        
+                        <option value="高唐" >高唐</option>
+                        
+                        <option value="邹平" >邹平</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 河南">
+                        
+                        <option value="郑州" >郑州</option>
+                        
+                        <option value="开封" >开封</option>
+                        
+                        <option value="洛阳" >洛阳</option>
+                        
+                        <option value="平顶山" >平顶山</option>
+                        
+                        <option value="安阳" >安阳</option>
+                        
+                        <option value="鹤壁" >鹤壁</option>
+                        
+                        <option value="新乡" >新乡</option>
+                        
+                        <option value="焦作" >焦作</option>
+                        
+                        <option value="濮阳" >濮阳</option>
+                        
+                        <option value="许昌" >许昌</option>
+                        
+                        <option value="漯河" >漯河</option>
+                        
+                        <option value="三门峡" >三门峡</option>
+                        
+                        <option value="南阳" >南阳</option>
+                        
+                        <option value="商丘" >商丘</option>
+                        
+                        <option value="信阳" >信阳</option>
+                        
+                        <option value="周口" >周口</option>
+                        
+                        <option value="驻马店" >驻马店</option>
+                        
+                        <option value="济源" >济源</option>
+                        
+                        <option value="巩义" >巩义</option>
+                        
+                        <option value="兰考" >兰考</option>
+                        
+                        <option value="汝州" >汝州</option>
+                        
+                        <option value="邓州" >邓州</option>
+                        
+                        <option value="永城" >永城</option>
+                        
+                        <option value="禹州" >禹州</option>
+                        
+                        <option value="长葛" >长葛</option>
+                        
+                        <option value="许昌县" >许昌县</option>
+                        
+                        <option value="尉氏" >尉氏</option>
+                        
+                        <option value="新郑" >新郑</option>
+                        
+                        <option value="登封" >登封</option>
+                        
+                        <option value="新密" >新密</option>
+                        
+                        <option value="荥阳" >荥阳</option>
+                        
+                        <option value="中牟" >中牟</option>
+                        
+                        <option value="偃师" >偃师</option>
+                        
+                        <option value="孟州" >孟州</option>
+                        
+                        <option value="沁阳" >沁阳</option>
+                        
+                        <option value="卫辉" >卫辉</option>
+                        
+                        <option value="辉县" >辉县</option>
+                        
+                        <option value="林州" >林州</option>
+                        
+                        <option value="滑县" >滑县</option>
+                        
+                        <option value="汤阴" >汤阴</option>
+                        
+                        <option value="内黄" >内黄</option>
+                        
+                        <option value="清丰" >清丰</option>
+                        
+                        <option value="南乐" >南乐</option>
+                        
+                        <option value="范县" >范县</option>
+                        
+                        <option value="台前" >台前</option>
+                        
+                        <option value="濮阳县" >濮阳县</option>
+                        
+                        <option value="长垣" >长垣</option>
+                        
+                        <option value="封丘" >封丘</option>
+                        
+                        <option value="原阳" >原阳</option>
+                        
+                        <option value="延津" >延津</option>
+                        
+                        <option value="获嘉" >获嘉</option>
+                        
+                        <option value="修武" >修武</option>
+                        
+                        <option value="武陟" >武陟</option>
+                        
+                        <option value="温县" >温县</option>
+                        
+                        <option value="博爱" >博爱</option>
+                        
+                        <option value="沁阳" >沁阳</option>
+                        
+                        <option value="孟州" >孟州</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 湖北">
+                        
+                        <option value="武汉" >武汉</option>
+                        
+                        <option value="黄石" >黄石</option>
+                        
+                        <option value="十堰" >十堰</option>
+                        
+                        <option value="宜昌" >宜昌</option>
+                        
+                        <option value="襄阳" >襄阳</option>
+                        
+                        <option value="鄂州" >鄂州</option>
+                        
+                        <option value="荆门" >荆门</option>
+                        
+                        <option value="孝感" >孝感</option>
+                        
+                        <option value="荆州" >荆州</option>
+                        
+                        <option value="黄冈" >黄冈</option>
+                        
+                        <option value="咸宁" >咸宁</option>
+                        
+                        <option value="随州" >随州</option>
+                        
+                        <option value="恩施" >恩施</option>
+                        
+                        <option value="仙桃" >仙桃</option>
+                        
+                        <option value="潜江" >潜江</option>
+                        
+                        <option value="天门" >天门</option>
+                        
+                        <option value="神农架" >神农架</option>
+                        
+                        <option value="大冶" >大冶</option>
+                        
+                        <option value="丹江口" >丹江口</option>
+                        
+                        <option value="宜城" >宜城</option>
+                        
+                        <option value="老河口" >老河口</option>
+                        
+                        <option value="枣阳" >枣阳</option>
+                        
+                        <option value="宜都" >宜都</option>
+                        
+                        <option value="枝江" >枝江</option>
+                        
+                        <option value="当阳" >当阳</option>
+                        
+                        <option value="荆州" >荆州</option>
+                        
+                        <option value="洪湖" >洪湖</option>
+                        
+                        <option value="松滋" >松滋</option>
+                        
+                        <option value="钟祥" >钟祥</option>
+                        
+                        <option value="京山" >京山</option>
+                        
+                        <option value="应城" >应城</option>
+                        
+                        <option value="云梦" >云梦</option>
+                        
+                        <option value="汉川" >汉川</option>
+                        
+                        <option value="石首" >石首</option>
+                        
+                        <option value="监利" >监利</option>
+                        
+                        <option value="公安" >公安</option>
+                        
+                        <option value="江陵" >江陵</option>
+                        
+                        <option value="麻城" >麻城</option>
+                        
+                        <option value="武穴" >武穴</option>
+                        
+                        <option value="红安" >红安</option>
+                        
+                        <option value="罗田" >罗田</option>
+                        
+                        <option value="浠水" >浠水</option>
+                        
+                        <option value="蕲春" >蕲春</option>
+                        
+                        <option value="黄梅" >黄梅</option>
+                        
+                        <option value="英山" >英山</option>
+                        
+                        <option value="团风" >团风</option>
+                        
+                        <option value="崇阳" >崇阳</option>
+                        
+                        <option value="通城" >通城</option>
+                        
+                        <option value="通山" >通山</option>
+                        
+                        <option value="赤壁" >赤壁</option>
+                        
+                        <option value="嘉鱼" >嘉鱼</option>
+                        
+                        <option value="广水" >广水</option>
+                        
+                        <option value="随县" >随县</option>
+                        
+                        <option value="恩施" >恩施</option>
+                        
+                        <option value="利川" >利川</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 湖南">
+                        
+                        <option value="长沙" >长沙</option>
+                        
+                        <option value="株洲" >株洲</option>
+                        
+                        <option value="湘潭" >湘潭</option>
+                        
+                        <option value="衡阳" >衡阳</option>
+                        
+                        <option value="邵阳" >邵阳</option>
+                        
+                        <option value="岳阳" >岳阳</option>
+                        
+                        <option value="常德" >常德</option>
+                        
+                        <option value="张家界" >张家界</option>
+                        
+                        <option value="益阳" >益阳</option>
+                        
+                        <option value="郴州" >郴州</option>
+                        
+                        <option value="永州" >永州</option>
+                        
+                        <option value="怀化" >怀化</option>
+                        
+                        <option value="娄底" >娄底</option>
+                        
+                        <option value="湘西" >湘西</option>
+                        
+                        <option value="浏阳" >浏阳</option>
+                        
+                        <option value="醴陵" >醴陵</option>
+                        
+                        <option value="韶山" >韶山</option>
+                        
+                        <option value="湘乡" >湘乡</option>
+                        
+                        <option value="耒阳" >耒阳</option>
+                        
+                        <option value="常宁" >常宁</option>
+                        
+                        <option value="武冈" >武冈</option>
+                        
+                        <option value="邵东" >邵东</option>
+                        
+                        <option value="临湘" >临湘</option>
+                        
+                        <option value="汨罗" >汨罗</option>
+                        
+                        <option value="岳阳" >岳阳</option>
+                        
+                        <option value="津市" >津市</option>
+                        
+                        <option value="澧县" >澧县</option>
+                        
+                        <option value="安乡" >安乡</option>
+                        
+                        <option value="汉寿" >汉寿</option>
+                        
+                        <option value="桃源" >桃源</option>
+                        
+                        <option value="石门" >石门</option>
+                        
+                        <option value="慈利" >慈利</option>
+                        
+                        <option value="桑植" >桑植</option>
+                        
+                        <option value="沅江" >沅江</option>
+                        
+                        <option value="资兴" >资兴</option>
+                        
+                        <option value="永兴" >永兴</option>
+                        
+                        <option value="宜章" >宜章</option>
+                        
+                        <option value="桂阳" >桂阳</option>
+                        
+                        <option value="嘉禾" >嘉禾</option>
+                        
+                        <option value="临武" >临武</option>
+                        
+                        <option value="汝城" >汝城</option>
+                        
+                        <option value="桂东" >桂东</option>
+                        
+                        <option value="安仁" >安仁</option>
+                        
+                        <option value="资兴" >资兴</option>
+                        
+                        <option value="冷水滩" >冷水滩</option>
+                        
+                        <option value="祁阳" >祁阳</option>
+                        
+                        <option value="东安" >东安</option>
+                        
+                        <option value="双牌" >双牌</option>
+                        
+                        <option value="道县" >道县</option>
+                        
+                        <option value="江永" >江永</option>
+                        
+                        <option value="宁远" >宁远</option>
+                        
+                        <option value="蓝山" >蓝山</option>
+                        
+                        <option value="新田" >新田</option>
+                        
+                        <option value="江华" >江华</option>
+                        
+                        <option value="怀化" >怀化</option>
+                        
+                        <option value="洪江" >洪江</option>
+                        
+                        <option value="沅陵" >沅陵</option>
+                        
+                        <option value="溆浦" >溆浦</option>
+                        
+                        <option value="会同" >会同</option>
+                        
+                        <option value="新晃" >新晃</option>
+                        
+                        <option value="芷江" >芷江</option>
+                        
+                        <option value="靖州" >靖州</option>
+                        
+                        <option value="通道" >通道</option>
+                        
+                        <option value="娄底" >娄底</option>
+                        
+                        <option value="冷水江" >冷水江</option>
+                        
+                        <option value="涟源" >涟源</option>
+                        
+                        <option value="双峰" >双峰</option>
+                        
+                        <option value="新化" >新化</option>
+                        
+                        <option value="吉首" >吉首</option>
+                        
+                        <option value="泸溪" >泸溪</option>
+                        
+                        <option value="凤凰" >凤凰</option>
+                        
+                        <option value="花垣" >花垣</option>
+                        
+                        <option value="保靖" >保靖</option>
+                        
+                        <option value="古丈" >古丈</option>
+                        
+                        <option value="永顺" >永顺</option>
+                        
+                        <option value="龙山" >龙山</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 广东">
+                        
+                        <option value="广州" >广州</option>
+                        
+                        <option value="深圳" >深圳</option>
+                        
+                        <option value="珠海" >珠海</option>
+                        
+                        <option value="汕头" >汕头</option>
+                        
+                        <option value="韶关" >韶关</option>
+                        
+                        <option value="佛山" >佛山</option>
+                        
+                        <option value="江门" >江门</option>
+                        
+                        <option value="湛江" >湛江</option>
+                        
+                        <option value="茂名" >茂名</option>
+                        
+                        <option value="肇庆" >肇庆</option>
+                        
+                        <option value="惠州" >惠州</option>
+                        
+                        <option value="梅州" >梅州</option>
+                        
+                        <option value="汕尾" >汕尾</option>
+                        
+                        <option value="河源" >河源</option>
+                        
+                        <option value="阳江" >阳江</option>
+                        
+                        <option value="清远" >清远</option>
+                        
+                        <option value="东莞" >东莞</option>
+                        
+                        <option value="中山" >中山</option>
+                        
+                        <option value="潮州" >潮州</option>
+                        
+                        <option value="揭阳" >揭阳</option>
+                        
+                        <option value="云浮" >云浮</option>
+                        
+                        <option value="从化" >从化</option>
+                        
+                        <option value="增城" >增城</option>
+                        
+                        <option value="英德" >英德</option>
+                        
+                        <option value="连州" >连州</option>
+                        
+                        <option value="乐昌" >乐昌</option>
+                        
+                        <option value="南雄" >南雄</option>
+                        
+                        <option value="高要" >高要</option>
+                        
+                        <option value="四会" >四会</option>
+                        
+                        <option value="罗定" >罗定</option>
+                        
+                        <option value="普宁" >普宁</option>
+                        
+                        <option value="陆丰" >陆丰</option>
+                        
+                        <option value="阳春" >阳春</option>
+                        
+                        <option value="恩平" >恩平</option>
+                        
+                        <option value="台山" >台山</option>
+                        
+                        <option value="开平" >开平</option>
+                        
+                        <option value="鹤山" >鹤山</option>
+                        
+                        <option value="高明" >高明</option>
+                        
+                        <option value="三水" >三水</option>
+                        
+                        <option value="顺德" >顺德</option>
+                        
+                        <option value="南海" >南海</option>
+                        
+                        <option value="番禺" >番禺</option>
+                        
+                        <option value="花都" >花都</option>
+                        
+                        <option value="白云" >白云</option>
+                        
+                        <option value="黄埔" >黄埔</option>
+                        
+                        <option value="天河" >天河</option>
+                        
+                        <option value="海珠" >海珠</option>
+                        
+                        <option value="越秀" >越秀</option>
+                        
+                        <option value="荔湾" >荔湾</option>
+                        
+                        <option value="福田" >福田</option>
+                        
+                        <option value="罗湖" >罗湖</option>
+                        
+                        <option value="南山" >南山</option>
+                        
+                        <option value="盐田" >盐田</option>
+                        
+                        <option value="宝安" >宝安</option>
+                        
+                        <option value="龙岗" >龙岗</option>
+                        
+                        <option value="龙华" >龙华</option>
+                        
+                        <option value="坪山" >坪山</option>
+                        
+                        <option value="光明" >光明</option>
+                        
+                        <option value="大鹏新区" >大鹏新区</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 海南">
+                        
+                        <option value="海口" >海口</option>
+                        
+                        <option value="三亚" >三亚</option>
+                        
+                        <option value="三沙" >三沙</option>
+                        
+                        <option value="儋州" >儋州</option>
+                        
+                        <option value="五指山" >五指山</option>
+                        
+                        <option value="琼海" >琼海</option>
+                        
+                        <option value="文昌" >文昌</option>
+                        
+                        <option value="万宁" >万宁</option>
+                        
+                        <option value="东方" >东方</option>
+                        
+                        <option value="定安" >定安</option>
+                        
+                        <option value="屯昌" >屯昌</option>
+                        
+                        <option value="澄迈" >澄迈</option>
+                        
+                        <option value="临高" >临高</option>
+                        
+                        <option value="白沙" >白沙</option>
+                        
+                        <option value="昌江" >昌江</option>
+                        
+                        <option value="乐东" >乐东</option>
+                        
+                        <option value="陵水" >陵水</option>
+                        
+                        <option value="保亭" >保亭</option>
+                        
+                        <option value="琼中" >琼中</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 四川">
+                        
+                        <option value="成都" >成都</option>
+                        
+                        <option value="自贡" >自贡</option>
+                        
+                        <option value="攀枝花" >攀枝花</option>
+                        
+                        <option value="泸州" >泸州</option>
+                        
+                        <option value="德阳" >德阳</option>
+                        
+                        <option value="绵阳" >绵阳</option>
+                        
+                        <option value="广元" >广元</option>
+                        
+                        <option value="遂宁" >遂宁</option>
+                        
+                        <option value="内江" >内江</option>
+                        
+                        <option value="乐山" >乐山</option>
+                        
+                        <option value="南充" >南充</option>
+                        
+                        <option value="眉山" >眉山</option>
+                        
+                        <option value="宜宾" >宜宾</option>
+                        
+                        <option value="广安" >广安</option>
+                        
+                        <option value="达州" >达州</option>
+                        
+                        <option value="雅安" >雅安</option>
+                        
+                        <option value="巴中" >巴中</option>
+                        
+                        <option value="资阳" >资阳</option>
+                        
+                        <option value="阿坝" >阿坝</option>
+                        
+                        <option value="甘孜" >甘孜</option>
+                        
+                        <option value="凉山" >凉山</option>
+                        
+                        <option value="都江堰" >都江堰</option>
+                        
+                        <option value="彭州" >彭州</option>
+                        
+                        <option value="邛崃" >邛崃</option>
+                        
+                        <option value="崇州" >崇州</option>
+                        
+                        <option value="广汉" >广汉</option>
+                        
+                        <option value="什邡" >什邡</option>
+                        
+                        <option value="绵竹" >绵竹</option>
+                        
+                        <option value="江油" >江油</option>
+                        
+                        <option value="阆中" >阆中</option>
+                        
+                        <option value="华蓥" >华蓥</option>
+                        
+                        <option value="峨眉山" >峨眉山</option>
+                        
+                        <option value="万源" >万源</option>
+                        
+                        <option value="简阳" >简阳</option>
+                        
+                        <option value="西昌" >西昌</option>
+                        
+                        <option value="康定" >康定</option>
+                        
+                        <option value="马尔康" >马尔康</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 贵州">
+                        
+                        <option value="贵阳" >贵阳</option>
+                        
+                        <option value="六盘水" >六盘水</option>
+                        
+                        <option value="遵义" >遵义</option>
+                        
+                        <option value="安顺" >安顺</option>
+                        
+                        <option value="铜仁" >铜仁</option>
+                        
+                        <option value="毕节" >毕节</option>
+                        
+                        <option value="黔西南" >黔西南</option>
+                        
+                        <option value="黔东南" >黔东南</option>
+                        
+                        <option value="黔南" >黔南</option>
+                        
+                        <option value="兴义" >兴义</option>
+                        
+                        <option value="凯里" >凯里</option>
+                        
+                        <option value="都匀" >都匀</option>
+                        
+                        <option value="福泉" >福泉</option>
+                        
+                        <option value="清镇" >清镇</option>
+                        
+                        <option value="赤水" >赤水</option>
+                        
+                        <option value="仁怀" >仁怀</option>
+                        
+                        <option value="兴仁" >兴仁</option>
+                        
+                        <option value="盘州" >盘州</option>
+                        
+                        <option value="兴义" >兴义</option>
+                        
+                        <option value="安龙" >安龙</option>
+                        
+                        <option value="册亨" >册亨</option>
+                        
+                        <option value="望谟" >望谟</option>
+                        
+                        <option value="贞丰" >贞丰</option>
+                        
+                        <option value="晴隆" >晴隆</option>
+                        
+                        <option value="普安" >普安</option>
+                        
+                        <option value="关岭" >关岭</option>
+                        
+                        <option value="紫云" >紫云</option>
+                        
+                        <option value="镇宁" >镇宁</option>
+                        
+                        <option value="平坝" >平坝</option>
+                        
+                        <option value="普定" >普定</option>
+                        
+                        <option value="西秀" >西秀</option>
+                        
+                        <option value="平坝" >平坝</option>
+                        
+                        <option value="关岭" >关岭</option>
+                        
+                        <option value="紫云" >紫云</option>
+                        
+                        <option value="镇宁" >镇宁</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 云南">
+                        
+                        <option value="昆明" >昆明</option>
+                        
+                        <option value="曲靖" >曲靖</option>
+                        
+                        <option value="玉溪" >玉溪</option>
+                        
+                        <option value="保山" >保山</option>
+                        
+                        <option value="昭通" >昭通</option>
+                        
+                        <option value="丽江" >丽江</option>
+                        
+                        <option value="普洱" >普洱</option>
+                        
+                        <option value="临沧" >临沧</option>
+                        
+                        <option value="楚雄" >楚雄</option>
+                        
+                        <option value="红河" >红河</option>
+                        
+                        <option value="文山" >文山</option>
+                        
+                        <option value="西双版纳" >西双版纳</option>
+                        
+                        <option value="大理" >大理</option>
+                        
+                        <option value="德宏" >德宏</option>
+                        
+                        <option value="怒江" >怒江</option>
+                        
+                        <option value="迪庆" >迪庆</option>
+                        
+                        <option value="安宁" >安宁</option>
+                        
+                        <option value="腾冲" >腾冲</option>
+                        
+                        <option value="宣威" >宣威</option>
+                        
+                        <option value="水富" >水富</option>
+                        
+                        <option value="瑞丽" >瑞丽</option>
+                        
+                        <option value="芒市" >芒市</option>
+                        
+                        <option value="泸水" >泸水</option>
+                        
+                        <option value="香格里拉" >香格里拉</option>
+                        
+                        <option value="大理" >大理</option>
+                        
+                        <option value="个旧" >个旧</option>
+                        
+                        <option value="开远" >开远</option>
+                        
+                        <option value="蒙自" >蒙自</option>
+                        
+                        <option value="弥勒" >弥勒</option>
+                        
+                        <option value="文山" >文山</option>
+                        
+                        <option value="景洪" >景洪</option>
+                        
+                        <option value="普洱" >普洱</option>
+                        
+                        <option value="思茅" >思茅</option>
+                        
+                        <option value="临沧" >临沧</option>
+                        
+                        <option value="景东" >景东</option>
+                        
+                        <option value="江城" >江城</option>
+                        
+                        <option value="孟连" >孟连</option>
+                        
+                        <option value="澜沧" >澜沧</option>
+                        
+                        <option value="西盟" >西盟</option>
+                        
+                        <option value="勐海" >勐海</option>
+                        
+                        <option value="勐腊" >勐腊</option>
+                        
+                        <option value="勐海" >勐海</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 陕西">
+                        
+                        <option value="西安" >西安</option>
+                        
+                        <option value="铜川" >铜川</option>
+                        
+                        <option value="宝鸡" >宝鸡</option>
+                        
+                        <option value="咸阳" >咸阳</option>
+                        
+                        <option value="渭南" >渭南</option>
+                        
+                        <option value="延安" >延安</option>
+                        
+                        <option value="汉中" >汉中</option>
+                        
+                        <option value="榆林" >榆林</option>
+                        
+                        <option value="安康" >安康</option>
+                        
+                        <option value="商洛" >商洛</option>
+                        
+                        <option value="韩城" >韩城</option>
+                        
+                        <option value="华阴" >华阴</option>
+                        
+                        <option value="兴平" >兴平</option>
+                        
+                        <option value="彬州" >彬州</option>
+                        
+                        <option value="神木" >神木</option>
+                        
+                        <option value="府谷" >府谷</option>
+                        
+                        <option value="靖边" >靖边</option>
+                        
+                        <option value="定边" >定边</option>
+                        
+                        <option value="绥德" >绥德</option>
+                        
+                        <option value="米脂" >米脂</option>
+                        
+                        <option value="佳县" >佳县</option>
+                        
+                        <option value="吴堡" >吴堡</option>
+                        
+                        <option value="清涧" >清涧</option>
+                        
+                        <option value="子洲" >子洲</option>
+                        
+                        <option value="横山" >横山</option>
+                        
+                        <option value="榆阳" >榆阳</option>
+                        
+                        <option value="汉台" >汉台</option>
+                        
+                        <option value="南郑" >南郑</option>
+                        
+                        <option value="城固" >城固</option>
+                        
+                        <option value="洋县" >洋县</option>
+                        
+                        <option value="西乡" >西乡</option>
+                        
+                        <option value="勉县" >勉县</option>
+                        
+                        <option value="宁强" >宁强</option>
+                        
+                        <option value="略阳" >略阳</option>
+                        
+                        <option value="镇巴" >镇巴</option>
+                        
+                        <option value="留坝" >留坝</option>
+                        
+                        <option value="佛坪" >佛坪</option>
+                        
+                        <option value="安康" >安康</option>
+                        
+                        <option value="汉阴" >汉阴</option>
+                        
+                        <option value="石泉" >石泉</option>
+                        
+                        <option value="宁陕" >宁陕</option>
+                        
+                        <option value="紫阳" >紫阳</option>
+                        
+                        <option value="岚皋" >岚皋</option>
+                        
+                        <option value="平利" >平利</option>
+                        
+                        <option value="镇坪" >镇坪</option>
+                        
+                        <option value="旬阳" >旬阳</option>
+                        
+                        <option value="白河" >白河</option>
+                        
+                        <option value="商州" >商州</option>
+                        
+                        <option value="洛南" >洛南</option>
+                        
+                        <option value="丹凤" >丹凤</option>
+                        
+                        <option value="商南" >商南</option>
+                        
+                        <option value="山阳" >山阳</option>
+                        
+                        <option value="镇安" >镇安</option>
+                        
+                        <option value="柞水" >柞水</option>
+                        
+                        <option value="西安" >西安</option>
+                        
+                        <option value="高陵" >高陵</option>
+                        
+                        <option value="蓝田" >蓝田</option>
+                        
+                        <option value="鄠邑" >鄠邑</option>
+                        
+                        <option value="周至" >周至</option>
+                        
+                        <option value="阎良" >阎良</option>
+                        
+                        <option value="临潼" >临潼</option>
+                        
+                        <option value="长安" >长安</option>
+                        
+                        <option value="碑林" >碑林</option>
+                        
+                        <option value="莲湖" >莲湖</option>
+                        
+                        <option value="灞桥" >灞桥</option>
+                        
+                        <option value="未央" >未央</option>
+                        
+                        <option value="雁塔" >雁塔</option>
+                        
+                        <option value="新城区" >新城区</option>
+                        
+                        <option value="阎良区" >阎良区</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 甘肃">
+                        
+                        <option value="兰州" >兰州</option>
+                        
+                        <option value="嘉峪关" >嘉峪关</option>
+                        
+                        <option value="金昌" >金昌</option>
+                        
+                        <option value="白银" >白银</option>
+                        
+                        <option value="天水" >天水</option>
+                        
+                        <option value="武威" >武威</option>
+                        
+                        <option value="张掖" >张掖</option>
+                        
+                        <option value="平凉" >平凉</option>
+                        
+                        <option value="酒泉" >酒泉</option>
+                        
+                        <option value="庆阳" >庆阳</option>
+                        
+                        <option value="定西" >定西</option>
+                        
+                        <option value="陇南" >陇南</option>
+                        
+                        <option value="临夏" >临夏</option>
+                        
+                        <option value="甘南" >甘南</option>
+                        
+                        <option value="玉门" >玉门</option>
+                        
+                        <option value="敦煌" >敦煌</option>
+                        
+                        <option value="华亭" >华亭</option>
+                        
+                        <option value="合作" >合作</option>
+                        
+                        <option value="西峰" >西峰</option>
+                        
+                        <option value="崆峒" >崆峒</option>
+                        
+                        <option value="秦州" >秦州</option>
+                        
+                        <option value="麦积" >麦积</option>
+                        
+                        <option value="甘州" >甘州</option>
+                        
+                        <option value="肃州" >肃州</option>
+                        
+                        <option value="凉州" >凉州</option>
+                        
+                        <option value="武都" >武都</option>
+                        
+                        <option value="成县" >成县</option>
+                        
+                        <option value="文县" >文县</option>
+                        
+                        <option value="宕昌" >宕昌</option>
+                        
+                        <option value="康县" >康县</option>
+                        
+                        <option value="西和" >西和</option>
+                        
+                        <option value="礼县" >礼县</option>
+                        
+                        <option value="徽县" >徽县</option>
+                        
+                        <option value="两当" >两当</option>
+                        
+                        <option value="华池" >华池</option>
+                        
+                        <option value="合水" >合水</option>
+                        
+                        <option value="正宁" >正宁</option>
+                        
+                        <option value="宁县" >宁县</option>
+                        
+                        <option value="镇原" >镇原</option>
+                        
+                        <option value="环县" >环县</option>
+                        
+                        <option value="庆城" >庆城</option>
+                        
+                        <option value="临夏市" >临夏市</option>
+                        
+                        <option value="临夏县" >临夏县</option>
+                        
+                        <option value="康乐" >康乐</option>
+                        
+                        <option value="永靖" >永靖</option>
+                        
+                        <option value="广河" >广河</option>
+                        
+                        <option value="和政" >和政</option>
+                        
+                        <option value="东乡族自治县" >东乡族自治县</option>
+                        
+                        <option value="积石山" >积石山</option>
+                        
+                        <option value="合作" >合作</option>
+                        
+                        <option value="临潭" >临潭</option>
+                        
+                        <option value="卓尼" >卓尼</option>
+                        
+                        <option value="舟曲" >舟曲</option>
+                        
+                        <option value="迭部" >迭部</option>
+                        
+                        <option value="玛曲" >玛曲</option>
+                        
+                        <option value="碌曲" >碌曲</option>
+                        
+                        <option value="夏河" >夏河</option>
+                        
+                        <option value="兰州新区" >兰州新区</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 青海">
+                        
+                        <option value="西宁" >西宁</option>
+                        
+                        <option value="海东" >海东</option>
+                        
+                        <option value="海北" >海北</option>
+                        
+                        <option value="海南" >海南</option>
+                        
+                        <option value="黄南" >黄南</option>
+                        
+                        <option value="果洛" >果洛</option>
+                        
+                        <option value="玉树" >玉树</option>
+                        
+                        <option value="海西" >海西</option>
+                        
+                        <option value="格尔木" >格尔木</option>
+                        
+                        <option value="德令哈" >德令哈</option>
+                        
+                        <option value="茫崖" >茫崖</option>
+                        
+                        <option value="大柴旦" >大柴旦</option>
+                        
+                        <option value="冷湖" >冷湖</option>
+                        
+                    </optgroup>
+                    
+                    <optgroup label="📍 其他">
+                        
+                        <option value="外籍" >外籍</option>
+                        
+                        <option value="其他" >其他</option>
+                        
+                    </optgroup>
+                    
+                </select>
+            </div>
+
+            <div>
+                <label class="app-label"><span class="text-red-500">*</span> 姓名</label>
+                <input type="text" name="real_name" required maxlength="20"
+                       value=""
+                       placeholder="请输入姓名"
+                       class="app-input">
+            </div>
+
+            <div>
+                <label class="app-label"><span class="text-red-500">*</span> 年级</label>
+                <select name="grade" required class="app-input">
+                    <option value="">请选择年级</option>
+                    
+                    <option value="PRIMARY_1" >小学一年级</option>
+                    
+                    <option value="PRIMARY_2" >小学二年级</option>
+                    
+                    <option value="PRIMARY_3" >小学三年级</option>
+                    
+                    <option value="PRIMARY_4" >小学四年级</option>
+                    
+                    <option value="PRIMARY_5" >小学五年级</option>
+                    
+                    <option value="PRIMARY_6" >小学六年级</option>
+                    
+                    <option value="JUNIOR_1" >初一</option>
+                    
+                    <option value="JUNIOR_2" >初二</option>
+                    
+                    <option value="JUNIOR_3" >初三</option>
+                    
+                    <option value="SENIOR_1" >高一</option>
+                    
+                    <option value="SENIOR_2" >高二</option>
+                    
+                    <option value="SENIOR_3" >高三</option>
+                    
+                    <option value="UNIV_1" >大一</option>
+                    
+                    <option value="UNIV_2" >大二</option>
+                    
+                    <option value="UNIV_3" >大三</option>
+                    
+                    <option value="UNIV_4" >大四</option>
+                    
+                    <option value="GRADUATED" >已毕业</option>
+                    
+                </select>
+            </div>
+
+            <div>
+                <label class="app-label"><span class="text-red-500">*</span> 性别</label>
+                <div class="grid grid-cols-2 gap-2">
+                    <label class="flex items-center justify-center gap-2 border rounded-lg px-3 py-2 cursor-pointer hover:bg-emerald-50 ">
+                        <input type="radio" name="gender" value="M"  class="text-emerald-600">
+                        <span>♂ 男生</span>
+                    </label>
+                    <label class="flex items-center justify-center gap-2 border rounded-lg px-3 py-2 cursor-pointer hover:bg-pink-50 ">
+                        <input type="radio" name="gender" value="F"  class="text-pink-600">
+                        <span>♀ 女生</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="border-t border-gray-200 pt-3 mt-3">
+                <p class="text-xs text-gray-500 mb-2">🔐 账号信息（用于登录）</p>
+
+                <div>
+                    <label class="app-label"><span class="text-red-500">*</span> 邮箱</label>
+                    <input type="email" name="email" required maxlength="120"
+                           value=""
+                           placeholder="parent@example.com"
+                           class="app-input">
+                    <p class="text-xs text-gray-400 mt-1">v3.10.0 · 登录账号 / 找回密码</p>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2 mt-2">
+                    <div>
+                        <label class="block text-xs text-gray-600 mb-1"><span class="text-red-500">*</span> 密码</label>
+                        <input type="password" name="password" required minlength="8" maxlength="64"
+                               placeholder="≥ 8 位"
+                               class="app-input">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-600 mb-1"><span class="text-red-500">*</span> 确认密码</label>
+                        <input type="password" name="password_confirm" required minlength="8" maxlength="64"
+                               placeholder="再输一次"
+                               class="app-input">
+                    </div>
+                </div>
+
+                <div class="mt-2">
+                    <label class="block text-xs text-gray-600 mb-1">出生日期（可选 · 用于 CSP 年龄判定）</label>
+                    <input type="date" name="birth_date"
+                           value=""
+                           class="app-input">
+                </div>
+            </div>
+
+            <div class="flex items-start gap-2 pt-2">
+                <input type="checkbox" name="agree" id="agree" required
+                       
+                       class="mt-1">
+                <label for="agree" class="text-xs text-gray-600">
+                    已阅读并同意 <a href="#" class="app-link">《用户协议》</a>
+                    和 <a href="#" class="app-link">《未成年人个人信息保护知情同意书》</a>
+                    （PIPL §5.2 · 14 岁以下需监护人陪同）
+                </label>
+            </div>
+
+            <button type="submit" class="app-btn app-btn-primary">
+                ✅ 完成注册
+            </button>
+        </form>
+
+        <div class="text-center mt-4">
+            <a href="/login" class="text-xs text-emerald-700 hover:underline">已有账号？登录 →</a>
+        </div>
+        <div class="text-center mt-2">
+            <a href="/" class="text-xs text-emerald-700 hover:underline">← 返回首页</a>
+        </div>
+    </div>
+</body>
+</html>

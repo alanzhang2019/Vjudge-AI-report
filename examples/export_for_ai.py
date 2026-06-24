@@ -102,6 +102,7 @@ def _summarize(problems: list[pyLuogu.ProblemSummary], tag_by_id: dict[int, dict
     difficulty_counter: Counter[int] = Counter()
     tag_counter: Counter[int] = Counter()
     algorithm_tag_counter: Counter[int] = Counter()
+    fallback_tag_counter: Counter[int] = Counter()  # v3.9.78 · type≠3 的非来源类标签
     tag_type_counter: Counter[int] = Counter()
     level_experience = _empty_level_experience()
 
@@ -116,6 +117,9 @@ def _summarize(problems: list[pyLuogu.ProblemSummary], tag_by_id: dict[int, dict
                     tag_type_counter[int(tag_type)] += 1
                     if int(tag_type) == 2:
                         algorithm_tag_counter[int(tag_id)] += 1
+                    # v3.9.78 · 兜底：type=1（功能/分类）和 type=2（算法）都属于"可对标知识点"范围
+                    if int(tag_type) in (1, 2):
+                        fallback_tag_counter[int(tag_id)] += 1
         for level_key, (by_difficulty, by_origin) in _infer_problem_level_flags(p, tag_by_id).items():
             if by_difficulty or by_origin:
                 level_experience[level_key]["solved"] = int(level_experience[level_key]["solved"]) + 1
@@ -136,13 +140,25 @@ def _summarize(problems: list[pyLuogu.ProblemSummary], tag_by_id: dict[int, dict
             }
         )
 
+    # v3.9.78 · 知识点对标用：优先 algorithm-type，回退到 type∈{1,2}
+    # 这样 4 道题没有 algorithm-type 标签时，仍能用功能/分类标签匹配到知识点
+    if algorithm_tag_counter:
+        _src = algorithm_tag_counter
+    else:
+        _src = fallback_tag_counter
+
     top_algorithm_tags = []
-    for tag_id, count in algorithm_tag_counter.most_common():
+    for tag_id, count in _src.most_common():
         tag = tag_by_id.get(tag_id)
+        name = None if tag is None else tag.get("name")
+        # v3.9.78 · name 兜底：如果 tag_by_id 没加载到（缓存失败），至少给个占位，
+        # 下游 _match_topic 会拿 None 视为不匹配；这里加个明显警告以便排查
+        if name is None:
+            name = f"#未识别标签_{tag_id}#"
         top_algorithm_tags.append(
             {
                 "id": tag_id,
-                "name": None if tag is None else tag.get("name"),
+                "name": name,
                 "type": None if tag is None else tag.get("type"),
                 "count": int(count),
             }

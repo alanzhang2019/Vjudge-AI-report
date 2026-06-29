@@ -1,4 +1,4 @@
-﻿import os
+import os
 from markupsafe import Markup
 import json
 import uuid
@@ -8,6 +8,13 @@ import hmac
 import hashlib
 from pathlib import Path
 from datetime import datetime, date, timedelta, timezone
+
+# v3.11.0 · 洛谷公开题库本地缓存 (problemset-open)
+# 进程启动时 ensure_ready() 会后台下载 + 构建索引, 提供 title/difficulty/tags 兜底
+import problemset_index
+
+# v3.11.0 · 洛谷个人练习页 HTML 源码解析 (用户 Ctrl+U 复制粘贴, 走 algobeatcontest 同款清洗)
+import html_source_parser
 
 # v3.9.38 · 北京时间统一 helper（防御性：即使容器 TZ 没设置也能正确转 Beijing）
 # 之前用 datetime.utcnow() + 8h hack，依赖容器 TZ=Asia/Shanghai 后改回 datetime.now()，
@@ -244,8 +251,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.10.0.5"
-APP_VERSION_BUILD = "20260620_v3p10p0p5_vjudge_recent_solved"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.11.0"
+APP_VERSION_BUILD = "20260628_v3p11p0_zip_upload_mode"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -325,6 +332,86 @@ def _api_version():
         "git": APP_GIT_COMMIT,
         "ts": _dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
     }, ensure_ascii=False), 200, {"Content-Type": "application/json; charset=utf-8"}
+
+
+# ===========================================================================
+# v3.11.0 · 洛谷公开题库缓存 (problemset-open) - 状态/管理 API
+# ===========================================================================
+# 首次访问 /api/problemset-status 时, 后台线程启动一次 download_and_build
+# 后续请求直接走内存索引
+
+@app.route("/api/problemset-status")
+def _api_problemset_status():
+    """公开状态: 缓存大小 / 题目数 / 上次更新时间 / 错误信息"""
+    import json as _json
+    return _json.dumps(problemset_index.get_status(), ensure_ascii=False), 200, {
+        "Content-Type": "application/json; charset=utf-8"
+    }
+
+
+@app.route("/api/problemset/lookup/<pid>")
+def _api_problemset_lookup(pid: str):
+    """单题查询(URL: /api/problemset/lookup/P1000)"""
+    import json as _json
+    info = problemset_index.get(pid)
+    if not info:
+        return _json.dumps({"ok": False, "pid": pid, "message": "not found"},
+                           ensure_ascii=False), 404, {
+            "Content-Type": "application/json; charset=utf-8"
+        }
+    return _json.dumps({"ok": True, "pid": pid, **info}, ensure_ascii=False), 200, {
+        "Content-Type": "application/json; charset=utf-8"
+    }
+
+
+@app.route("/admin/refresh-problemset", methods=["POST"])
+def _admin_refresh_problemset():
+    """手动触发重新下载 + 构建(管理员用)。
+
+    鉴权: 优先 X-Admin-Token header, 兜底 ?token= 参数,
+          都不匹配时回退到 ALLOW_INSECURE_DEFAULT=1 (本地开发)。
+
+    Body: form 字段 force=1 时强制重新下载, 否则仅当本地无缓存时下载。
+    """
+    import json as _json
+    expected = os.environ.get("PROBLEMSET_ADMIN_TOKEN", "").strip()
+    provided = (
+        request.headers.get("X-Admin-Token", "")
+        or request.args.get("token", "")
+    ).strip()
+    allow_insecure = os.environ.get("ALLOW_INSECURE_DEFAULT", "").strip() == "1"
+    if expected and provided != expected and not allow_insecure:
+        return _json.dumps({"ok": False, "message": "unauthorized"}, ensure_ascii=False), 401, {
+            "Content-Type": "application/json; charset=utf-8"
+        }
+    force = (request.form.get("force") or request.args.get("force") or "0").strip() in ("1", "true", "yes")
+
+    progress = {"download": 0, "build": 0, "last_stage": "", "last_error": ""}
+
+    def _cb(stage, done, total):
+        if stage == "download":
+            progress["download"] = done
+        elif stage == "build":
+            progress["build"] = done
+        progress["last_stage"] = stage
+        if stage == "error":
+            progress["last_error"] = "see logs"
+
+    # 用后台线程跑, 接口立即返回当前进度
+    t = threading.Thread(
+        target=problemset_index.download_and_build,
+        args=(_cb,),
+        kwargs={"force_download": force},
+        daemon=True,
+        name="admin-refresh-problemset",
+    )
+    t.start()
+    return _json.dumps({
+        "ok": True,
+        "message": "后台已启动, 请轮询 /api/problemset-status 查看进度",
+        "force_download": force,
+        "progress": progress,
+    }, ensure_ascii=False), 202, {"Content-Type": "application/json; charset=utf-8"}
 
 
 # ===========================================================================
@@ -1712,7 +1799,7 @@ INDEX_V3100_HTML = """
     <section class="max-w-6xl mx-auto px-4 py-16 text-center">
         <div class="inline-flex items-center gap-2 bg-indigo-50 text-indigo-700 px-4 py-1.5 rounded-full text-sm font-medium mb-6">
             <span class="w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></span>
-            v3.10.0 · 全 VJudge 跨平台模式
+            v3.11.0 · 全 VJudge 跨平台模式
         </div>
         <h1 class="text-5xl md:text-6xl font-extrabold tracking-tight mb-6">
             30 秒,让你的<br>
@@ -1732,6 +1819,19 @@ INDEX_V3100_HTML = """
             {% endif %}
         </div>
         <p class="text-xs text-slate-400 mt-4">📌 邮箱+密码注册 · 零门槛</p>
+
+        {# v3.11.0 · ZIP 数据包模式入口:不依赖注册/抓取,有本地 ZIP 即可生成报告 #}
+        <div class="text-center mt-3">
+            <a href="/upload-zip" class="text-sm text-indigo-600 hover:text-indigo-800 hover:underline font-medium">
+                📦 有本地 ZIP 数据包? 跳过抓取直接生成报告 →
+            </a>
+        </div>
+        {# v3.11.0 · 源码粘贴模式入口:连 cookies 都不用,Ctrl+U 复制粘贴 #}
+        <div class="text-center mt-2">
+            <a href="/upload-source" class="text-sm text-amber-700 hover:text-amber-900 hover:underline font-medium">
+                📋 没有 ZIP? 粘贴洛谷练习页源码也能出报告 →
+            </a>
+        </div>
     </section>
 
     {# 三步流程 #}
@@ -1862,7 +1962,7 @@ INDEX_V3100_HTML = """
                     <span>查看排行榜</span>
                 </a>
             </div>
-            <p>信竞 AI 报告 · v3.10.0.4 · 学员成长平台</p>
+            <p>信竞 AI 报告 · v3.11.0 · 学员成长平台</p>
             <p class="mt-1">Powered by VJudge + DeepSeek/GPT-4o + Playwright</p>
         </div>
     </footer>
@@ -2277,6 +2377,19 @@ INDEX_HTML = """
             <a href="/select-mode" class="text-[var(--accent)] hover:underline font-medium">👀 我已注册 · 仍可查看历史报告 →</a>
         </div>
         {% endif %}
+
+        {# v3.11.0 · ZIP 数据包模式入口: 不受 killswitch 控制,放此 CTA 之后始终可见 #}
+        <div class="mt-3 text-center">
+            <a href="/upload-zip" class="text-[12px] text-[var(--ink-3)] hover:text-[var(--accent)] hover:underline font-medium">
+                📦 有本地 ZIP 数据包? 跳过抓取直接生成报告 →
+            </a>
+        </div>
+        {# v3.11.0 · 源码粘贴模式入口: 始终可见,连 cookies 都不用 #}
+        <div class="mt-2 text-center">
+            <a href="/upload-source" class="text-[12px] text-[var(--ink-3)] hover:text-[var(--accent)] hover:underline font-medium">
+                📋 没有 ZIP? 粘贴洛谷练习页源码也能出报告 →
+            </a>
+        </div>
     </section>
 
     <!-- 3 大特性 -->
@@ -4357,6 +4470,19 @@ def run_generation(task_id: str, form: dict):
             # 自检失败 ≠ 数据错误，仅 warning 不阻塞
             app.logger.debug(f"[v3.9.47] data integrity precheck skipped: {_pre_e}")
 
+        # v3.11.0 · 用洛谷公开题库缓存补全 items 的 title/difficulty/tags
+        # (针对 pyLuogu 抓取模式, items 通常已有标题, 这里主要补 difficulty/tags)
+        try:
+            enrich_stats = problemset_index.enrich_export_data(export_data)
+            if enrich_stats["total_changed"]:
+                app.logger.info(
+                    f"[v3.11.0/problemset] task={task_id} "
+                    f"补全 {enrich_stats['total_changed']} 字段 "
+                    f"(passed={enrich_stats['passed']} failed={enrich_stats['failed']} records={enrich_stats['records']})"
+                )
+        except Exception as _e:  # noqa: BLE001
+            app.logger.debug(f"[v3.11.0/problemset] enrich 跳过: {_e}")
+
         _generate_ai_report_artifacts(
             task_id=task_id,
             export_data=export_data,
@@ -4939,6 +5065,1011 @@ def generate():
     register_active_generation_task(task_id, thread)
     thread.start()
     return redirect(url_for("status_page", task_id=task_id))
+
+
+# ============================================================
+# v3.11.0 · ZIP 数据包上传模式
+# 入口: /upload-zip (GET 拖拽页 / POST 接收 ZIP)
+# 数据源: 用户用 luogu-toolkit / luogu-report-generator 打出的 ZIP
+#         (manifest.json + export_data.json + items/*.json, schema_version=1)
+# 走线: 跳过 pyLuogu 抓取, 直接把 export_data 喂给 _generate_ai_report_artifacts()
+# ============================================================
+def run_zip_generation(task_id: str, zip_path: Path, form: dict):
+    """ZIP 上传报告生成主函数 (与 run_generation 共享 AI 阶段代码)"""
+    from zip_bundle_loader import load_zip, BundleLoadError
+
+    current_stage = "解析 ZIP"
+    try:
+        try:
+            bundle = load_zip(zip_path)
+        except BundleLoadError as e:
+            with TASKS_LOCK:
+                update_task(
+                    task_id,
+                    status="error",
+                    stage="ZIP 解析失败",
+                    message=f"❌ {e}",
+                )
+            app.logger.error(f"[v3.11.0/zip] task={task_id} ZIP 解析失败: {e}")
+            return
+
+        export_data = bundle.export_data
+        manifest = bundle.manifest
+        student_info = export_data.get("student_info") or {}
+        if not isinstance(student_info, dict):
+            student_info = {}
+
+        # 从 manifest / form 取姓名 / 学校 / 年级 (form 优先, manifest 兜底)
+        student_name = (
+            str(form.get("student_name") or "").strip()
+            or str(student_info.get("name") or "").strip()
+            or bundle.name
+            or "未知选手"
+        )
+        school = (
+            str(form.get("school") or "").strip()
+            or str(student_info.get("school") or "").strip()
+            or "未知学校"
+        )
+        grade = (
+            str(form.get("grade") or "").strip()
+            or str(student_info.get("grade") or "").strip()
+            or "未知年级"
+        )
+        luogu_uid = (
+            str(form.get("luogu_uid") or "").strip()
+            or bundle.luogu_uid
+            or str(student_info.get("luogu_uid") or "").strip()
+        )
+
+        # 把 ZIP 自带的 passed/failed items 合并进 export_data
+        # (确保 _resolve_source_code_progress / _summarize 都能取到)
+        if bundle.passed_items:
+            export_data.setdefault("passed_items", bundle.passed_items)
+        if bundle.failed_items:
+            export_data.setdefault("failed_items", bundle.failed_items)
+        # 同步 solved_count / failed_count
+        if bundle.solved_count and not export_data.get("solved_count"):
+            export_data["solved_count"] = bundle.solved_count
+        if bundle.failed_count and not export_data.get("failed_count"):
+            export_data["failed_count"] = bundle.failed_count
+
+        # 同步学生信息回 export_data (供 AI prompt 用)
+        student_info["name"] = student_name
+        student_info["school"] = school
+        student_info["grade"] = grade
+        if luogu_uid:
+            student_info["luogu_uid"] = luogu_uid
+        export_data["student_info"] = student_info
+
+        # 解析 LLM 参数
+        api_key, api_key_source = resolve_openai_api_key(form)
+        base_url = (
+            form.get("base_url", "").strip()
+            or DEFAULT_BASE_URL
+            or os.environ.get("OPENAI_BASE_URL", "")
+            or None
+        )
+        model_name = (
+            form.get("model_name", "").strip()
+            or DEFAULT_MODEL_NAME
+            or os.environ.get("OPENAI_MODEL_NAME", "")
+            or "gpt-4o"
+        )
+
+        # 报告类型 (noi_csp / gesp)
+        _exam_type_raw = str(form.get("exam_type") or "noi_csp").strip().lower()
+        exam_type = _exam_type_raw if _exam_type_raw in ("noi_csp", "gesp") else "noi_csp"
+        _target_gesp_level_raw = str(form.get("target_gesp_level") or "auto").strip()
+        target_gesp_level: int | str = _target_gesp_level_raw if _target_gesp_level_raw else "auto"
+
+        # 构造报告路径
+        out_dir, assets_dir, md_path, html_path, pdf_path = _build_report_paths(
+            task_id,
+            student_name,
+            luogu_uid=luogu_uid,
+            exam_type=exam_type,
+        )
+
+        # 写 export_data.json 落盘 (供 /me/<uid>/report-data/ 反查)
+        _write_export_data_json(out_dir, export_data)
+
+        # 把 ZIP 整包存一份到 reports 目录, 方便后续复盘/重生成
+        try:
+            (out_dir / "uploaded_bundle.zip").write_bytes(zip_path.read_bytes())
+        except Exception:
+            pass
+        # 写一份 manifest_snapshot.json
+        try:
+            (out_dir / "manifest_snapshot.json").write_text(
+                json.dumps(manifest, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
+        # 进度反馈
+        source_code_success, source_code_total = _resolve_source_code_progress(export_data)
+        with TASKS_LOCK:
+            update_task(
+                task_id,
+                status="running",
+                stage="ZIP 已解析, 进入 AI 阶段",
+                source_code_success=source_code_success,
+                source_code_total=source_code_total,
+                solved_count=int(export_data.get("solved_count") or bundle.solved_count or 0),
+                failed_count=int(export_data.get("failed_count") or bundle.failed_count or 0),
+                student_name=student_name,
+                school=school,
+                grade=grade,
+                message=(
+                    f"📦 ZIP 已解析 ({bundle.summary_line()})，"
+                    f"跳过洛谷抓取，直接进入 AI 报告生成..."
+                ),
+            )
+
+        # v3.11.0 · 用洛谷公开题库缓存补全 items 的 title/difficulty/tags
+        # 注意: 异步执行,不阻塞主流程(几毫秒到几十毫秒)
+        try:
+            enrich_stats = problemset_index.enrich_export_data(export_data)
+            if enrich_stats["total_changed"]:
+                app.logger.info(
+                    f"[v3.11.0/zip+problemset] task={task_id} "
+                    f"补全 {enrich_stats['total_changed']} 字段 "
+                    f"(passed={enrich_stats['passed']} failed={enrich_stats['failed']} records={enrich_stats['records']})"
+                )
+        except Exception as _e:  # noqa: BLE001
+            app.logger.debug(f"[v3.11.0/zip+problemset] enrich 跳过: {_e}")
+
+        # ZIP 来源: 走"续写模式"等价路径(不需要 pyLuogu, 也不需要 resume_task_id)
+        # 复用 _generate_ai_report_artifacts(), 这是与 run_generation() 唯一的汇合点
+        _generate_ai_report_artifacts(
+            task_id=task_id,
+            export_data=export_data,
+            api_key=api_key,
+            api_key_source=api_key_source,
+            base_url=base_url,
+            model_name=model_name,
+            md_path=md_path,
+            html_path=html_path,
+            pdf_path=pdf_path,
+            assets_dir=assets_dir,
+            student_name=student_name,
+            school=school,
+            grade=grade,
+            resume_md_prefix=None,  # ZIP 模式不做"续写"语义
+            luogu_uid=luogu_uid,
+            exam_type=exam_type,
+            target_gesp_level=target_gesp_level,
+        )
+
+        app.logger.info(
+            f"[v3.11.0/zip] task={task_id} 完成, "
+            f"uid={luogu_uid} passed={bundle.solved_count} failed={bundle.failed_count}"
+        )
+    except Exception as e:
+        app.logger.exception(f"[v3.11.0/zip] task={task_id} 异常: {e}")
+        try:
+            with TASKS_LOCK:
+                update_task(
+                    task_id,
+                    status="error",
+                    stage=current_stage,
+                    message=f"❌ ZIP 报告生成失败: {e}",
+                )
+        except Exception:
+            pass
+
+
+# ============================================================
+# v3.11.0 · 入口 /upload-source (前端源码粘贴模式)
+# 数据源: 用户在洛谷【个人练习】页 Ctrl+U 复制完整 HTML 源码, 粘贴到文本框
+# 走线: html_source_parser 解析 → export_data → _generate_ai_report_artifacts
+# 适用: 没有 cookies / 不愿交 cookies / 偶尔评测的场景
+# ============================================================
+def run_source_generation(task_id: str, source_text: str, form: dict):
+    """HTML 源码粘贴报告生成主函数 (与 run_zip_generation 共享 AI 阶段代码)"""
+    current_stage = "解析 HTML 源码"
+    export_data: dict = {}
+    try:
+        try:
+            export_data = html_source_parser.parse_html_source(
+                source_text,
+                uid_hint=form.get("luogu_uid") or None,
+                name_hint=form.get("student_name") or None,
+            )
+        except html_source_parser.HtmlSourceParseError as e:
+            with TASKS_LOCK:
+                update_task(
+                    task_id,
+                    status="error",
+                    stage="HTML 解析失败",
+                    message=f"❌ {e}",
+                )
+            app.logger.error(f"[v3.11.0/source] task={task_id} HTML 解析失败: {e}")
+            return
+
+        # 题库缓存补全 title/difficulty/tags/difficulty_name (跟 ZIP 模式同源)
+        try:
+            enrich_stats = problemset_index.enrich_export_data(export_data)
+            if enrich_stats["total_changed"]:
+                app.logger.info(
+                    f"[v3.11.0/source+problemset] task={task_id} "
+                    f"补全 {enrich_stats['total_changed']} 字段"
+                )
+        except Exception as _e:  # noqa: BLE001
+            app.logger.debug(f"[v3.11.0/source+problemset] enrich 跳过: {_e}")
+
+        # 学员信息
+        user_meta = export_data.get("user") or {}
+        student_info = {
+            "name": "",
+            "school": "",
+            "grade": "",
+            "luogu_uid": "",
+        }
+        # 表单优先, export_data.user 兜底
+        student_info["name"] = (
+            str(form.get("student_name") or "").strip()
+            or str(user_meta.get("name") or "").strip()
+        ) or "未知选手"
+        student_info["school"] = (
+            str(form.get("school") or "").strip()
+        ) or "未知学校"
+        student_info["grade"] = (
+            str(form.get("grade") or "").strip()
+        ) or "未知年级"
+        student_info["luogu_uid"] = (
+            str(form.get("luogu_uid") or "").strip()
+            or str(user_meta.get("uid") or "").strip()
+        )
+        export_data["student_info"] = student_info
+
+        # solved/failed count (从 stats 拿)
+        stats = export_data.get("stats") or {}
+        export_data["solved_count"] = stats.get("passed", 0)
+        export_data["failed_count"] = stats.get("failed", 0)
+
+        # LLM 参数
+        api_key, api_key_source = resolve_openai_api_key(form)
+        base_url = (
+            form.get("base_url", "").strip()
+            or DEFAULT_BASE_URL
+            or os.environ.get("OPENAI_BASE_URL", "")
+            or None
+        )
+        model_name = (
+            form.get("model_name", "").strip()
+            or DEFAULT_MODEL_NAME
+            or os.environ.get("OPENAI_MODEL_NAME", "")
+            or "gpt-4o"
+        )
+
+        # 报告类型
+        _exam_type_raw = str(form.get("exam_type") or "noi_csp").strip().lower()
+        exam_type = _exam_type_raw if _exam_type_raw in ("noi_csp", "gesp") else "noi_csp"
+        _target_gesp_level_raw = str(form.get("target_gesp_level") or "auto").strip()
+        target_gesp_level: int | str = _target_gesp_level_raw if _target_gesp_level_raw else "auto"
+
+        # 报告路径
+        out_dir, assets_dir, md_path, html_path, pdf_path = _build_report_paths(
+            task_id,
+            student_info["name"],
+            luogu_uid=student_info["luogu_uid"],
+            exam_type=exam_type,
+        )
+
+        # 落盘 export_data.json (供反查)
+        _write_export_data_json(out_dir, export_data)
+        # 落盘一份 raw source (供复盘/重生成)
+        try:
+            (out_dir / "uploaded_source.html").write_text(source_text, encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+        # 进度反馈
+        with TASKS_LOCK:
+            update_task(
+                task_id,
+                status="running",
+                stage=current_stage,
+                message=f"📋 已解析 {export_data['solved_count']} AC / "
+                        f"{export_data['failed_count']} 失败, 准备生成 AI 报告...",
+            )
+
+        # 复用 AI 报告生成流程 (与 ZIP 模式同一条流水线)
+        current_stage = "AI 报告生成"
+        _generate_ai_report_artifacts(
+            task_id=task_id,
+            export_data=export_data,
+            api_key=api_key,
+            api_key_source=api_key_source,
+            base_url=base_url,
+            model_name=model_name,
+            md_path=md_path,
+            html_path=html_path,
+            pdf_path=pdf_path,
+            assets_dir=assets_dir,
+            student_name=student_info["name"],
+            school=student_info["school"],
+            grade=student_info["grade"],
+            resume_md_prefix=None,  # 源码模式不做"续写"语义
+            luogu_uid=student_info["luogu_uid"],
+            exam_type=exam_type,
+            target_gesp_level=target_gesp_level,
+        )
+
+        # 标记完成
+        with TASKS_LOCK:
+            update_task(
+                task_id,
+                status="done",
+                stage="完成",
+                message="✅ 报告生成完成",
+                html_path=str(html_path),
+                pdf_path=str(pdf_path),
+            )
+        app.logger.info(
+            f"[v3.11.0/source] task={task_id} 完成, "
+            f"uid={student_info['luogu_uid']} "
+            f"passed={export_data['solved_count']} failed={export_data['failed_count']}"
+        )
+    except Exception as e:
+        app.logger.exception(f"[v3.11.0/source] task={task_id} 异常: {e}")
+        try:
+            with TASKS_LOCK:
+                update_task(
+                    task_id,
+                    status="error",
+                    stage=current_stage,
+                    message=f"❌ 源码报告生成失败: {e}",
+                )
+        except Exception:
+            pass
+
+
+@app.route("/upload-zip", methods=["GET"])
+def upload_zip_form():
+    """ZIP 上传拖拽页"""
+    return render_template_string(UPLOAD_ZIP_HTML)
+
+
+@app.route("/upload-zip", methods=["POST"])
+def upload_zip_submit():
+    """接收 ZIP, 落盘, 创建任务, 启动后台生成线程"""
+    upload = request.files.get("zip_file")
+    if upload is None or not upload.filename:
+        return jsonify({"ok": False, "message": "未选择文件"}), 400
+
+    filename = (upload.filename or "").strip()
+    if not filename.lower().endswith(".zip"):
+        return jsonify({"ok": False, "message": "只接受 .zip 文件"}), 400
+
+    # 读取字节 (含大小校验)
+    data = upload.read()
+    if not data:
+        return jsonify({"ok": False, "message": "ZIP 文件为空"}), 400
+    from zip_bundle_loader import MAX_ZIP_BYTES
+    if len(data) > MAX_ZIP_BYTES:
+        return jsonify({
+            "ok": False,
+            "message": f"ZIP 过大: {len(data) / 1024 / 1024:.1f} MB, "
+                       f"上限 {MAX_ZIP_BYTES / 1024 / 1024:.0f} MB",
+        }), 413
+
+    # 落盘到 uploads/<ts>_<rand>.zip
+    upload_dir = Path("uploads")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    task_id = str(uuid.uuid4())
+    safe_base = "".join(c for c in Path(filename).stem if c.isalnum() or c in "_-")[:32] or "upload"
+    saved_path = upload_dir / f"{task_id[:8]}_{safe_base}.zip"
+    saved_path.write_bytes(data)
+
+    # 从 form 收集 LLM 参数 (与 /generate 保持一致)
+    form_data = {
+        "api_key":   (request.form.get("api_key")   or "").strip(),
+        "base_url":  (request.form.get("base_url")  or "").strip(),
+        "model_name":(request.form.get("model_name") or "").strip(),
+        "student_name": (request.form.get("student_name") or "").strip(),
+        "school":       (request.form.get("school")       or "").strip(),
+        "grade":        (request.form.get("grade")        or "").strip(),
+        "luogu_uid":    (request.form.get("luogu_uid")    or "").strip(),
+        "exam_type":        (request.form.get("exam_type")        or "noi_csp").strip(),
+        "target_gesp_level":(request.form.get("target_gesp_level") or "auto").strip(),
+        # 标记来源 (供 task_store / 审计)
+        "_source": "zip_upload",
+        "_zip_filename": filename,
+    }
+
+    # 创建任务 (复用 insert_task, task_type 用 report_zip_upload)
+    with TASKS_LOCK:
+        insert_task(
+            task_id,
+            status="queued",
+            message="📦 ZIP 已接收, 排队解析中...",
+            luogu_uid=form_data.get("luogu_uid", ""),
+            task_type="report_zip_upload",
+        )
+        update_task(
+            task_id,
+            student_name=form_data["student_name"] or "ZIP 学员",
+            school=form_data["school"] or "未知学校",
+            grade=form_data["grade"] or "未知年级",
+            retry_form_json=json.dumps(form_data, ensure_ascii=False),
+        )
+
+    # 启动后台线程
+    thread = threading.Thread(
+        target=run_zip_generation,
+        args=(task_id, saved_path, form_data),
+        daemon=True,
+    )
+    register_active_generation_task(task_id, thread)
+    thread.start()
+
+    return redirect(url_for("status_page", task_id=task_id))
+
+
+# v3.11.0 · /upload-source 路由 (前端源码粘贴模式)
+MAX_SOURCE_BYTES = 30 * 1024 * 1024  # 30 MB 源码上限 (洛谷 SSR 页面通常 50K-500K, 30MB 留足)
+
+
+@app.route("/upload-source", methods=["GET"])
+def upload_source_form():
+    """HTML 源码粘贴页"""
+    return render_template_string(UPLOAD_SOURCE_HTML)
+
+
+@app.route("/upload-source", methods=["POST"])
+def upload_source_submit():
+    """接收用户粘贴的 HTML 源码, 解析, 创建任务, 启动后台生成线程"""
+    source = (request.form.get("html_source") or "").strip()
+    if not source:
+        return jsonify({"ok": False, "message": "未粘贴 HTML 源码"}), 400
+
+    # 长度校验 (防滥用 + 防误传巨大文件)
+    if len(source) < 80:
+        return jsonify({"ok": False, "message": "源码过短, 请粘贴完整页面"}), 400
+    if len(source.encode("utf-8")) > MAX_SOURCE_BYTES:
+        return jsonify({
+            "ok": False,
+            "message": f"源码过大 ({len(source) / 1024 / 1024:.1f} MB), 上限 "
+                       f"{MAX_SOURCE_BYTES / 1024 / 1024:.0f} MB",
+        }), 413
+
+    # 收集表单 (与 ZIP 模式同字段)
+    form_data = {
+        "api_key":   (request.form.get("api_key")   or "").strip(),
+        "base_url":  (request.form.get("base_url")  or "").strip(),
+        "model_name":(request.form.get("model_name") or "").strip(),
+        "student_name": (request.form.get("student_name") or "").strip(),
+        "school":       (request.form.get("school")       or "").strip(),
+        "grade":        (request.form.get("grade")        or "").strip(),
+        "luogu_uid":    (request.form.get("luogu_uid")    or "").strip(),
+        "exam_type":         (request.form.get("exam_type")         or "noi_csp").strip(),
+        "target_gesp_level": (request.form.get("target_gesp_level") or "auto").strip(),
+        "_source": "html_source_upload",
+        "_source_len": len(source),
+    }
+
+    # 创建任务
+    task_id = str(uuid.uuid4())
+    with TASKS_LOCK:
+        insert_task(
+            task_id,
+            status="queued",
+            message="📋 源码已接收, 排队解析中...",
+            luogu_uid=form_data.get("luogu_uid", ""),
+            task_type="report_source_upload",
+        )
+        update_task(
+            task_id,
+            student_name=form_data["student_name"] or "源码学员",
+            school=form_data["school"] or "未知学校",
+            grade=form_data["grade"] or "未知年级",
+            retry_form_json=json.dumps(form_data, ensure_ascii=False),
+        )
+
+    # 启动后台线程
+    thread = threading.Thread(
+        target=run_source_generation,
+        args=(task_id, source, form_data),
+        daemon=True,
+    )
+    register_active_generation_task(task_id, thread)
+    thread.start()
+
+    return redirect(url_for("status_page", task_id=task_id))
+
+
+# v3.11.0 · ZIP 上传拖拽 UI
+# 风格: 跟现有 app-card / app-pill / app-title 对齐
+UPLOAD_ZIP_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>📦 ZIP 数据包上传 · 洛谷 AI 报告</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
+    <style>
+        .zip-drop {
+            border: 2px dashed #94a3b8;
+            border-radius: 16px;
+            padding: 48px 24px;
+            text-align: center;
+            background: #f8fafc;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+        .zip-drop.dragover {
+            border-color: #10b981;
+            background: #ecfdf5;
+        }
+        .zip-drop.has-file {
+            border-color: #0d9488;
+            background: #f0fdfa;
+        }
+        .zip-drop .big-icon {
+            font-size: 56px;
+            line-height: 1;
+        }
+    </style>
+</head>
+<body class="app-body p-4">
+    <div class="max-w-2xl mx-auto py-6 space-y-4">
+        <div class="app-card">
+            <div class="text-center mb-4">
+                <div class="app-pill app-pill-done mb-2">v3.11.0 · ZIP 数据包模式</div>
+                <h1 class="app-title">📦 上传 ZIP 数据包</h1>
+                <p class="app-subtitle">本机已下载的洛谷数据 → AI 测评报告<br>无需提供 cookies / 无需联网抓取</p>
+            </div>
+
+            <form method="POST" enctype="multipart/form-data" id="zipForm" class="space-y-4">
+                <!-- 拖拽区 -->
+                <div id="dropZone" class="zip-drop" onclick="document.getElementById('zipFile').click()">
+                    <div class="big-icon mb-2">📦</div>
+                    <div id="dropText" class="text-gray-700 font-semibold mb-1">
+                        拖拽 ZIP 文件到这里 / 点击选择
+                    </div>
+                    <div class="text-xs text-gray-500">
+                        来自 <a href="https://github.com/mine030788/luogu-SRC-tool" target="_blank" class="text-emerald-600 underline">luogu-SRC-tool</a>
+                        的 <code>build_report_zip()</code> 产物 (schema_version=1) · 上限 200 MB
+                    </div>
+                    <input type="file" id="zipFile" name="zip_file" accept=".zip" class="hidden" required>
+                </div>
+
+                <!-- 已选文件提示 -->
+                <div id="fileInfo" class="hidden px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-lg">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <div class="text-sm font-semibold text-emerald-700">✅ 已选择</div>
+                            <div id="fileName" class="text-sm text-emerald-800 break-all"></div>
+                            <div id="fileSize" class="text-xs text-emerald-600 mt-0.5"></div>
+                        </div>
+                        <button type="button" id="clearBtn" class="text-xs text-rose-600 hover:underline">清除</button>
+                    </div>
+                </div>
+
+                <!-- 折叠的 LLM 配置 (高级) -->
+                <details class="px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg">
+                    <summary class="cursor-pointer font-semibold text-slate-700 text-sm">
+                        ⚙️ LLM 配置 (高级 · 留空走服务端 .env)
+                    </summary>
+                    <div class="mt-3 space-y-2">
+                        <input type="text" name="api_key" placeholder="OpenAI 兼容 API Key (sk-...)"
+                               class="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                        <input type="text" name="base_url" placeholder="Base URL (默认 https://api.openai.com/v1)"
+                               class="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                        <input type="text" name="model_name" placeholder="模型 (默认 gpt-4o)"
+                               class="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                    </div>
+                </details>
+
+                <!-- 可选学员信息 (ZIP manifest 自带, 这里是覆盖用) -->
+                <details class="px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg">
+                    <summary class="cursor-pointer font-semibold text-slate-700 text-sm">
+                        👤 覆盖学员信息 (可选 · ZIP 自带 manifest 会兜底)
+                    </summary>
+                    <div class="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2">
+                        <input type="text" name="luogu_uid" placeholder="洛谷 UID"
+                               class="px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                        <input type="text" name="student_name" placeholder="姓名"
+                               class="px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                        <input type="text" name="school" placeholder="学校"
+                               class="px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                        <input type="text" name="grade" placeholder="年级 (如 高一)"
+                               class="px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 md:col-span-3">
+                    </div>
+                </details>
+
+                <!-- 报告类型 -->
+                <div class="px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg">
+                    <div class="text-sm font-semibold text-slate-700 mb-2">📋 报告类型</div>
+                    <div class="flex gap-3 text-sm">
+                        <label class="flex items-center gap-1.5">
+                            <input type="radio" name="exam_type" value="noi_csp" checked> 🏆 NOI-CSP 测评
+                        </label>
+                        <label class="flex items-center gap-1.5">
+                            <input type="radio" name="exam_type" value="gesp"> 📘 GESP 备考
+                        </label>
+                    </div>
+                    <div class="mt-2">
+                        <select name="target_gesp_level" class="px-3 py-1.5 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                            <option value="auto">🤖 GESP 目标级别: 系统自动算</option>
+                            <option value="1">GESP 1 级</option>
+                            <option value="2">GESP 2 级</option>
+                            <option value="3">GESP 3 级</option>
+                            <option value="4">GESP 4 级</option>
+                            <option value="5">GESP 5 级</option>
+                            <option value="6">GESP 6 级</option>
+                            <option value="7">GESP 7 级</option>
+                            <option value="8">GESP 8 级</option>
+                        </select>
+                    </div>
+                </div>
+
+                <button type="submit" id="submitBtn"
+                        class="w-full py-3 px-6 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-lg shadow transition disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled>
+                    🚀 上传并生成报告
+                </button>
+            </form>
+        </div>
+
+        <!-- FAQ -->
+        <div class="app-card text-sm space-y-2">
+            <div class="font-bold text-slate-700">❓ 常见问题</div>
+            <details>
+                <summary class="cursor-pointer text-slate-600">ZIP 从哪里来?</summary>
+                <div class="mt-1 text-slate-500 pl-4">
+                    用 <a href="https://github.com/mine030788/luogu-SRC-tool" target="_blank" class="text-emerald-600 underline">luogu-SRC-tool</a>
+                    (项目 A) 的 <code>build_report_zip()</code> 函数, 输入 cookies 即可打出 schema_version=1 的标准 ZIP。
+                </div>
+            </details>
+            <details>
+                <summary class="cursor-pointer text-slate-600">和直接走 cookies 报告有什么差别?</summary>
+                <div class="mt-1 text-slate-500 pl-4">
+                    ZIP 模式 <b>完全离线</b>: 服务端不调洛谷 API, 不读 cookies, 数据就在你上传的文件里。
+                    适合 (1) cookies 不想交出 (2) 想批量打报告 (3) 学员之间互传 ZIP。
+                    生成出来的报告 (.md / .html / .pdf) 与正常模式完全一致。
+                </div>
+            </details>
+            <details>
+                <summary class="cursor-pointer text-slate-600">ZIP 提示 "schema_version 不匹配" 怎么办?</summary>
+                <div class="mt-1 text-slate-500 pl-4">
+                    说明打 ZIP 的 luogu-SRC-tool 版本与本服务不兼容。重新拉取最新版的 luogu-SRC-tool 打 ZIP 即可。
+                </div>
+            </details>
+            <details>
+                <summary class="cursor-pointer text-slate-600">VJudge 跨平台数据怎么办?</summary>
+                <div class="mt-1 text-slate-500 pl-4">
+                    ZIP 模式 <b>不联网拉 VJudge</b>, 只吃 ZIP 自带数据 (通常是洛谷主源)。
+                    如果需要 VJudge 跨平台画像, 请走
+                    <a href="/me/" class="text-emerald-600 underline">学员个人中心</a>
+                    → "VJudge 跨平台" 入口绑定。
+                </div>
+            </details>
+        </div>
+
+        <div class="text-center text-xs text-slate-400">
+            <a href="/" class="hover:underline">← 返回首页</a>
+            ·
+            <a href="/generate-form" class="hover:underline">走标准模式 (cookies)</a>
+        </div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('zipFile');
+        const fileInfo = document.getElementById('fileInfo');
+        const fileName = document.getElementById('fileName');
+        const fileSize = document.getElementById('fileSize');
+        const dropText = document.getElementById('dropText');
+        const clearBtn = document.getElementById('clearBtn');
+        const submitBtn = document.getElementById('submitBtn');
+        const zipForm = document.getElementById('zipForm');
+
+        function fmtSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+        }
+
+        function onFile(file) {
+            if (!file) return;
+            if (!file.name.toLowerCase().endsWith('.zip')) {
+                alert('只接受 .zip 文件');
+                return;
+            }
+            if (file.size > 200 * 1024 * 1024) {
+                alert('ZIP 超过 200 MB, 太大');
+                return;
+            }
+            fileName.textContent = file.name;
+            fileSize.textContent = '大小: ' + fmtSize(file.size);
+            fileInfo.classList.remove('hidden');
+            dropZone.classList.add('has-file');
+            dropText.textContent = '✅ 已选择 (可重新拖拽覆盖)';
+            submitBtn.disabled = false;
+        }
+
+        function clearFile() {
+            fileInput.value = '';
+            fileInfo.classList.add('hidden');
+            dropZone.classList.remove('has-file');
+            dropText.textContent = '拖拽 ZIP 文件到这里 / 点击选择';
+            submitBtn.disabled = true;
+        }
+
+        fileInput.addEventListener('change', e => onFile(e.target.files[0]));
+        clearBtn.addEventListener('click', e => { e.stopPropagation(); clearFile(); });
+
+        ['dragenter', 'dragover'].forEach(ev => {
+            dropZone.addEventListener(ev, e => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropZone.classList.add('dragover');
+            });
+        });
+        ['dragleave', 'drop'].forEach(ev => {
+            dropZone.addEventListener(ev, e => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropZone.classList.remove('dragover');
+            });
+        });
+        dropZone.addEventListener('drop', e => {
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                fileInput.files = files;
+                onFile(files[0]);
+            }
+        });
+
+        zipForm.addEventListener('submit', () => {
+            submitBtn.disabled = true;
+            submitBtn.textContent = '⏳ 上传中...';
+        });
+    </script>
+</body>
+</html>
+"""
+
+
+# v3.11.0 · HTML 源码粘贴 UI (风格与 UPLOAD_ZIP_HTML 对齐)
+# 入口: /upload-source
+UPLOAD_SOURCE_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>📋 HTML 源码粘贴 · 洛谷 AI 报告</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
+    <style>
+        .source-ta {
+            width: 100%;
+            min-height: 220px;
+            max-height: 480px;
+            padding: 12px;
+            border: 2px dashed #94a3b8;
+            border-radius: 12px;
+            background: #f8fafc;
+            font-family: ui-monospace, "SF Mono", Consolas, monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            resize: vertical;
+            transition: all 0.2s ease;
+        }
+        .source-ta.has-content {
+            border-color: #0d9488;
+            border-style: solid;
+            background: #f0fdfa;
+        }
+        .source-ta:focus {
+            outline: none;
+            border-color: #10b981;
+            background: #ecfdf5;
+        }
+        .paste-hint {
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            border-left: 4px solid #f59e0b;
+        }
+    </style>
+</head>
+<body class="app-body p-4">
+    <div class="max-w-3xl mx-auto py-6 space-y-4">
+        <div class="app-card">
+            <div class="text-center mb-4">
+                <div class="app-pill app-pill-done mb-2">v3.11.0 · HTML 源码粘贴模式</div>
+                <h1 class="app-title">📋 粘贴洛谷练习页源码</h1>
+                <p class="app-subtitle">无需 cookies · 离线解析 · 出 AI 测评报告</p>
+            </div>
+
+            <!-- 使用说明 -->
+            <div class="paste-hint px-4 py-3 rounded-lg mb-4 text-sm">
+                <div class="font-bold text-amber-900 mb-2">📌 使用方法 (3 步)</div>
+                <ol class="space-y-1 text-amber-800 list-decimal list-inside">
+                    <li>打开洛谷 → <b>个人练习</b> 页: <code class="bg-amber-100 px-1 rounded">https://www.luogu.com.cn/user/&lt;你的UID&gt;/practice</code></li>
+                    <li>在页面空白处 <b>右键 → 查看网页源代码</b> (或 <kbd class="bg-amber-100 px-1 rounded">Ctrl+U</kbd>),
+                        <b>Ctrl+A</b> 全选, <b>Ctrl+C</b> 复制</li>
+                    <li>把复制的内容 <b>Ctrl+V</b> 粘贴到下方文本框, 点击「开始生成」</li>
+                </ol>
+                <div class="mt-2 text-xs text-amber-700">
+                    ⚠️ 必须是【个人练习】页的源码 (含 <code>__NEXT_DATA__</code>),
+                    其他页面 (训练题单/比赛记录) 解析不出来。
+                    整页源码通常 50KB - 500KB。
+                </div>
+            </div>
+
+            <form method="POST" action="/upload-source" id="sourceForm" class="space-y-4">
+                <!-- 源码粘贴框 -->
+                <div>
+                    <div class="flex items-center justify-between mb-1.5">
+                        <label class="text-sm font-semibold text-slate-700">📄 HTML 源码</label>
+                        <div class="text-xs text-slate-500">
+                            字符数: <span id="charCount" class="font-mono">0</span>
+                            <span id="charSize" class="ml-1"></span>
+                        </div>
+                    </div>
+                    <textarea id="htmlSource" name="html_source"
+                              class="source-ta"
+                              placeholder='把洛谷【个人练习】页 Ctrl+U 的全部 HTML 源码 Ctrl+V 到这里...'
+                              required></textarea>
+                </div>
+
+                <!-- 折叠的 LLM 配置 -->
+                <details class="px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg">
+                    <summary class="cursor-pointer font-semibold text-slate-700 text-sm">
+                        ⚙️ LLM 配置 (高级 · 留空走服务端 .env)
+                    </summary>
+                    <div class="mt-3 space-y-2">
+                        <input type="text" name="api_key" placeholder="OpenAI 兼容 API Key (sk-...)"
+                               class="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                        <input type="text" name="base_url" placeholder="Base URL (默认 https://api.openai.com/v1)"
+                               class="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                        <input type="text" name="model_name" placeholder="模型 (默认 gpt-4o)"
+                               class="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                    </div>
+                </details>
+
+                <!-- 学员信息 -->
+                <details class="px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg" open>
+                    <summary class="cursor-pointer font-semibold text-slate-700 text-sm">
+                        👤 学员信息 (留空时尝试从源码自动提取)
+                    </summary>
+                    <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+                        <input type="text" name="luogu_uid" placeholder="洛谷 UID (源码含 /user/123 时可省略)"
+                               class="px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                        <input type="text" name="student_name" placeholder="姓名 (源码含 title 时可省略)"
+                               class="px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                        <input type="text" name="school" placeholder="学校 (必填 · 源码不包含)"
+                               class="px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                        <input type="text" name="grade" placeholder="年级 (如 高一)"
+                               class="px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                    </div>
+                </details>
+
+                <!-- 报告类型 -->
+                <div class="px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg">
+                    <div class="text-sm font-semibold text-slate-700 mb-2">📋 报告类型</div>
+                    <div class="flex gap-3 text-sm">
+                        <label class="flex items-center gap-1.5">
+                            <input type="radio" name="exam_type" value="noi_csp" checked> 🏆 NOI-CSP 测评
+                        </label>
+                        <label class="flex items-center gap-1.5">
+                            <input type="radio" name="exam_type" value="gesp"> 📘 GESP 备考
+                        </label>
+                    </div>
+                    <div class="mt-2">
+                        <select name="target_gesp_level" class="px-3 py-1.5 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                            <option value="auto">🤖 GESP 目标级别: 系统自动算</option>
+                            <option value="1">GESP 1 级</option>
+                            <option value="2">GESP 2 级</option>
+                            <option value="3">GESP 3 级</option>
+                            <option value="4">GESP 4 级</option>
+                            <option value="5">GESP 5 级</option>
+                            <option value="6">GESP 6 级</option>
+                            <option value="7">GESP 7 级</option>
+                            <option value="8">GESP 8 级</option>
+                        </select>
+                    </div>
+                </div>
+
+                <button type="submit" id="submitBtn"
+                        class="w-full py-3 px-6 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-lg shadow transition disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled>
+                    🚀 开始生成报告
+                </button>
+            </form>
+        </div>
+
+        <!-- FAQ -->
+        <div class="app-card text-sm space-y-2">
+            <div class="font-bold text-slate-700">❓ 常见问题</div>
+            <details>
+                <summary class="cursor-pointer text-slate-600">源码粘贴模式 vs ZIP 模式 vs 标准 cookies 模式, 怎么选?</summary>
+                <div class="mt-1 text-slate-500 pl-4 space-y-1">
+                    <div>• <b>源码粘贴</b> (本页面): 不想交 cookies / 临时看一份报告 / 学员之间互传, 最快</div>
+                    <div>• <a href="/upload-zip" class="text-emerald-600 underline">ZIP 模式</a>:
+                         完整离线数据包 (含 submissionRecords 等更多字段), 适合批量 / 复盘</div>
+                    <div>• <a href="/generate-form" class="text-emerald-600 underline">标准 cookies 模式</a>:
+                         实时从洛谷拉数据, 需要用户提供 client_id</div>
+                </div>
+            </details>
+            <details>
+                <summary class="cursor-pointer text-slate-600">源码会被保存吗? 隐私如何?</summary>
+                <div class="mt-1 text-slate-500 pl-4">
+                    源码会临时存到 <code>reports/&lt;task_id&gt;/uploaded_source.html</code>
+                    用于复盘/重生成, 不会上传到任何第三方。
+                    如有顾虑, 可在生成完成后联系管理员删除该目录。
+                </div>
+            </details>
+            <details>
+                <summary class="cursor-pointer text-slate-600">解析失败 "未找到 passed 数据" 怎么办?</summary>
+                <div class="mt-1 text-slate-500 pl-4">
+                    大概率是粘贴错了页面。必须是洛谷【个人练习】页
+                    (<code>/user/&lt;UID&gt;/practice</code>), 且包含完整的 <code>__NEXT_DATA__</code> 脚本。
+                    可以用浏览器 <kbd>Ctrl+F</kbd> 搜 "passed" 看是否存在。
+                </div>
+            </details>
+            <details>
+                <summary class="cursor-pointer text-slate-600">难度显示成中文了, 是新的吗?</summary>
+                <div class="mt-1 text-slate-500 pl-4">
+                    是的, v3.11.0 起接入了 <a href="https://docs.lgapi.cn/open/judge/" target="_blank" class="underline">洛谷公开题库</a>
+                    缓存, 报告里会自动把数字 0-7 翻译成
+                    「入门 / 普及− / 普及/提高− / 普及+/提高 / 提高+/省选− / 省选/NOI− / NOI/NOI+/CTSC」。
+                </div>
+            </details>
+        </div>
+
+        <div class="text-center text-xs text-slate-400">
+            <a href="/" class="hover:underline">← 返回首页</a>
+            ·
+            <a href="/upload-zip" class="hover:underline">走 ZIP 模式</a>
+            ·
+            <a href="/generate-form" class="hover:underline">走标准模式 (cookies)</a>
+        </div>
+    </div>
+
+    <script>
+        const ta = document.getElementById('htmlSource');
+        const charCount = document.getElementById('charCount');
+        const charSize = document.getElementById('charSize');
+        const submitBtn = document.getElementById('submitBtn');
+        const form = document.getElementById('sourceForm');
+
+        function updateStats() {
+            const n = ta.value.length;
+            charCount.textContent = n.toLocaleString();
+            if (n > 1024) {
+                charSize.textContent = '(' + (n / 1024).toFixed(1) + ' KB)';
+            } else {
+                charSize.textContent = '';
+            }
+            // 启用/禁用提交
+            if (n >= 80) {
+                submitBtn.disabled = false;
+                ta.classList.add('has-content');
+            } else {
+                submitBtn.disabled = true;
+                ta.classList.remove('has-content');
+            }
+        }
+
+        ta.addEventListener('input', updateStats);
+        // 兜底: 页面加载时如果有内容 (例如浏览器自动填充), 触发一次
+        updateStats();
+
+        form.addEventListener('submit', () => {
+            submitBtn.disabled = true;
+            submitBtn.textContent = '⏳ 解析 + AI 生成中...';
+        });
+    </script>
+</body>
+</html>
+"""
 
 
 STATUS_HTML = """
@@ -19037,4 +20168,13 @@ if __name__ == "__main__":
     # 读取 FLASK_DEBUG 环境变量（与 `flask run` 一致），默认 off
     import os as _os
     _dbg = _os.environ.get("FLASK_DEBUG", "0") == "1"
+
+    # v3.11.0 · 进程启动时, 后台异步拉取洛谷公开题库缓存
+    # 首次启动需下载 26MB, 索引构建 1-2s, 不阻塞主线程
+    try:
+        problemset_index.ensure_ready()
+        app.logger.info("[v3.11.0/problemset] ensure_ready 已调度")
+    except Exception as _e:  # noqa: BLE001
+        app.logger.warning(f"[v3.11.0/problemset] ensure_ready 失败: {_e}")
+
     app.run(host="0.0.0.0", port=5000, debug=_dbg)

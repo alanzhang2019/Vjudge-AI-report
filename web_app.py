@@ -251,8 +251,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.11.18"
-APP_VERSION_BUILD = "20260630_v3p11p18_status_page_luogu_uid_fallback_to_path_or_session"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.11.19"
+APP_VERSION_BUILD = "20260630_v3p11p19_task_poster_route_no_uid_needed"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -6339,12 +6339,11 @@ STATUS_HTML = """
                     <div id="posterError" class="text-center text-rose-600 text-sm" style="display:none"></div>
                 </div>
                 <div class="flex gap-2">
-                    {# v3.9.67 · 海报按报告类型分文件, GESP 报告渲染琥珀色 GESP 海报, NOI/CSP 渲染紫色原版
-                       v3.11.16 · share_id 是 task.luogu_uid 字段(可能 short_id 字母数字), 兜底 me_url #}
-                    {% set _poster_id = share_id or (me_url.split('/')[-1] if me_url else '') or luogu_uid %}
+                    {# v3.11.19 · 海报 URL 用 task_id (新路由 /api/task-poster/<task_id>.png 服务端反推学员), 不依赖 sub_id / luogu_uid
+                       老 task 可能 luogu_uid 为空, 走 /me/<empty>/share-card.png → 404, 新路由彻底解决 #}
                     <a id="posterDownloadBtn"
-                       href="/me/{{ _poster_id }}/share-card.png?exam_type={{ 'gesp' if task_type == 'report_gesp' else 'noi_csp' }}"
-                       download="学习报告海报_{{ _poster_id or 'user' }}.png"
+                       href="/api/task-poster/{{ task_id }}.png?exam_type={{ 'gesp' if task_type == 'report_gesp' else 'noi_csp' }}"
+                       download="学习报告海报_{{ task_id }}.png"
                        class="app-btn app-btn-primary flex-1">⬇ 再次下载</a>
                     <button type="button" onclick="closeSharePoster()" class="app-btn app-btn-secondary flex-1">关闭</button>
                 </div>
@@ -6366,8 +6365,10 @@ STATUS_HTML = """
                 m.classList.remove('hidden');
                 // 1) 预加载海报 PNG（matplotlib 现场渲染，可能 5-15s）
                 // v3.9.67 · GESP 报告传 exam_type=gesp, NOI/CSP 报告传 exam_type=noi_csp
+                // v3.11.19 · 用 task_id 新路由 /api/task-poster/<task_id>.png, 服务端反推学员 (老 task luogu_uid 空也能渲染)
                 var _exam_type = '{{ "gesp" if task_type == "report_gesp" else "noi_csp" }}';
-                var url = '/me/{{ _poster_id }}/share-card.png?exam_type=' + encodeURIComponent(_exam_type) + '&t=' + Date.now();
+                var _task_id = '{{ task_id }}';
+                var url = '/api/task-poster/' + encodeURIComponent(_task_id) + '.png?exam_type=' + encodeURIComponent(_exam_type) + '&t=' + Date.now();
                 var pre=new Image();
                 pre.onload=function(){
                     // 2) 加载完成 → 显示 + 自动下载
@@ -6379,8 +6380,8 @@ STATUS_HTML = """
                 };
                 pre.onerror=function(){
                     // 3) 失败：loading 隐、error 显（提示重试）
-                    // v3.11.16 · 用 fetch 拿真实 HTTP status（<img onerror 拿不到）
-                    var _retry_url = '/me/{{ _poster_id }}/share-card.png?exam_type=' + encodeURIComponent(_exam_type);
+                    // v3.11.19 · fetch 也用 task_id 新路由拿真实 status (更准的 404/500 提示)
+                    var _retry_url = '/api/task-poster/' + encodeURIComponent(_task_id) + '.png?exam_type=' + encodeURIComponent(_exam_type);
                     fetch(_retry_url, {method:'GET', cache:'no-store'}).then(function(r){
                         var _code = r.status;
                         var _hint = (_code===404) ? '（学员档案或海报缓存未找到，请重新生成报告）'
@@ -16054,6 +16055,84 @@ def _extract_achievements_from_report(report_md: str) -> dict:
       - ai_score_thousand: int|None  AI 评测分（0-1000，None 表无）
       - ai_score_label: str          等级文字
       - mistakes: list[dict]         错题条目（idx/problem_id/title/source/summary）
+
+
+# ---- v3.11.19 · 状态页海报路由 (用 task_id 直查学员, 不依赖 status_page sub_id 兜底) ----
+@app.route("/api/task-poster/<task_id>.png", methods=["GET"])
+def task_poster_png(task_id: str):
+    """v3.11.19 · 状态页"生成海报分享"专用路由, 解决 task.luogu_uid 为空时 /me//share-card.png 404 问题.
+
+    流程: task_id → get_task(task_id) → 反推学员 short_id → 自己调 _build_share_card_data + 渲染 PNG.
+    不再 redirect 到 /me/<id>/share-card.png (那个路由要 student 表里有记录, 老 task 可能没有).
+    """
+    _t = get_task(task_id)
+    if not _t:
+        return "任务不存在", 404
+    _student_id = str(_t.get("luogu_uid") or "").strip()
+    if not _student_id:
+        _student_id = str(session.get("student_short_id") or session.get("student_uid") or "").strip()
+    if not _student_id:
+        # 兜底: 从 task.html/pdf 路径里取 (如 /reports/<task_id>_姓名/report.html)
+        for _k in ("html", "pdf", "md"):
+            _v = str(_t.get(_k, "") or "")
+            _i = _v.find("/reports/")
+            if _i >= 0:
+                _tail = _v[_i + len("/reports/"):]
+                _slash = _tail.find("/")
+                if _slash > 0:
+                    _first = _tail[:_slash].strip()
+                    # 形如 "23f9ed63_未知选手" → 取下划线前的段 (可能是 task_id 或学员 ID)
+                    _guess = _first.split("_")[0].strip() if "_" in _first else _first
+                    if _guess and len(_guess) >= 6:
+                        # 查 students.short_id / luogu_uid
+                        try:
+                            from sqlite3 import connect as _sq
+                            _db = _sq("/app/data/tasks.db")
+                            _row = _db.execute(
+                                "SELECT short_id, luogu_uid FROM students WHERE short_id=? OR luogu_uid=? LIMIT 1",
+                                (_guess, _guess),
+                            ).fetchone()
+                            if _row:
+                                _student_id = _row[0] or _row[1] or _guess
+                                break
+                            # 查不到 → 还是用 _guess (后续 _build_share_card_data 会从 export_data.json 兜底)
+                            _student_id = _guess
+                            break
+                        except Exception:
+                            _student_id = _guess
+                            break
+    if not _student_id:
+        app.logger.warning(f"[task_poster_png] task_id={task_id} 找不到学员, 返回 404")
+        return "未找到该任务的关联学员, 请重新生成报告", 404
+    app.logger.info(f"[task_poster_png] task_id={task_id} → 学员={_student_id}")
+    # 直接调 _build_share_card_data + _render_share_card_png, 不依赖 share_card_png 路由
+    _q_exam_type = (request.args.get("exam_type") or "noi_csp").strip().lower()
+    if _q_exam_type not in ("noi_csp", "gesp", "parent_subscribe"):
+        _q_exam_type = "noi_csp"
+    data = _build_share_card_data(_student_id, exam_type=_q_exam_type)
+    if not data:
+        return f"海报数据为空: 学生 {_student_id} 没有报告数据", 404
+    _public_base = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
+    base = _public_base or request.host_url.rstrip("/")
+    qr_url = f"{base}/r/{_student_id}?exam_type={_q_exam_type}"
+    try:
+        png_bytes = _render_share_card_png(data, qr_url, exam_type=_q_exam_type)
+    except Exception as _e:
+        app.logger.exception(f"[task_poster_png] 渲染失败 task_id={task_id}: {_e}")
+        return f"海报生成失败: {_e}", 500
+    # 落盘缓存到 reports/<student_id>/ (让 /me/<id>/share-card.png 之后也能命中)
+    try:
+        _out = Path(__file__).parent / "reports" / _student_id
+        _out.mkdir(parents=True, exist_ok=True)
+        _SUFFIX = {"noi_csp": "_noi_csp", "gesp": "_gesp", "parent_subscribe": "_parent"}[_q_exam_type]
+        (_out / f"share-card{_SUFFIX}.png").write_bytes(png_bytes)
+        (_out / "share-card.png").write_bytes(png_bytes)
+    except Exception as _ce:
+        app.logger.warning(f"[task_poster_png] 落盘缓存失败: {_ce}")
+    return Response(png_bytes, mimetype="image/png", headers={
+        "Content-Disposition": f'inline; filename="share-card-{_q_exam_type}-{_student_id}.png"',
+        "Cache-Control": "public, max-age=600",
+    })
 
     v3.9 · 兼容新报告生成器的格式：
       - 6 维表：旧 `| **基础算法** | **72** |` / 新 `| 基础算法 | 72 |` 都能匹配

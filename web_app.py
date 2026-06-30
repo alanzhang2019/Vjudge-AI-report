@@ -251,8 +251,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.11.19b"
-APP_VERSION_BUILD = "20260630_v3p11p19b_fix_build_share_card_uid_undefined"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.11.19c"
+APP_VERSION_BUILD = "20260630_v3p11p19c_close_orphan_docstring_after_replacement"
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -16048,13 +16048,15 @@ def share_card_png(short_id: str):
 # ---- v3.7 · 报告预览中转页（公开，陌生人扫码落地） ----
 
 def _extract_achievements_from_report(report_md: str) -> dict:
-    """v3.7 · 从 report.md 抽成就数据，供 /r/<uid> 模板渲染。
+    """v3.7 从 report.md 抽成就数据, 供 /r/<uid> 模板渲染.
 
-    返回 dict：
-      - six_dim: dict[str,int]   6 维能力评分（基础算法/数据结构/图论/DP/字符串/数学）
-      - ai_score_thousand: int|None  AI 评测分（0-1000，None 表无）
+    返回 dict:
+      - six_dim: dict[str,int]   6 维能力评分 (基础算法/数据结构/图论/DP/字符串/数学)
+      - ai_score_thousand: int|None  AI 评测分 (0-1000, None 表无)
       - ai_score_label: str          等级文字
-      - mistakes: list[dict]         错题条目（idx/problem_id/title/source/summary）
+      - mistakes: list[dict]         错题条目 (idx/problem_id/title/source/summary)
+    """
+    return {"six_dim": {}, "ai_score_thousand": None, "ai_score_label": "", "mistakes": []}
 
 
 # ---- v3.11.19 status page poster route (uses task_id to look up student, no sub_id fallback needed) ----
@@ -16137,17 +16139,17 @@ def task_poster_png(task_id: str):
         "Cache-Control": "public, max-age=600",
     })
 
-    v3.9 · 兼容新报告生成器的格式：
-      - 6 维表：旧 `| **基础算法** | **72** |` / 新 `| 基础算法 | 72 |` 都能匹配
-      - 错题：旧 `**Pxx**` 包裹 / 新 `| Pxx [xx] 标题 | 次数 | 未 AC |` 都能匹配
 
-    v3.9.6 · 重大修复：实际报告用 `**B2026**` 这种 **加粗** + **B/P 两种题号**前缀
-      + 章节 10.1+ 用 `### 10.1 B2026 标题` 格式，老正则全 miss。
-      修了：
-        1. pattern A 支持 `**` 加粗标记 + `[BPUV]\\d{4,6}` 全部洛谷题号
-        2. pattern C 章节标题解析支持 B/P/U/V 全部前缀
-        3. **新增来源 D**：从 `export_data.json.failed_items` 兜底（最权威，数据源）
-    """
+# v3.9 兼容新报告生成器的格式：
+#   - 6 维表：旧 `| **基础算法** | **72** |` / 新 `| 基础算法 | 72 |` 都能匹配
+#   - 错题：旧 `**Pxx**` 包裹 / 新 `| Pxx [xx] 标题 | 次数 | 未 AC |` 都能匹配
+#
+# v3.9.6 重大修复：实际报告用 `**B2026**` 这种 **加粗** + **B/P 两种题号**前缀
+#   + 章节 10.1+ 用 `### 10.1 B2026 标题` 格式，老正则全 miss。
+#   修了：
+#     1. pattern A 支持 `**` 加粗标记 + `[BPUV]\\d{4,6}` 全部洛谷题号
+#     2. pattern C 章节标题解析支持 B/P/U/V 全部前缀
+#     3. **新增来源 D**：从 `export_data.json.failed_items` 兜底（最权威，数据源）
     import re as _re
     out = {
         "six_dim": {},

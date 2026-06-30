@@ -37,8 +37,14 @@ _RE_SUBMITTED = re.compile(
     r'"submitted"\s*:\s*(\[(?:[^\[\]]|\[[^\[\]]*\])*\])\s*[,}]',
     re.S,
 )
-# 提取 uid (从 URL / __NEXT_DATA__)
-_RE_UID = re.compile(r'/user/(\d+)')
+# 提取 uid (优先 __NEXT_DATA__ 里的 "uid":<num>, 备选 URL /user/<num>)
+# v3.11.6 · 粘贴练习页源码通常不含 /user/<uid> 路径 (URL 是 /practice),
+# 只能从 __NEXT_DATA__.props.pageProps.user.uid 里抽。原版只匹配 URL
+# 导致 _extract_user → uid=None, status_page 拿不到 me_url, 跳过家长订阅版。
+# 用两个独立正则按优先级匹配, 避免单个 regex 的 | 在 re.search 中受
+# 文本顺序干扰 (ND 块可能在 URL 链接之后, 会先匹到 URL)。
+_RE_UID_ND = re.compile(r'"uid"\s*:\s*(\d{2,12})')          # __NEXT_DATA__.user.uid
+_RE_UID_URL = re.compile(r'/user/(\d{2,12})')                # URL 路径 /user/<num>
 # 提取用户名 (洛谷 <title>...</title> 通常是 "用户名 的个人中心 - 洛谷")
 _RE_TITLE = re.compile(r'<title>\s*([^<\s]+)(?:\s+的个人[^\-]*)?\s*-\s*洛谷\s*</title>')
 
@@ -103,12 +109,21 @@ def _extract_submitted_array(html: str) -> Optional[List[Any]]:
 
 def _extract_user(html: str) -> Tuple[Optional[int], Optional[str]]:
     uid = None
-    m = _RE_UID.search(html)
+    # 优先 __NEXT_DATA__ (数值 uid 字段)
+    m = _RE_UID_ND.search(html)
     if m:
         try:
             uid = int(m.group(1))
-        except ValueError:
+        except (TypeError, ValueError):
             uid = None
+    # 备选 URL 路径
+    if uid is None:
+        m = _RE_UID_URL.search(html)
+        if m:
+            try:
+                uid = int(m.group(1))
+            except (TypeError, ValueError):
+                uid = None
     name = None
     m = _RE_TITLE.search(html)
     if m:

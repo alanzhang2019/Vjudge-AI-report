@@ -132,8 +132,23 @@ def _coerce_int(v: Any) -> Optional[int]:
 
 def _normalize_item(it: Any) -> Optional[Dict[str, Any]]:
     """
-    把洛谷 passed/submitted 数组里的每条数据归一化成:
-    { pid, title, difficulty, difficulty_name, tags, status, submitTime }
+    把洛谷 passed/submitted 数组里的每条数据归一化成与 ZIP 模式同构的 item:
+
+        {
+            "problem": {                  # ← luogu_evaluator.generate_ai_report 期望的嵌套结构
+                "pid": ...,
+                "title": ...,
+                "difficulty": ...,
+                "difficulty_name": ...,
+                "tags": [...],
+            },
+            "record": None,               # ← 源码粘贴模式没有源码, 显式置 None
+            "status": "passed" | "failed",
+            "submitTime": "...",
+        }
+
+    同时把扁平字段 (pid / title / ...) 保留在顶层,
+    兼容下游部分对扁平字段的访问 (例如 _prefill_cached_records)。
     """
     if not isinstance(it, dict):
         return None
@@ -180,7 +195,21 @@ def _normalize_item(it: Any) -> Optional[Dict[str, Any]]:
             )
     elif isinstance(submit_time, str):
         submit_time_str = submit_time
+    problem_payload: Dict[str, Any] = {
+        "pid": pid,
+        "title": title,
+        "difficulty": difficulty,
+        "difficulty_name": difficulty_name,
+        "tags": tags,
+    }
     return {
+        # 嵌套: 与 ZIP 模式 luogu_evaluator.generate_ai_report 期望一致
+        "problem": problem_payload,
+        # 源码粘贴模式没有真实提交记录源码, 显式 None
+        # (luogu_evaluator 会用 item.get("record") 兜底跳过代码样本)
+        "record": None,
+        # 顶层扁平字段 (兼容部分下游对扁平访问的代码, 例如
+        # _prefill_cached_records / failed_items 错题本聚合)
         "pid": pid,
         "title": title,
         "difficulty": difficulty,

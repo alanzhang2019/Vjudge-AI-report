@@ -5399,15 +5399,23 @@ def run_source_generation(task_id: str, source_text: str, form: dict):
             target_gesp_level=target_gesp_level,
         )
 
-        # 标记完成
+        # 标记完成 (列名跟 ZIP 模式保持一致: html/pdf/md 存 URL,
+        # 不能用 html_path/pdf_path —— tasks 表没这俩列,会触发
+        # "no such column: html_path")
         with TASKS_LOCK:
             update_task(
                 task_id,
                 status="done",
                 stage="完成",
                 message="✅ 报告生成完成",
-                html_path=str(html_path),
-                pdf_path=str(pdf_path),
+                html=_report_url(html_path),
+                pdf=_report_url(pdf_path),
+                md=_report_url(md_path),
+                student_name=student_info["name"],
+                school=student_info["school"],
+                grade=student_info["grade"],
+                solved_count=int(export_data.get("solved_count") or 0),
+                failed_count=int(export_data.get("failed_count") or 0),
             )
         app.logger.info(
             f"[v3.11.0/source] task={task_id} 完成, "

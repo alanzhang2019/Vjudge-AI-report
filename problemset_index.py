@@ -561,23 +561,33 @@ def enrich_export_data(
             if not info:
                 continue
             changed = 0
-            # title
+            # title (扁平 + 嵌套 problem 同步, 同时覆盖 ZIP 模式 (嵌套)
+            # 和 HTML 源码模式 (扁平 + 嵌套) 的 item 结构)
+            prob = it.get("problem") if isinstance(it.get("problem"), dict) else None
             if info.get("title") and not (it.get("title") or "").strip():
                 it["title"] = info["title"]
+                if prob is not None and not (prob.get("title") or "").strip():
+                    prob["title"] = info["title"]
                 changed += 1
             # difficulty
             if info.get("difficulty") is not None and it.get("difficulty") is None:
                 it["difficulty"] = info["difficulty"]
+                if prob is not None and prob.get("difficulty") is None:
+                    prob["difficulty"] = info["difficulty"]
                 changed += 1
             # difficulty_name (v3.11.0 · 中文标签)
             cached_dn = info.get("difficulty_name")
             if cached_dn and not (it.get("difficulty_name") or "").strip():
                 it["difficulty_name"] = cached_dn
+                if prob is not None and not (prob.get("difficulty_name") or "").strip():
+                    prob["difficulty_name"] = cached_dn
                 changed += 1
             # tags
             cached_tags = info.get("tags") or []
             if cached_tags and not (it.get("tags") or []):
                 it["tags"] = list(cached_tags)
+                if prob is not None and not (prob.get("tags") or []):
+                    prob["tags"] = list(cached_tags)
                 changed += 1
             n += changed
         return n

@@ -251,8 +251,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.11.17"
-APP_VERSION_BUILD = "20260630_v3p11p17_status_page_parent_subscribe_qr_always_shown"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.11.18"
+APP_VERSION_BUILD = "20260630_v3p11p18_status_page_luogu_uid_fallback_to_path_or_session"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -6241,13 +6241,14 @@ STATUS_HTML = """
                     <a href="/{{ md }}" target="_blank" class="app-btn app-btn-secondary">📝 查看 Markdown 原文</a>
                 </div>
             </div>
-            <a href="/me/{{ me_url.split('/')[-1] if me_url else luogu_uid }}" class="app-btn app-btn-secondary">↩ 返回学员主页</a>
+            {# v3.11.18 · sub_id 来自 view 层 (luogu_uid / html 路径 / session 三重兜底) #}
+            <a href="{% if sub_id %}/me/{{ sub_id }}{% else %}/me{% endif %}" class="app-btn app-btn-secondary">↩ 返回学员主页</a>
             {% elif status == 'error' %}
             <div class="bg-rose-50 border border-rose-200 rounded-lg p-3">
                 <p class="text-sm text-rose-800 font-bold">❌ VJudge 报告生成失败</p>
                 <p class="text-xs text-rose-600 mt-1">{{ message }}</p>
             </div>
-            <a href="/me/{{ me_url.split('/')[-1] if me_url else luogu_uid }}" class="app-btn app-btn-primary">返回重试</a>
+            <a href="{% if sub_id %}/me/{{ sub_id }}{% else %}/me{% endif %}" class="app-btn app-btn-primary">返回重试</a>
             {% else %}
             <p class="text-sm text-gray-400">页面每 3 秒自动刷新，AI 正在基于 VJudge 跨平台数据生成深度分析报告(约 30s-3min)...</p>
             {% endif %}
@@ -6260,9 +6261,8 @@ STATUS_HTML = """
                 <button type="button" onclick="openSharePoster()" class="app-btn app-btn-amber">📤 生成海报分享</button>
             </div>
 
-            {# v3.11.9 · 醒目 banner：始终显示"升级家长订阅版"入口 (不管 me_url 是否解析成功)
-               解决老用户看不到家长版块被 {% if me_url %} 跳过时, 不知道还有这个功能的问题 #}
-            <a href="/me/{{ luogu_uid }}/parent-subscribe"
+            {# v3.11.18 · 兜底: sub_id 来自 view 层 (luogu_uid/html 路径/session 三重兜底) #}
+            <a href="{% if sub_id %}/me/{{ sub_id }}/parent-subscribe{% else %}/me{% endif %}"
                class="block bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 text-white text-center rounded-lg py-3 px-4 font-bold shadow-md hover:shadow-lg transition">
                 📨 升级家长订阅版 · 添加客服微信获得邀请码
             </a>
@@ -6278,11 +6278,11 @@ STATUS_HTML = """
                     <p class="text-sm text-emerald-800">✅ 您家孩子的家长订阅已激活</p>
                     <p class="text-[11px] text-emerald-600 mt-1">订阅版报告正在生成或上次生成未完成，点击下方按钮重新触发</p>
                     {% endif %}
-                    <a href="/me/{{ me_url.split('/')[-1] if me_url else luogu_uid }}/parent-subscribe" class="app-btn app-btn-secondary mt-2 block text-center">↩ 进入家长订阅版中心</a>
+                    <a href="{% if sub_id %}/me/{{ sub_id }}/parent-subscribe{% else %}/me{% endif %}" class="app-btn app-btn-secondary mt-2 block text-center">↩ 进入家长订阅版中心</a>
                 </div>
             {% else %}
             {# v3.11.17 · 家长订阅版：始终显示二维码 + 邀请码输入框 (不依赖 me_url) #}
-            <form method="POST" action="/me/{{ me_url.split('/')[-1] if me_url else luogu_uid }}/start-parent-subscribe" class="block" id="parentSubForm">
+            <form method="POST" action="{% if sub_id %}/me/{{ sub_id }}/start-parent-subscribe{% else %}/start-parent-subscribe{% endif %}" class="block" id="parentSubForm">
                 <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-2">
                     <label class="block text-xs font-bold text-amber-800 mb-1">
                         🔑 家长订阅邀请码
@@ -6485,11 +6485,37 @@ def status_page(task_id):
     task = get_task(task_id) or {"status": "unknown", "message": "任务不存在"}
     pdf_url = str(task.get("pdf", "") or "")
     # v3.5.2 · 统一入口生成的报告支持跳回 /me/<uid>（3 版本报告）
-    luogu_uid = str(request.args.get("luogu_uid", "") or task.get("luogu_uid", "") or "")
-    me_url = f"/me/{luogu_uid}" if luogu_uid and luogu_uid.isdigit() else ""
+    luogu_uid = str(request.args.get("luogu_uid", "") or task.get("luogu_uid", "") or "").strip()
+    # v3.11.18 · luogu_uid 为空时多重兜底反推 (避免 /me// 出现)
+    if not luogu_uid:
+        # 1) 试从 task.html / pdf 路径里反推  (/reports/<uid>/<dir>/<file>)
+        for _k in ("html", "pdf", "md", "ps_html"):
+            _v = str(task.get(_k, "") or "")
+            # 找 "/reports/" 后第一个 "/" 前的段
+            _i = _v.find("/reports/")
+            if _i >= 0:
+                _tail = _v[_i + len("/reports/"):]
+                _slash = _tail.find("/")
+                if _slash > 0:
+                    _guessed = _tail[:_slash].strip()
+                    # 过滤明显非 uid 的占位 (如 "tmp", "preview")
+                    if _guessed and _guessed not in ("tmp", "preview", "static"):
+                        luogu_uid = _guessed
+                        app.logger.info(f"[status_page] luogu_uid 空, 从 task.{_k}={_v!r} 反推: {luogu_uid}")
+                        break
+        # 2) 试从 session 拿当前登录学员
+        if not luogu_uid:
+            _sess_sid = str(session.get("student_short_id") or session.get("student_uid") or "").strip()
+            if _sess_sid:
+                luogu_uid = _sess_sid
+                app.logger.info(f"[status_page] luogu_uid 空, 从 session 反推: {luogu_uid}")
+        # 3) 还空 → 标 unknown 走"返回首页"分支
+    me_url = f"/me/{luogu_uid}" if luogu_uid else ""
     # v3.11.16 · 海报 URL 用的 id: 与 me_url.split('/')[-1] 一致 (luogu_uid 本身可能是 short_id 字母数字)
     share_id = luogu_uid if luogu_uid else ""
     me_url_full = me_url  # 别名, 模板里用 me_url.split('/')[-1] 取 id
+    # v3.11.18 · 兜底学员 ID (luogu_uid / me_url 都空时, 模板里跳转 /me 主页而非 /me// 404)
+    sub_id = luogu_uid or share_id or ""
 
     # v3.9.6 · 智能门控：检查该 UID 是否已生成过 parent_subscribe.html
     # 如果已生成 → 状态页直接显示"查看家长订阅版"，不再每次让家长重输邀请码
@@ -6540,6 +6566,8 @@ def status_page(task_id):
         luogu_uid=luogu_uid,
         # v3.11.12 · 海报 URL 用的 id (与 me_url 同源, luogu_uid 空时安全)
         share_id=share_id,
+        # v3.11.18 · 兜底学员 ID, 模板里所有跳转链接都基于它, 避免 /me// 404
+        sub_id=sub_id,
         # v3.9.6 · 新增：智能门控用
         has_parent_sub_html=has_parent_sub_html,
         ps_html_url=ps_html_url,

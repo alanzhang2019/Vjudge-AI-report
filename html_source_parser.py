@@ -130,7 +130,7 @@ def _coerce_int(v: Any) -> Optional[int]:
             return None
 
 
-def _normalize_item(it: Any) -> Optional[Dict[str, Any]]:
+def _normalize_item(it: Any, default_status: str = "unknown") -> Optional[Dict[str, Any]]:
     """
     把洛谷 passed/submitted 数组里的每条数据归一化成与 ZIP 模式同构的 item:
 
@@ -180,7 +180,8 @@ def _normalize_item(it: Any) -> Optional[Dict[str, Any]]:
     elif isinstance(status_raw, str):
         status = status_raw
     else:
-        status = "unknown"
+        # v3.11.2 · submitted 数组的 item 没 status 字段, 用调用方传入的 default_status 兜底
+        status = default_status
     submit_time = it.get("submitTime") or it.get("submitTimeMs") or it.get("time")
     submit_time_str: Optional[str] = None
     if isinstance(submit_time, (int, float)):
@@ -273,16 +274,22 @@ def parse_html_source(
         name = (name_hint or "").strip() or None
 
     # 4) 归一化
+    # v3.11.2 · __NEXT_DATA__ 的 passed 数组和 submitted 数组是互斥的:
+    #   - passed 全部 = AC 题
+    #   - submitted 全部 = 提交过但未 AC 的题 (status 字段不存在, 数组本身就是 failed 集合)
+    # 之前要求 submitted 项有 status="failed" 才纳入 failed_items, 是基于旧的
+    # 假设 (每条记录都带 status 字段), 实际新版洛谷页面里 submitted 数组的
+    # item 只有 {type, name, difficulty, pid}, 没有 status, 导致全被过滤掉
     passed_items: List[Dict[str, Any]] = []
     for it in passed_raw:
-        norm = _normalize_item(it)
+        norm = _normalize_item(it, default_status="passed")
         if norm:
             passed_items.append(norm)
 
     failed_items: List[Dict[str, Any]] = []
     for it in submitted_raw:
-        norm = _normalize_item(it)
-        if norm and norm.get("status") == "failed":
+        norm = _normalize_item(it, default_status="failed")
+        if norm:
             failed_items.append(norm)
 
     # 5) 构造 records: 合并 passed + failed, 含 status

@@ -5300,6 +5300,84 @@ def run_source_generation(task_id: str, source_text: str, form: dict):
         except Exception as _e:  # noqa: BLE001
             app.logger.debug(f"[v3.11.0/source+problemset] enrich 跳过: {_e}")
 
+        # v3.11.2 · 注入 summary + syllabus_evaluation (复用 ZIP 模式的 _summarize
+        # 流水线 + 缓存的 tag_maps, 让源码粘贴报告也能展示知识点覆盖统计)
+        # 注意: problemset_index 缓存的 tags 实际是中文名 (历史遗留 bug), 不是 int,
+        # _summarize 又强转 int, 会丢光; 这里先做 name→id 反查, 兜底对 syllabus_matcher 友好
+        try:
+            from types import SimpleNamespace
+            _tag_by_id, _type_by_id, _cached_at = _load_cached_tag_maps()
+            # v3.11.2 · 反向索引: 中文名 → int id (problemset_index 存的是 name 字符串)
+            _name_to_id: dict[str, int] = {}
+            for _tid, _info in (_tag_by_id or {}).items():
+                try:
+                    _nm = str((_info or {}).get("name") or "").strip()
+                    if _nm:
+                        _name_to_id[_nm] = int(_tid)
+                except (TypeError, ValueError):
+                    continue
+            _passed_items = export_data.get("passed_items") or []
+            _problems = []
+            _resolve_fail = 0
+            for p in _passed_items:
+                _diff = p.get("difficulty")
+                try:
+                    _diff_i: int | None = int(_diff) if _diff is not None else None
+                except (TypeError, ValueError):
+                    _diff_i = None
+                _tags: list[int] = []
+                for t in (p.get("tags") or []):
+                    if isinstance(t, int):
+                        _tags.append(t)
+                        continue
+                    if isinstance(t, str):
+                        # 先试直接 int
+                        try:
+                            _tags.append(int(t))
+                            continue
+                        except (TypeError, ValueError):
+                            pass
+                        # 再试中文名 → int id 反查
+                        _tid = _name_to_id.get(t.strip())
+                        if _tid is not None:
+                            _tags.append(int(_tid))
+                        else:
+                            _resolve_fail += 1
+                _problems.append(
+                    SimpleNamespace(difficulty=_diff_i, tags=_tags)
+                )
+            if _resolve_fail:
+                app.logger.info(
+                    f"[v3.11.2/source+tag-resolve] task={task_id} "
+                    f"未识别的 tag 名 × {_resolve_fail} (缓存里没这些 tag, "
+                    f"不影响主流程)"
+                )
+            if _problems:
+                export_data["summary"] = _summarize(
+                    _problems, tag_by_id=_tag_by_id or {}
+                )
+                try:
+                    from syllabus_matcher import evaluate_all_topics
+                    export_data["syllabus_evaluation"] = evaluate_all_topics(
+                        export_data["summary"].get("top_algorithm_tags", [])
+                        or export_data["summary"].get("top_tags", []),
+                        tag_difficulty_map=None,
+                    )
+                except Exception as _sy:  # noqa: BLE001
+                    app.logger.debug(
+                        f"[v3.11.2/source+syllabus] 跳过: {_sy}"
+                    )
+                    export_data.setdefault("syllabus_evaluation", {})
+            else:
+                export_data.setdefault("summary", {})
+                export_data.setdefault("syllabus_evaluation", {})
+        except Exception as _e:  # noqa: BLE001
+            app.logger.warning(
+                f"[v3.11.1/source+summary] 注入失败: {_e}"
+            )
+            export_data.setdefault("summary", {})
+            export_data.setdefault("syllabus_evaluation", {})
+
         # 学员信息
         user_meta = export_data.get("user") or {}
         student_info = {

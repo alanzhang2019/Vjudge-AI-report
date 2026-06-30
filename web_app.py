@@ -251,8 +251,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.11.19"
-APP_VERSION_BUILD = "20260630_v3p11p19_task_poster_route_no_uid_needed"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.11.19b"
+APP_VERSION_BUILD = "20260630_v3p11p19b_fix_build_share_card_uid_undefined"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -15278,7 +15278,7 @@ def _build_share_card_data(luogu_uid_or_short_id: str, exam_type: str = "noi_csp
 
     return {
         "name": name,
-        "uid": luogu_uid,
+        "uid": _key,
         "gesp_level": gesp_level,
         "gesp_score": gesp_score,
         "segment": segment,
@@ -16057,13 +16057,16 @@ def _extract_achievements_from_report(report_md: str) -> dict:
       - mistakes: list[dict]         错题条目（idx/problem_id/title/source/summary）
 
 
-# ---- v3.11.19 · 状态页海报路由 (用 task_id 直查学员, 不依赖 status_page sub_id 兜底) ----
+# ---- v3.11.19 status page poster route (uses task_id to look up student, no sub_id fallback needed) ----
 @app.route("/api/task-poster/<task_id>.png", methods=["GET"])
 def task_poster_png(task_id: str):
-    """v3.11.19 · 状态页"生成海报分享"专用路由, 解决 task.luogu_uid 为空时 /me//share-card.png 404 问题.
+    """v3.11.19 status-page poster route.
 
-    流程: task_id → get_task(task_id) → 反推学员 short_id → 自己调 _build_share_card_data + 渲染 PNG.
-    不再 redirect 到 /me/<id>/share-card.png (那个路由要 student 表里有记录, 老 task 可能没有).
+    Fixes the issue where task.luogu_uid is empty -> /me//share-card.png returns 404.
+    Flow: task_id -> get_task(task_id) -> derive student short_id -> call
+    _build_share_card_data + render PNG directly. Does NOT redirect to
+    /me/<id>/share-card.png (which requires the student to exist in the students
+    table; older tasks may not have a student record).
     """
     _t = get_task(task_id)
     if not _t:

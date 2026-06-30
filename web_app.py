@@ -251,8 +251,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.11.11"
-APP_VERSION_BUILD = "20260630_v3p11p11_parent_sub_invite_first"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.11.12"
+APP_VERSION_BUILD = "20260630_v3p11p12_poster_fix_and_login_gate"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -5629,12 +5629,20 @@ def run_source_generation(task_id: str, source_text: str, form: dict):
 @app.route("/upload-zip", methods=["GET"])
 def upload_zip_form():
     """ZIP 上传拖拽页"""
+    # v3.11.12 · 三入口都要求注册
+    _gate = _require_student_login()
+    if _gate:
+        return _gate
     return render_template_string(UPLOAD_ZIP_HTML)
 
 
 @app.route("/upload-zip", methods=["POST"])
 def upload_zip_submit():
     """接收 ZIP, 落盘, 创建任务, 启动后台生成线程"""
+    # v3.11.12 · 三入口都要求注册
+    _gate = _require_student_login()
+    if _gate:
+        return _gate
     upload = request.files.get("zip_file")
     if upload is None or not upload.filename:
         return jsonify({"ok": False, "message": "未选择文件"}), 400
@@ -5715,12 +5723,20 @@ MAX_SOURCE_BYTES = 30 * 1024 * 1024  # 30 MB 源码上限 (洛谷 SSR 页面通�
 @app.route("/upload-source", methods=["GET"])
 def upload_source_form():
     """HTML 源码粘贴页"""
+    # v3.11.12 · 三入口都要求注册
+    _gate = _require_student_login()
+    if _gate:
+        return _gate
     return render_template_string(UPLOAD_SOURCE_HTML)
 
 
 @app.route("/upload-source", methods=["POST"])
 def upload_source_submit():
     """接收用户粘贴的 HTML 源码, 解析, 创建任务, 启动后台生成线程"""
+    # v3.11.12 · 三入口都要求注册
+    _gate = _require_student_login()
+    if _gate:
+        return _gate
     source = (request.form.get("html_source") or "").strip()
     if not source:
         return jsonify({"ok": False, "message": "未粘贴 HTML 源码"}), 400
@@ -6393,9 +6409,9 @@ STATUS_HTML = """
         {% if status == 'done' %}
         {# v3.9.6 · 去掉 Markdown 原文按钮（家长不应直接看源码）；重命名"AI 真生成" → "AI 决策支持" #}
         <a href="{{ ps_html }}" target="_blank" class="app-btn app-btn-amber mb-2">📨 查看家长订阅版（AI 决策支持）</a>
-        <a href="/me/{{ luogu_uid }}/parent-subscribe" class="app-btn app-btn-secondary">↩ 返回家长订阅版页</a>
+        <a href="/me/{{ share_id or me_url.split('/')[-1] if me_url else '' }}/parent-subscribe" class="app-btn app-btn-secondary">↩ 返回家长订阅版页</a>
         {% elif status == 'error' %}
-        <a href="/me/{{ luogu_uid }}/parent-subscribe" class="app-btn app-btn-primary">返回重试</a>
+        <a href="/me/{{ share_id or me_url.split('/')[-1] if me_url else '' }}/parent-subscribe" class="app-btn app-btn-primary">返回重试</a>
         {% else %}
         <p class="text-sm text-gray-400">页面每 3 秒自动刷新，AI 正在基于您家孩子的报告重写一份家长视角的深度分析...</p>
         {% endif %}
@@ -6513,10 +6529,11 @@ STATUS_HTML = """
                     <div id="posterError" class="text-center text-rose-600 text-sm" style="display:none"></div>
                 </div>
                 <div class="flex gap-2">
-                    {# v3.9.67 · 海报按报告类型分文件, GESP 报告渲染琥珀色 GESP 海报, NOI/CSP 渲染紫色原版 #}
+                    {# v3.9.67 · 海报按报告类型分文件, GESP 报告渲染琥珀色 GESP 海报, NOI/CSP 渲染紫色原版
+                       v3.11.12 · 用 share_id 替代 luogu_uid, 避免空值导致 404 #}
                     <a id="posterDownloadBtn"
-                       href="/me/{{ luogu_uid }}/share-card.png?exam_type={{ 'gesp' if task_type == 'report_gesp' else 'noi_csp' }}"
-                       download="学习报告海报_{{ luogu_uid }}.png"
+                       href="/me/{{ share_id }}/share-card.png?exam_type={{ 'gesp' if task_type == 'report_gesp' else 'noi_csp' }}"
+                       download="学习报告海报_{{ share_id or 'user' }}.png"
                        class="app-btn app-btn-primary flex-1">⬇ 再次下载</a>
                     <button type="button" onclick="closeSharePoster()" class="app-btn app-btn-secondary flex-1">关闭</button>
                 </div>
@@ -6539,7 +6556,7 @@ STATUS_HTML = """
                 // 1) 预加载海报 PNG（matplotlib 现场渲染，可能 5-15s）
                 // v3.9.67 · GESP 报告传 exam_type=gesp, NOI/CSP 报告传 exam_type=noi_csp
                 var _exam_type = '{{ "gesp" if task_type == "report_gesp" else "noi_csp" }}';
-                var url = '/me/{{ luogu_uid }}/share-card.png?exam_type=' + encodeURIComponent(_exam_type) + '&t=' + Date.now();
+                var url = '/me/{{ share_id }}/share-card.png?exam_type=' + encodeURIComponent(_exam_type) + '&t=' + Date.now();
                 var pre=new Image();
                 pre.onload=function(){
                     // 2) 加载完成 → 显示 + 自动下载
@@ -6565,7 +6582,7 @@ STATUS_HTML = """
                         // 优先复用"再次下载"按钮（带 download 属性）
                         if(btn){
                             btn.href=finalUrl;
-                            btn.setAttribute('download','学习报告海报_{{ luogu_uid }}.png');
+                            btn.setAttribute('download','学习报告海报_{{ share_id or 'user' }}.png');
                             btn.click();
                             return;
                         }
@@ -6574,7 +6591,7 @@ STATUS_HTML = """
                     try{
                         var a=document.createElement('a');
                         a.href=finalUrl;
-                        a.download='学习报告海报_{{ luogu_uid }}.png';
+                        a.download='学习报告海报_{{ share_id or 'user' }}.png';
                         a.style.display='none';
                         document.body.appendChild(a);a.click();document.body.removeChild(a);
                     }catch(e){console.error('[poster download]',e);}
@@ -6646,6 +6663,9 @@ def status_page(task_id):
     # v3.5.2 · 统一入口生成的报告支持跳回 /me/<uid>（3 版本报告）
     luogu_uid = str(request.args.get("luogu_uid", "") or task.get("luogu_uid", "") or "")
     me_url = f"/me/{luogu_uid}" if luogu_uid and luogu_uid.isdigit() else ""
+    # v3.11.12 · 海报 URL 用的 id：与 me_url 一致 (Flask 路由用 <short_id>, status_page 模板也别传 luogu_uid 否则空值会 404)
+    share_id = luogu_uid if luogu_uid and luogu_uid.isdigit() else ""
+    me_url_full = me_url  # 别名, 模板里用 me_url.split('/')[-1] 取 id
 
     # v3.9.6 · 智能门控：检查该 UID 是否已生成过 parent_subscribe.html
     # 如果已生成 → 状态页直接显示"查看家长订阅版"，不再每次让家长重输邀请码
@@ -6694,6 +6714,8 @@ def status_page(task_id):
         retry_url=url_for("retry_task", task_id=task_id),
         me_url=me_url,
         luogu_uid=luogu_uid,
+        # v3.11.12 · 海报 URL 用的 id (与 me_url 同源, luogu_uid 空时安全)
+        share_id=share_id,
         # v3.9.6 · 新增：智能门控用
         has_parent_sub_html=has_parent_sub_html,
         ps_html_url=ps_html_url,
@@ -12935,6 +12957,24 @@ def _grade_to_label(grade: str | None) -> str | None:
     return grade   # 未知值原样返回
 
 
+# v3.11.12 · 三入口都要求注册登录（1=洛谷练习页 /upload-source, 2=VJudge 已有, 3=ZIP /upload-zip）
+def _require_student_login(next_path: str = ""):
+    """v3.11.12 · 学员未登录 → 跳 /register?next=<原 URL>
+
+    已登录: 返回 None（路由继续执行）
+    未登录: 返回 redirect Response（路由应该 return 这个）
+    """
+    _sid = str(session.get("student_short_id") or "").strip()
+    _uid = str(session.get("student_uid") or "").strip()
+    if _sid or _uid:
+        return None  # 已登录
+    if not next_path:
+        next_path = request.path
+        if request.query_string:
+            next_path = next_path + "?" + request.query_string.decode("utf-8")
+    return redirect(url_for("register_student", next=next_path, need_login=1))
+
+
 @app.route("/register", methods=["GET", "POST"])
 def register_student():
     """v3.10.0 学员邮箱注册（取代学而思图 1 模式 4 字段极简）
@@ -12946,6 +12986,13 @@ def register_student():
       4. 提交后：BCrypt 哈希密码 → 生成 8 位 short_id → 写入 students
       5. 重定向：/me/<short_id>
     """
+    # v3.11.12 · 学员未登录访问受保护页时, 显示顶部提示横幅
+    need_login_msg = ""
+    if request.method == "GET" and str(request.args.get("need_login", "") or "") == "1":
+        need_login_msg = (
+            "🔒 生成报告需要先注册账号 (30 秒, 邮箱即可, 无需手机验证) — "
+            "免费注册后可永久使用本站 1/2/3 三个版本。"
+        )
     if request.method == "GET":
         return render_template_string(
             REGISTER_HTML,
@@ -12953,6 +13000,7 @@ def register_student():
             grades=GRADES_REGISTRATION,
             error=None,
             form={},
+            need_login_msg=need_login_msg,
         )
 
     # ---- POST 处理 ----
@@ -18084,6 +18132,12 @@ REGISTER_HTML = """
 </head>
 <body class="app-body min-h-screen flex items-center justify-center p-4">
     <div class="app-card max-w-md w-full">
+        {# v3.11.12 · 未登录访问保护页时的引导提示 #}
+        {% if need_login_msg %}
+        <div class="mb-4 p-3 bg-amber-50 border-2 border-amber-300 rounded-lg text-amber-800 text-sm leading-relaxed">
+            {{ need_login_msg }}
+        </div>
+        {% endif %}
         <div class="text-center mb-4">
             <div class="app-pill app-pill-done mb-2">v3.10.0</div>
             <h1 class="app-title">学员注册</h1>

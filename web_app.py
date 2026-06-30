@@ -251,8 +251,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.11.16"
-APP_VERSION_BUILD = "20260630_v3p11p16_poster_share_id_works_with_short_id"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.11.17"
+APP_VERSION_BUILD = "20260630_v3p11p17_status_page_parent_subscribe_qr_always_shown"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -6269,9 +6269,6 @@ STATUS_HTML = """
             <p class="text-[10px] text-gray-500 text-center -mt-1">
                 💡 孩子视角的报告, 家长看会更焦虑 😊 · 家长版带 AI 决策支持 + 周报
             </p>
-            {% if me_url %}
-            {# v3.9.6 · 智能门控：已生成过家长订阅版 → 直接显示"查看"，不再每次让家长重输邀请码 #}
-            {# v3.9.41 · 扩展：DB 里有任何已激活的 parent_invite/parent_sub 记录，也跳过表单（即使 HTML 未生成成功） #}
             {% if has_parent_sub_html or has_parent_sub_db %}
                 <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
                     {% if has_parent_sub_html %}
@@ -6281,11 +6278,11 @@ STATUS_HTML = """
                     <p class="text-sm text-emerald-800">✅ 您家孩子的家长订阅已激活</p>
                     <p class="text-[11px] text-emerald-600 mt-1">订阅版报告正在生成或上次生成未完成，点击下方按钮重新触发</p>
                     {% endif %}
-                    <a href="/me/{{ me_url.split('/')[-1] }}/parent-subscribe" class="app-btn app-btn-secondary mt-2 block text-center">↩ 进入家长订阅版中心</a>
+                    <a href="/me/{{ me_url.split('/')[-1] if me_url else luogu_uid }}/parent-subscribe" class="app-btn app-btn-secondary mt-2 block text-center">↩ 进入家长订阅版中心</a>
                 </div>
             {% else %}
-            {# v3.11.11 · 家长订阅版：先输邀请码 → 提示加微信获得 → 才能生成 (无价格) #}
-            <form method="POST" action="/me/{{ me_url.split('/')[-1] }}/start-parent-subscribe" class="block" id="parentSubForm">
+            {# v3.11.17 · 家长订阅版：始终显示二维码 + 邀请码输入框 (不依赖 me_url) #}
+            <form method="POST" action="/me/{{ me_url.split('/')[-1] if me_url else luogu_uid }}/start-parent-subscribe" class="block" id="parentSubForm">
                 <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-2">
                     <label class="block text-xs font-bold text-amber-800 mb-1">
                         🔑 家长订阅邀请码
@@ -6319,7 +6316,6 @@ STATUS_HTML = """
                 </button>
                 <p class="text-[10px] text-gray-500 text-center mt-1">💡 使用服务端环境变量 OPENAI_API_KEY 直接生成</p>
             </form>
-            {% endif %}
             {% endif %}
         </div>
 

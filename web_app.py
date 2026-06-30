@@ -251,8 +251,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.11.4"
-APP_VERSION_BUILD = "20260630_v3p11p4_paste_parent_subscribe_three_entries"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.11.5"
+APP_VERSION_BUILD = "20260630_v3p11p5_index_luogu_first"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -1778,7 +1778,7 @@ INDEX_V3100_HTML = """
             <a href="/" class="flex items-center gap-2">
                 <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg">信</div>
                 <span class="font-bold text-lg">信竞 AI 报告</span>
-                <span class="text-xs text-slate-400 ml-1">VJudge 版</span>
+                <span class="text-xs text-slate-400 ml-1">洛谷练习页版</span>
             </a>
             <div class="flex items-center gap-3">
                 {% if logged_in_banner %}
@@ -1797,45 +1797,31 @@ INDEX_V3100_HTML = """
 
     {# Hero #}
     <section class="max-w-6xl mx-auto px-4 py-16 text-center">
-        <div class="inline-flex items-center gap-2 bg-indigo-50 text-indigo-700 px-4 py-1.5 rounded-full text-sm font-medium mb-6">
-            <span class="w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></span>
-            v3.11.0 · 全 VJudge 跨平台模式
+        <div class="inline-flex items-center gap-2 bg-emerald-50 text-emerald-700 px-4 py-1.5 rounded-full text-sm font-medium mb-6">
+            <span class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
+            v3.11.5 · 洛谷练习页解析版 (推荐)
         </div>
         <h1 class="text-5xl md:text-6xl font-extrabold tracking-tight mb-6">
-            30 秒,让你的<br>
-            <span class="grad-text">VJudge 跨平台数据</span><br>
+            30 秒粘贴,让你的<br>
+            <span class="grad-text">洛谷练习数据</span><br>
             变成 AI 深度报告
         </h1>
         <p class="text-lg text-slate-600 max-w-2xl mx-auto mb-8">
-            直接绑定 <strong>VJudge username</strong>,AI 教练会基于你的 100+ OJ
-            跨平台提交记录,生成专属的《算法竞赛成长画像》。
+            打开洛谷「个人练习」页 → <strong>Ctrl+U</strong> 复制源码 → 粘贴到本平台<br>
+            无需注册 · 无需 Cookie · 无需 ZIP · 一键解析出 6 张图表 + 知识点覆盖
         </p>
         <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
-            {% if logged_in_banner %}
-            <a href="/me/{{ student_short_id }}" class="btn-primary text-base">🤖 去生成我的 AI 报告</a>
-            {% else %}
-            <a href="/register" class="btn-primary text-base">🚀 立即注册(30 秒)</a>
-            <a href="/login" class="btn-secondary text-base">已有账号 → 登录</a>
-            {% endif %}
+            <a href="/upload-source" class="btn-primary text-base bg-gradient-to-r from-emerald-500 to-teal-500">
+                📋 立即粘贴源码生成报告
+            </a>
+            <a href="#three-ways" class="btn-secondary text-base">查看其他 2 种方式 ↓</a>
         </div>
-        <p class="text-xs text-slate-400 mt-4">📌 邮箱+密码注册 · 零门槛</p>
+        <p class="text-xs text-slate-400 mt-4">📌 30 秒-3 分钟拿到报告 · 含家长订阅版 + 海报分享</p>
 
-        {# v3.11.0 · ZIP 数据包模式入口:不依赖注册/抓取,有本地 ZIP 即可生成报告 #}
-        <div class="text-center mt-3">
-            <a href="/upload-zip" class="text-sm text-indigo-600 hover:text-indigo-800 hover:underline font-medium">
-                📦 有本地 ZIP 数据包? 跳过抓取直接生成报告 →
-            </a>
-        </div>
-        {# v3.11.0 · 源码粘贴模式入口:连 cookies 都不用,Ctrl+U 复制粘贴 #}
-        <div class="text-center mt-2">
-            <a href="/upload-source" class="text-sm text-amber-700 hover:text-amber-900 hover:underline font-medium">
-                📋 没有 ZIP? 粘贴洛谷练习页源码也能出报告 →
-            </a>
-        </div>
     </section>
 
-    {# v3.11.3 · 三种报告生成方式平级展示 #}
-    <section class="max-w-6xl mx-auto px-4 py-12">
+    {# v3.11.5 · 三种报告生成方式平级展示 #}
+    <section id="three-ways" class="max-w-6xl mx-auto px-4 py-12">
         <h2 class="text-3xl font-bold text-center mb-3">🎯 三种 AI 报告生成方式</h2>
         <p class="text-center text-slate-500 mb-10">根据你的需求任选其一,30 秒-3 分钟拿到报告</p>
         <div class="grid md:grid-cols-3 gap-6">
@@ -1903,117 +1889,120 @@ INDEX_V3100_HTML = """
         </div>
     </section>
 
-    {# 三步流程 #}
+    {# 三步流程 (v3.11.5 · 改为主流程 = 洛谷练习页粘贴) #}
     <section class="max-w-6xl mx-auto px-4 py-12">
         <h2 class="text-3xl font-bold text-center mb-3">三步搞定</h2>
-        <p class="text-center text-slate-500 mb-12">从注册到拿到报告,平均不到 2 分钟</p>
+        <p class="text-center text-slate-500 mb-12">从复制源码到拿到报告,平均不到 1 分钟</p>
         <div class="grid md:grid-cols-3 gap-6">
 
             <div class="card p-6">
                 <div class="step-num mb-4">1</div>
-                <h3 class="text-xl font-bold mb-2">📧 邮箱注册</h3>
+                <h3 class="text-xl font-bold mb-2">🌐 打开洛谷练习页</h3>
                 <p class="text-slate-600 text-sm leading-relaxed">
-                    填邮箱 + 设置密码 + 姓名 / 年级 / 城市,
-                    30 秒内注册完成。系统会生成一个 8 位
-                    <code class="text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-xs">short_id</code>
-                    作为你的个人主页地址。
+                    登录 <a href="https://www.luogu.com.cn/practice" target="_blank" class="text-emerald-600 hover:underline font-semibold">luogu.com.cn/practice</a>,
+                    按 <kbd class="px-1.5 py-0.5 bg-slate-100 border border-slate-300 rounded text-xs font-mono">Ctrl</kbd>
+                    + <kbd class="px-1.5 py-0.5 bg-slate-100 border border-slate-300 rounded text-xs font-mono">U</kbd>
+                    打开「查看网页源代码」。
                 </p>
-                <a href="/register" class="inline-block mt-4 text-indigo-600 text-sm font-semibold hover:underline">→ 去注册</a>
+                <a href="https://www.luogu.com.cn/practice" target="_blank" class="inline-block mt-4 text-emerald-600 text-sm font-semibold hover:underline">→ 打开洛谷练习页</a>
             </div>
 
             <div class="card p-6">
                 <div class="step-num mb-4">2</div>
-                <h3 class="text-xl font-bold mb-2">🔗 绑定 VJudge</h3>
+                <h3 class="text-xl font-bold mb-2">📋 整页复制源码</h3>
                 <p class="text-slate-600 text-sm leading-relaxed">
-                    在个人主页输入你的
-                    <strong class="text-indigo-600">VJudge username</strong>
-                    (vjudge.net 上的账号),点"刷新"开始抓取。
-                    抓取内容包括:总 AC、总提交、各 OJ 分布、最近 20 题。
+                    在打开的源码页按
+                    <kbd class="px-1.5 py-0.5 bg-slate-100 border border-slate-300 rounded text-xs font-mono">Ctrl</kbd>
+                    + <kbd class="px-1.5 py-0.5 bg-slate-100 border border-slate-300 rounded text-xs font-mono">A</kbd>
+                    全选,再
+                    <kbd class="px-1.5 py-0.5 bg-slate-100 border border-slate-300 rounded text-xs font-mono">Ctrl</kbd>
+                    + <kbd class="px-1.5 py-0.5 bg-slate-100 border border-slate-300 rounded text-xs font-mono">C</kbd>
+                    复制,粘到下方文本框。
                 </p>
-                <a href="https://vjudge.net/user" target="_blank" class="inline-block mt-4 text-indigo-600 text-sm font-semibold hover:underline">→ 找我的 VJudge ID</a>
+                <span class="inline-block mt-4 text-slate-400 text-sm">→ 50KB-500KB 之间 (一秒钟复制完)</span>
             </div>
 
             <div class="card p-6">
                 <div class="step-num mb-4">3</div>
                 <h3 class="text-xl font-bold mb-2">🤖 一键 AI 报告</h3>
                 <p class="text-slate-600 text-sm leading-relaxed">
-                    抓取完成后,点紫色的
-                    <strong class="text-purple-600">"🤖 AI 报告"</strong>
-                    按钮,30 秒-3 分钟内 AI 教练会输出:
-                    跨平台画像 / 提交效率 / 难度研判 / 4 周训练计划 / 家长版总结。
+                    填一下姓名 / 年级,点
+                    <strong class="text-emerald-600">"📋 立即生成"</strong>,
+                    30 秒-3 分钟内 AI 教练会输出:
+                    能力雷达 / 性格画像 / 6 张核心图表 / 4 周训练计划 / 家长版总结。
                 </p>
-                <span class="inline-block mt-4 text-slate-400 text-sm">→ 输出 MD / HTML / PDF 三件套</span>
+                <a href="/upload-source" class="inline-block mt-4 text-emerald-600 text-sm font-semibold hover:underline">→ 去粘贴源码</a>
             </div>
 
         </div>
     </section>
 
-    {# 数据流示意 #}
+    {# 数据流示意 (v3.11.5 · 改为主流程 = 洛谷 HTML 源码) #}
     <section class="max-w-6xl mx-auto px-4 py-12">
-        <div class="card p-8 bg-gradient-to-br from-indigo-50 via-white to-purple-50">
+        <div class="card p-8 bg-gradient-to-br from-emerald-50 via-white to-teal-50">
             <h2 class="text-2xl font-bold mb-6 text-center">📊 数据流全景</h2>
             <div class="flex flex-col md:flex-row items-center justify-center gap-4 text-sm">
                 <div class="bg-white p-4 rounded-lg shadow-sm text-center min-w-[140px]">
-                    <div class="text-2xl mb-1">🌐</div>
-                    <div class="font-semibold">VJudge 公开数据</div>
-                    <div class="text-xs text-slate-500 mt-1">100+ OJ 提交记录</div>
+                    <div class="text-2xl mb-1">📋</div>
+                    <div class="font-semibold">洛谷练习页源码</div>
+                    <div class="text-xs text-slate-500 mt-1">Ctrl+U 复制 (50-500KB)</div>
                 </div>
-                <div class="text-2xl text-indigo-400">→</div>
+                <div class="text-2xl text-emerald-400">→</div>
                 <div class="bg-white p-4 rounded-lg shadow-sm text-center min-w-[140px]">
-                    <div class="text-2xl mb-1">🗄️</div>
-                    <div class="font-semibold">SQLite 持久化</div>
-                    <div class="text-xs text-slate-500 mt-1">student_vjudge_data</div>
+                    <div class="text-2xl mb-1">🔍</div>
+                    <div class="font-semibold">__NEXT_DATA__ 解析</div>
+                    <div class="text-xs text-slate-500 mt-1">passed / submitted 数组</div>
                 </div>
-                <div class="text-2xl text-indigo-400">→</div>
+                <div class="text-2xl text-emerald-400">→</div>
                 <div class="bg-white p-4 rounded-lg shadow-sm text-center min-w-[140px]">
                     <div class="text-2xl mb-1">🧠</div>
                     <div class="font-semibold">AI 教练分析</div>
                     <div class="text-xs text-slate-500 mt-1">DeepSeek / GPT-4o</div>
                 </div>
-                <div class="text-2xl text-indigo-400">→</div>
+                <div class="text-2xl text-emerald-400">→</div>
                 <div class="bg-white p-4 rounded-lg shadow-sm text-center min-w-[140px]">
                     <div class="text-2xl mb-1">📄</div>
                     <div class="font-semibold">报告三件套</div>
-                    <div class="text-xs text-slate-500 mt-1">MD / HTML / PDF</div>
+                    <div class="text-xs text-slate-500 mt-1">HTML + PDF + 家长订阅版</div>
                 </div>
             </div>
         </div>
     </section>
 
-    {# 为什么选 VJudge #}
+    {# 为什么选洛谷练习页解析? (v3.11.5 · 替代旧的「为什么选 VJudge」) #}
     <section class="max-w-6xl mx-auto px-4 py-12">
-        <h2 class="text-3xl font-bold text-center mb-12">为什么用 VJudge 数据?</h2>
+        <h2 class="text-3xl font-bold text-center mb-12">为什么推荐洛谷练习页解析?</h2>
         <div class="grid md:grid-cols-3 gap-6">
             <div class="card p-6">
-                <div class="text-3xl mb-3">🌍</div>
-                <h3 class="font-bold text-lg mb-2">跨平台画像</h3>
-                <p class="text-sm text-slate-600">VJudge 聚合 100+ OJ 提交记录(Codeforces/AtCoder/洛谷/POJ/HDU ...),比单一 OJ 更能反映真实水平。</p>
-            </div>
-            <div class="card p-6">
                 <div class="text-3xl mb-3">⚡</div>
-                <h3 class="font-bold text-lg mb-2">30 秒出报告</h3>
-                <p class="text-sm text-slate-600">不需要洛谷 cookie 也不需要密码登录,绑一次 VJudge username 就能反复刷新,AI 报告秒级出。</p>
+                <h3 class="font-bold text-lg mb-2">30 秒上手</h3>
+                <p class="text-sm text-slate-600">Ctrl+U 复制粘贴即可, 不需要注册账号、绑定 Cookie 或导出 ZIP, 新手也能 1 分钟拿到第一份报告。</p>
             </div>
             <div class="card p-6">
-                <div class="text-3xl mb-3">🎯</div>
-                <h3 class="font-bold text-lg mb-2">家长友好</h3>
-                <p class="text-sm text-slate-600">报告里的"家长下一步"模块用直白中文写,父母看不懂算法也能帮孩子定方向。</p>
+                <div class="text-3xl mb-3">📊</div>
+                <h3 class="font-bold text-lg mb-2">6 张核心图表</h3>
+                <p class="text-sm text-slate-600">能力雷达 / 性格画像 / 难度分布 / AC 提交次数 / 通过率 / 高频标签, AI 分析洛谷 200+ 维数据, 给你看得见的画像。</p>
+            </div>
+            <div class="card p-6">
+                <div class="text-3xl mb-3">📨</div>
+                <h3 class="font-bold text-lg mb-2">家长订阅版</h3>
+                <p class="text-sm text-slate-600">报告生成后扫码可解锁家长订阅版, 微信收到 AI 决策支持 + 4 周训练计划, 父母不懂算法也能帮孩子定方向。</p>
             </div>
         </div>
     </section>
 
-    {# 底部 CTA #}
+    {# 底部 CTA (v3.11.5 · 改为主推 洛谷练习页粘贴) #}
     <section class="max-w-6xl mx-auto px-4 py-16 text-center">
-        <div class="card p-12 bg-gradient-to-br from-indigo-600 to-purple-600 text-white">
+        <div class="card p-12 bg-gradient-to-br from-emerald-500 to-teal-500 text-white">
             <h2 class="text-3xl font-bold mb-4">准备好看到你的 AI 报告了吗?</h2>
-            <p class="text-indigo-100 mb-8">注册 + 绑 VJudge + 出报告 · 全程 2 分钟</p>
+            <p class="text-emerald-50 mb-8">打开洛谷练习页 → Ctrl+U 复制 → 粘贴生成 · 全程 1 分钟</p>
             <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
-                {% if logged_in_banner %}
-                <a href="/me/{{ student_short_id }}" class="bg-white text-indigo-600 font-semibold px-8 py-3 rounded-lg hover:bg-indigo-50">🤖 去生成我的报告</a>
-                {% else %}
-                <a href="/register" class="bg-white text-indigo-600 font-semibold px-8 py-3 rounded-lg hover:bg-indigo-50">🚀 立即注册</a>
-                <a href="/login" class="border-2 border-white text-white font-semibold px-8 py-3 rounded-lg hover:bg-white hover:text-indigo-600">已有账号 → 登录</a>
-                {% endif %}
+                <a href="/upload-source" class="bg-white text-emerald-600 font-bold px-8 py-3 rounded-lg hover:bg-emerald-50 text-lg">
+                    📋 立即粘贴源码生成报告
+                </a>
+                <a href="#three-ways" class="border-2 border-white text-white font-semibold px-8 py-3 rounded-lg hover:bg-white hover:text-emerald-600">
+                    查看其他 2 种方式
+                </a>
             </div>
         </div>
     </section>
@@ -2031,8 +2020,8 @@ INDEX_V3100_HTML = """
                     <span>查看排行榜</span>
                 </a>
             </div>
-            <p>信竞 AI 报告 · v3.11.0 · 学员成长平台</p>
-            <p class="mt-1">Powered by VJudge + DeepSeek/GPT-4o + Playwright</p>
+            <p>信竞 AI 报告 · v3.11.5 · 洛谷练习页解析版 (主推)</p>
+            <p class="mt-1">Powered by 洛谷 __NEXT_DATA__ 解析 + DeepSeek/GPT-4o + Playwright (兜底)</p>
         </div>
     </footer>
 

@@ -251,8 +251,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.11.3"
-APP_VERSION_BUILD = "20260630_v3p11p3_paste_charts_complete"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.11.4"
+APP_VERSION_BUILD = "20260630_v3p11p4_paste_parent_subscribe_three_entries"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -1831,6 +1831,75 @@ INDEX_V3100_HTML = """
             <a href="/upload-source" class="text-sm text-amber-700 hover:text-amber-900 hover:underline font-medium">
                 📋 没有 ZIP? 粘贴洛谷练习页源码也能出报告 →
             </a>
+        </div>
+    </section>
+
+    {# v3.11.3 · 三种报告生成方式平级展示 #}
+    <section class="max-w-6xl mx-auto px-4 py-12">
+        <h2 class="text-3xl font-bold text-center mb-3">🎯 三种 AI 报告生成方式</h2>
+        <p class="text-center text-slate-500 mb-10">根据你的需求任选其一,30 秒-3 分钟拿到报告</p>
+        <div class="grid md:grid-cols-3 gap-6">
+
+            {# 1. 洛谷练习页解析版 (推荐) #}
+            <div class="card p-6 border-2 border-emerald-300 relative">
+                <div class="absolute -top-3 left-1/2 -translate-x-1/2">
+                    <span class="inline-block px-3 py-1 text-xs font-bold rounded-full bg-emerald-500 text-white shadow-md">⭐ 推荐</span>
+                </div>
+                <div class="text-4xl mb-3 text-center">📋</div>
+                <h3 class="text-xl font-bold text-center mb-2 text-emerald-700">洛谷练习页解析版</h3>
+                <p class="text-sm text-slate-600 leading-relaxed text-center mb-4">
+                    打开洛谷「个人练习」页 → Ctrl+U 复制源码 → 粘贴到本平台<br>
+                    <strong class="text-emerald-600">无需 ZIP · 无需 Cookie · 一键解析</strong>
+                </p>
+                <ul class="text-xs text-slate-500 space-y-1 mb-4">
+                    <li>✅ 最快上手 (Ctrl+U 复制粘贴)</li>
+                    <li>✅ 含 AC / 未通过 / 知识点 / 难度</li>
+                    <li>✅ 生成 6 张核心图表 + 知识点覆盖统计</li>
+                </ul>
+                <a href="/upload-source" class="block text-center bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-2.5 rounded-lg transition">
+                    立即使用 →
+                </a>
+            </div>
+
+            {# 2. VJudge 做题情况解析版 #}
+            <div class="card p-6 border-2 border-indigo-300">
+                <div class="text-4xl mb-3 text-center">🌐</div>
+                <h3 class="text-xl font-bold text-center mb-2 text-indigo-700">VJudge 跨平台版</h3>
+                <p class="text-sm text-slate-600 leading-relaxed text-center mb-4">
+                    绑定 VJudge username → 自动抓取 100+ OJ 跨平台提交记录 → AI 生成报告<br>
+                    <strong class="text-indigo-600">跨 OJ 画像 · 一次绑定反复刷新</strong>
+                </p>
+                <ul class="text-xs text-slate-500 space-y-1 mb-4">
+                    <li>✅ 跨 100+ OJ 平台</li>
+                    <li>✅ 不用抓包/粘贴</li>
+                    <li>✅ 含家长订阅版生成入口</li>
+                </ul>
+                <a href="/register" class="block text-center bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2.5 rounded-lg transition">
+                    立即注册绑定 →
+                </a>
+            </div>
+
+            {# 3. 洛谷源码解析版 (专业版) #}
+            <div class="card p-6 border-2 border-purple-300 relative">
+                <div class="absolute -top-3 right-3">
+                    <span class="inline-block px-2 py-0.5 text-[10px] font-bold rounded-full bg-purple-100 text-purple-700">专业版</span>
+                </div>
+                <div class="text-4xl mb-3 text-center">📦</div>
+                <h3 class="text-xl font-bold text-center mb-2 text-purple-700">洛谷源码包版</h3>
+                <p class="text-sm text-slate-600 leading-relaxed text-center mb-4">
+                    上传洛谷「个人练习」导出的 ZIP 数据包 → 完整源码分析 → AI 深度报告<br>
+                    <strong class="text-purple-600">含真实代码样本 · 最深度</strong>
+                </p>
+                <ul class="text-xs text-slate-500 space-y-1 mb-4">
+                    <li>✅ 含真实提交代码样本</li>
+                    <li>✅ AI 可针对性讲代码</li>
+                    <li>✅ 错题本聚合最完整</li>
+                </ul>
+                <a href="/upload-zip" class="block text-center bg-purple-500 hover:bg-purple-600 text-white font-bold py-2.5 rounded-lg transition">
+                    上传 ZIP →
+                </a>
+            </div>
+
         </div>
     </section>
 
@@ -5637,6 +5706,21 @@ def upload_source_submit():
         "_source": "html_source_upload",
         "_source_len": len(source),
     }
+
+    # v3.11.3 · 同步从源码轻解析 uid/name, 写入 task.luogu_uid
+    # 这样 status_page 的兜底分支能拿到 me_url, 展示「家长订阅版」入口
+    # + 「家长订阅版二维码添加指引」(粘贴模式不解析源码会缺这块)。
+    # 这里用 _extract_user 抽 uid/title 即可, 完整 parsed 留给后台 run_source_generation 跑
+    if not form_data["luogu_uid"] or not form_data["student_name"]:
+        try:
+            from html_source_parser import _extract_user
+            _uid_s, _name_s = _extract_user(source)
+            if not form_data["luogu_uid"] and _uid_s:
+                form_data["luogu_uid"] = str(_uid_s)
+            if not form_data["student_name"] and _name_s:
+                form_data["student_name"] = _name_s
+        except Exception:  # noqa: BLE001
+            pass
 
     # 创建任务
     task_id = str(uuid.uuid4())

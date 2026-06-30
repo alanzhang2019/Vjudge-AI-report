@@ -16961,9 +16961,36 @@ def start_parent_subscribe(short_id: str):
               避免「admin 显示已用，前端仍要输码」造成"无效"误判。
     """
     # v3.8 · 此处不再拦截 _HIDE_COMMERCE。生成动作属于"已购用户的技术服务"，不归商业化展示开关管。
+    # v3.11.19 fix · 参考 alanzhang2019/luogu-AI-report: 学员未注册时"无感注册"
+    # 原逻辑直接 404, 但很多用户是先生成报告(没填姓名)再点家长订阅, 学员档案不在 students 表
+    # 这里从 reports/<uid>/export_data.json 兜底拿姓名/城市, 立即 create_student,
+    # 避免"先注册再订阅"的多余流程 (与 _build_share_card_data 的 export_data 兜底一致)
     student = _admin_students.get_student_by_short_id(short_id) or _admin_students.get_student_by_uid(short_id) or _admin_students.get_student_by_uid(short_id)
     if not student:
-        return render_template_string(REGISTER_INVALID_HTML, message=f"UID {short_id} 未注册"), 404
+        try:
+            _fallback_dir = _find_latest_report_dir(short_id, "")
+            if _fallback_dir and (_fallback_dir / "export_data.json").exists():
+                _exp = json.loads((_fallback_dir / "export_data.json").read_text(encoding="utf-8"))
+                _exp_meta = (_exp.get("meta") or {})
+                _fallback_name = (str(_exp_meta.get("student_name") or "").strip() or f"学员{short_id[-4:]}")
+                _admin_students.create_student(
+                    luogu_uid=str(short_id).strip(),
+                    real_name=_fallback_name,
+                    school=str(_exp_meta.get("school") or "").strip() or None,
+                    grade=str(_exp_meta.get("grade") or "").strip() or None,
+                    city=str(_exp_meta.get("city") or "").strip() or None,
+                    province=str(_exp_meta.get("province") or "").strip() or None,
+                    is_minor=False,
+                    registered_via="auto_from_parent_subscribe",
+                )
+                student = _admin_students.get_student_by_uid(short_id)
+                app.logger.info(f"v3.11.19 无感注册: UID={short_id} name={_fallback_name} (from {_fallback_dir.name}/export_data.json)")
+        except Exception as _e:
+            app.logger.warning(f"v3.11.19 无感注册失败: UID={short_id} {_e}")
+    if not student:
+        return render_template_string(REGISTER_INVALID_HTML, message=f"UID {short_id} 未注册,且未找到对应报告目录"), 404
+
+    luogu_uid = str(short_id).strip()  # 后续所有函数都依赖 luogu_uid 变量
 
     # v3.9.69 · 报告 / 海报公开显示的脱敏字段：仅姓氏 + 学校 hash 匿称
     student = dict(student)

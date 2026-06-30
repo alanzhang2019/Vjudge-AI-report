@@ -251,8 +251,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.11.12"
-APP_VERSION_BUILD = "20260630_v3p11p12_poster_fix_and_login_gate"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.11.13"
+APP_VERSION_BUILD = "20260630_v3p11p13_register_next_or_home"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -13110,7 +13110,11 @@ def register_student():
         app.logger.warning(f"[register_student] _set_student_session 失败: {_se}")
 
     flash(f"✅ 学员 {form['real_name']} 注册成功（短 ID {short_id}）")
-    return redirect(url_for("student_me", short_id=short_id))
+    # v3.11.13 · 注册后跳转: 有 next → 跳 next(原打算访问的页面), 没有 → 回首页让用户选版本
+    _reg_next = (request.form.get("next") or request.args.get("next") or "").strip()
+    if _reg_next and _reg_next.startswith("/"):
+        return redirect(_reg_next)
+    return redirect(url_for("index"))
 
 
 # ---- v3.10.0 · 登录 / 登出 ----
@@ -18149,6 +18153,8 @@ REGISTER_HTML = """
         {% endif %}
 
         <form method="POST" class="space-y-3" id="register-form">
+            {# v3.11.13 · 注册后跳回原打算访问的页面 (避免跳到学员中心) #}
+            <input type="hidden" name="next" value="{{ request.args.get('next', '') }}" />
             <div>
                 <label class="app-label"><span class="text-red-500">*</span> 所在地区</label>
                 <div class="grid grid-cols-2 gap-2">

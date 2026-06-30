@@ -251,8 +251,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.11.10"
-APP_VERSION_BUILD = "20260630_v3p11p10_legal_pages"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.11.11"
+APP_VERSION_BUILD = "20260630_v3p11p11_parent_sub_invite_first"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -6434,7 +6434,7 @@ STATUS_HTML = """
                解决老用户看不到家长版块被 {% if me_url %} 跳过时, 不知道还有这个功能的问题 #}
             <a href="/me/{{ luogu_uid }}/parent-subscribe"
                class="block bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 text-white text-center rounded-lg py-3 px-4 font-bold shadow-md hover:shadow-lg transition">
-                📨 升级家长订阅版 · 加微信送 ¥30 邀请码
+                📨 升级家长订阅版 · 添加客服微信获得邀请码
             </a>
             <p class="text-[10px] text-gray-500 text-center -mt-1">
                 💡 孩子视角的报告, 家长看会更焦虑 😊 · 家长版带 AI 决策支持 + 周报
@@ -6454,32 +6454,40 @@ STATUS_HTML = """
                     <a href="/me/{{ me_url.split('/')[-1] }}/parent-subscribe" class="app-btn app-btn-secondary mt-2 block text-center">↩ 进入家长订阅版中心</a>
                 </div>
             {% else %}
-            {# v3.9 · 家长订阅版：邀请码门控（获取方式 = 加微信） #}
-            <form method="POST" action="/me/{{ me_url.split('/')[-1] }}/start-parent-subscribe" class="block">
+            {# v3.11.11 · 家长订阅版：先输邀请码 → 提示加微信获得 → 才能生成 (无价格) #}
+            <form method="POST" action="/me/{{ me_url.split('/')[-1] }}/start-parent-subscribe" class="block" id="parentSubForm">
                 <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-2">
-                    <label class="block text-xs font-bold text-amber-800 mb-1">🔑 家长订阅邀请码（必填）</label>
-                    <input type="text" name="invite_code" required
-                           placeholder="扫码下方微信，备注'家长订阅'获取"
+                    <label class="block text-xs font-bold text-amber-800 mb-1">
+                        🔑 家长订阅邀请码
+                    </label>
+                    <input type="text" name="invite_code" id="inviteCodeInput" required
+                           placeholder="请先输入邀请码"
+                           autocomplete="off"
+                           oninput="document.getElementById('genParentBtn').disabled = !this.value.trim()"
                            class="w-full px-3 py-2 border border-amber-300 rounded text-sm font-mono focus:outline-none focus:border-amber-500" />
-                    <div class="flex items-start gap-3 mt-3">
+
+                    <p class="text-[11px] text-amber-700 mt-2 leading-relaxed">
+                        💡 还没获得邀请码？添加下方客服微信, 备注"<strong>家长订阅</strong>", 客服会立即发送。
+                    </p>
+                    <div class="flex items-start gap-3 mt-2">
                         <img src="/static/wechat_qr.png" alt="微信二维码"
-                             class="w-28 h-28 border border-amber-200 rounded bg-white p-1 flex-shrink-0" />
+                             class="w-24 h-24 border border-amber-200 rounded bg-white p-1 flex-shrink-0" />
                         <div class="text-[11px] text-amber-700 leading-relaxed flex-1">
-                            📞 <strong>邀请码获取方式：</strong>
-                            {# v3.9.24 · 改 list-inside + 去掉 pl-4：旧版 numbers 排在 li 外面，配合 pl-4 把序号挤到左侧 QR 区域，看上去「1.2.3.4.」和文字分两列。list-inside 把序号收回文字前，与 li 文本对齐。 #}
+                            <strong>📞 获取步骤：</strong>
                             <ol class="list-decimal list-inside mt-1 space-y-0.5 marker:font-bold marker:text-amber-800">
                                 <li>微信扫码左侧二维码</li>
                                 <li>添加客服为好友</li>
                                 <li>备注"<strong>家长订阅</strong>"</li>
-                                <li>客服会立即发送邀请码</li>
+                                <li>客服立即发送邀请码</li>
+                                <li>回到此处<strong>填入上方输入框</strong></li>
                             </ol>
                         </div>
                     </div>
                 </div>
-                <button type="submit" class="app-btn app-btn-amber">
-                    📨 验证邀请码并生成家长订阅版
+                <button type="submit" id="genParentBtn" class="app-btn app-btn-amber" disabled>
+                    📨 生成家长订阅版（约 1-2 分钟）
                 </button>
-                <p class="text-[10px] text-gray-500 text-center mt-1">💡 使用服务端环境变量 OPENAI_API_KEY 直接生成（约 1-2 分钟）</p>
+                <p class="text-[10px] text-gray-500 text-center mt-1">💡 使用服务端环境变量 OPENAI_API_KEY 直接生成</p>
             </form>
             {% endif %}
             {% endif %}
@@ -8964,7 +8972,7 @@ PARENT_SUBSCRIBE_HTML = """
             <div>
                 <div class="flex items-center gap-2">
                     <span class="text-xs px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full">
-                        📨 家长订阅版{% if not commerce_hidden %} · ¥30/月{% endif %}
+                        📨 家长订阅版 · 5 维度深度
                     </span>
                     <span class="text-xs px-2 py-0.5 bg-rose-100 text-rose-700 rounded-full">v3.9 · 5 维度深度</span>
                 </div>
@@ -9188,31 +9196,44 @@ PARENT_SUBSCRIBE_HTML = """
     <!-- 触发 AI 决策支持生成表单（仅当已生成基础报告、且还没有家长订阅版时显示） -->
     {% if has_report %}
     <div class="bg-gradient-to-r from-amber-50 to-rose-50 rounded-2xl card-shadow p-6 border-2 border-amber-200">
-        <h2 class="text-lg font-bold text-gray-800">🚀 触发生成 AI 家长决策支持报告</h2>
+        <h2 class="text-lg font-bold text-gray-800">🚀 生成 AI 家长决策支持报告</h2>
         <p class="text-xs text-gray-600 mt-1">基于同账号的报告 {{ report_dir_name }} 让 AI 写一份"家长视角"的决策支持分析（约 1-2 分钟）</p>
         {% if error_msg %}
         <div class="mt-3 bg-rose-100 border border-rose-300 text-rose-800 text-sm p-3 rounded">❌ {{ error_msg }}</div>
         {% endif %}
-        <form method="POST" action="/me/{{ luogu_uid }}/start-parent-subscribe" class="mt-4 space-y-3">
-            {% if not commerce_hidden %}
-            {# v3.9 · 传播期隐藏 API Key / 模型配置（家长无需关心技术细节）#}
+        <form method="POST" action="/me/{{ luogu_uid }}/start-parent-subscribe" class="mt-4 space-y-3" id="parentSubFormMe">
+            {# v3.11.11 · 流程: 先输邀请码 → 提示加微信获得 → 才能生成 (无价格) #}
             <div>
-                <label class="text-xs text-gray-600">OpenAI API Key（如服务端已设环境变量可留空）</label>
-                <input type="password" name="api_key" placeholder="sk-..." class="w-full mt-1 px-3 py-2 border border-gray-300 rounded text-sm focus:border-amber-500 focus:outline-none">
+                <label class="text-xs font-bold text-amber-800 mb-1 block">🔑 家长订阅邀请码</label>
+                <input type="text" name="invite_code" id="inviteCodeInputMe" required
+                       placeholder="请先输入邀请码"
+                       autocomplete="off"
+                       oninput="document.getElementById('genParentBtnMe').disabled = !this.value.trim()"
+                       class="w-full px-3 py-2 border-2 border-amber-300 rounded text-sm font-mono focus:border-amber-500 focus:outline-none" />
             </div>
-            <div class="grid grid-cols-2 gap-3">
-                <div>
-                    <label class="text-xs text-gray-600">模型名（默认 gpt-4o-mini）</label>
-                    <input type="text" name="model_name" placeholder="gpt-4o-mini" class="w-full mt-1 px-3 py-2 border border-gray-300 rounded text-sm">
-                </div>
-                <div>
-                    <label class="text-xs text-gray-600">Base URL（可留空）</label>
-                    <input type="text" name="base_url" placeholder="https://api.openai.com/v1" class="w-full mt-1 px-3 py-2 border border-gray-300 rounded text-sm">
+
+            <div class="bg-white border border-amber-200 rounded-lg p-3">
+                <p class="text-xs text-amber-800 leading-relaxed">
+                    💡 还没获得邀请码？添加下方客服微信, 备注"<strong>家长订阅</strong>", 客服会立即发送。
+                </p>
+                <div class="flex items-start gap-3 mt-2">
+                    <img src="/static/wechat_qr.png" alt="微信二维码"
+                         class="w-28 h-28 border border-amber-200 rounded bg-white p-1 flex-shrink-0" />
+                    <div class="text-[11px] text-amber-700 leading-relaxed flex-1">
+                        <strong>📞 获取步骤：</strong>
+                        <ol class="list-decimal list-inside mt-1 space-y-0.5 marker:font-bold marker:text-amber-800">
+                            <li>微信扫码左侧二维码</li>
+                            <li>添加客服为好友</li>
+                            <li>备注"<strong>家长订阅</strong>"</li>
+                            <li>客服立即发送邀请码</li>
+                            <li>回到此处<strong>填入上方输入框</strong></li>
+                        </ol>
+                    </div>
                 </div>
             </div>
-            {% endif %}
-            <button type="submit" class="w-full bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-600 hover:to-rose-600 text-white font-bold py-3 rounded-md transition">
-                📨 开始 AI 决策支持生成 · 约 1-2 分钟
+
+            <button type="submit" id="genParentBtnMe" class="w-full bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-600 hover:to-rose-600 text-white font-bold py-3 rounded-md transition disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                📨 生成家长订阅版 · 约 1-2 分钟
             </button>
         </form>
     </div>

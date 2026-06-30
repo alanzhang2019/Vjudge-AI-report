@@ -251,8 +251,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.11.5"
-APP_VERSION_BUILD = "20260630_v3p11p5_index_luogu_first"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.11.6"
+APP_VERSION_BUILD = "20260630_v3p11p6_compliance_safety_notice"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -1818,6 +1818,31 @@ INDEX_V3100_HTML = """
         </div>
         <p class="text-xs text-slate-400 mt-4">📌 30 秒-3 分钟拿到报告 · 含家长订阅版 + 海报分享</p>
 
+    </section>
+
+    {# v3.11.5 · 安全合规醒目提醒 (紧跟 hero 后, 消除"是否封号"顾虑) #}
+    <section class="max-w-4xl mx-auto px-4 py-2">
+        <div class="card p-5 border-2 border-emerald-300 bg-gradient-to-r from-emerald-50 via-white to-teal-50 shadow-sm">
+            <div class="flex items-start gap-3">
+                <div class="text-3xl flex-shrink-0">🛡️</div>
+                <div class="flex-1 text-left">
+                    <h3 class="text-base font-bold text-emerald-800 mb-1">
+                        ✅ 完全合规 · 零封号风险
+                        <span class="ml-2 inline-block px-2 py-0.5 text-[10px] font-bold rounded bg-emerald-500 text-white align-middle">合规安全</span>
+                    </h3>
+                    <p class="text-sm text-slate-700 leading-relaxed mb-2">
+                        洛谷练习页解析 = <strong>您自己浏览器</strong>登录洛谷 → 访问自己的「个人练习」页 → <kbd class="px-1.5 py-0.5 bg-white border border-slate-300 rounded text-xs font-mono">Ctrl</kbd>+<kbd class="px-1.5 py-0.5 bg-white border border-slate-300 rounded text-xs font-mono">U</kbd> 复制源码 → 粘贴到本平台。
+                        本质 = <strong>手工导出个人数据</strong>, 跟您用 Excel 整理自己洛谷做题记录完全一样。
+                    </p>
+                    <div class="grid sm:grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-600">
+                        <div>✅ 本平台服务器<strong>不访问</strong>洛谷, 零网络请求</div>
+                        <div>✅ 不收 Cookie / 账号 / 密码</div>
+                        <div>✅ 不爬取他人数据, 只处理您自己的</div>
+                        <div>✅ 洛谷用户协议无相关禁止条款</div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </section>
 
     {# v3.11.5 · 三种报告生成方式平级展示 #}
@@ -6060,6 +6085,21 @@ UPLOAD_SOURCE_HTML = """
                     其他页面 (训练题单/比赛记录) 解析不出来。
                     整页源码通常 50KB - 500KB。
                 </div>
+            </div>
+
+            <!-- v3.11.5 · 醒目安全合规说明 (消除"是否封号"顾虑) -->
+            <div class="px-4 py-3 rounded-lg mb-4 text-sm bg-gradient-to-r from-emerald-50 to-teal-50 border-2 border-emerald-300">
+                <div class="font-bold text-emerald-800 mb-1.5 flex items-center gap-2">
+                    <span class="text-base">🛡️</span>
+                    <span>合规安全 · 零封号风险</span>
+                    <span class="ml-auto px-2 py-0.5 text-[10px] font-bold rounded bg-emerald-500 text-white">合规</span>
+                </div>
+                <ul class="text-xs text-emerald-900 space-y-0.5 list-disc list-inside leading-relaxed">
+                    <li>本平台服务器<strong>不访问洛谷</strong>, 全部数据来自您自己浏览器手工复制</li>
+                    <li>不收 Cookie / 账号 / 密码, 源码仅用于解析生成报告, 不会外传</li>
+                    <li>性质 = 手工导出个人做题记录, 跟用 Excel 整理自己洛谷题单完全一样, <strong>不违反洛谷用户协议</strong></li>
+                    <li>洛谷用户协议禁止的是"爬虫/机器人/批量抓取", 我们全部手动, 不触发</li>
+                </ul>
             </div>
 
             <form method="POST" action="/upload-source" id="sourceForm" class="space-y-4">

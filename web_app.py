@@ -251,8 +251,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.11.7"
-APP_VERSION_BUILD = "20260630_v3p11p7_parent_subscribe_uid_fix"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.11.8"
+APP_VERSION_BUILD = "20260630_v3p11p8_tag_cache_fallback"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -1394,7 +1394,13 @@ def _source_cache_file(uid: int | str, pid: str) -> Path:
 # 作业记录是按用户隔离 → _ROOT/.source_cache/<uid>/_practice.json
 # 这两个数据每用户每小时变动很小，但当前实现每次跑报告都会重拉，
 # 加缓存后 "返回重试" 可以秒级跳过洛谷 API，只花 AI 生成时间。
+# v3.11.8 · 历史遗留兼容: 旧版缓存落在 /tmp/_tag_maps.json, 新版在
+# _ROOT/.source_cache/_tag_maps.json。两份都支持, 优先新版
 _TAG_MAPS_CACHE_FILE = _ROOT / ".source_cache" / "_tag_maps.json"
+_TAG_MAPS_CACHE_FALLBACKS = [
+    Path("/tmp/_tag_maps.json"),                  # v3.8 之前 ZIP 模式用的旧路径
+    _ROOT / "_tag_maps.json",                      # 偶尔有同学手动扔到根目录
+]
 _PRACTICE_CACHE_TTL_SECONDS = 6 * 3600  # 作业记录 6h 过期（标签基本不变，可视为永久）
 
 
@@ -1403,15 +1409,38 @@ def _load_cached_tag_maps() -> tuple[dict | None, dict | None, str]:
 
     v3.8 修复：JSON 加载后 dict 的 key 都是 str，但 _summarize 等下游函数用 int 查询，
     会导致 algorithm_tag_counter 永远为 0。这里加载时把 key 强制转回 int。
+
+    v3.11.8 · 多路径 fallback: 旧缓存可能落在 /tmp/ 或 _ROOT/, 都尝试加载
     """
-    if not _TAG_MAPS_CACHE_FILE.exists():
+    # v3.11.8 · 主路径优先, 然后依次尝试 fallback
+    candidate_paths = [_TAG_MAPS_CACHE_FILE, *_TAG_MAPS_CACHE_FALLBACKS]
+    payload = None
+    used_path: Path | None = None
+    for p in candidate_paths:
+        if not p.exists():
+            continue
+        try:
+            _pl = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(_pl, dict):
+            payload = _pl
+            used_path = p
+            break
+    if payload is None or not isinstance(payload, dict):
         return None, None, ""
-    try:
-        payload = json.loads(_TAG_MAPS_CACHE_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        return None, None, ""
-    if not isinstance(payload, dict):
-        return None, None, ""
+    if used_path is not None and used_path != _TAG_MAPS_CACHE_FILE:
+        # v3.11.8 · fallback 命中 → 主动拷贝到主路径, 下次秒过
+        try:
+            _TAG_MAPS_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _TAG_MAPS_CACHE_FILE.write_text(
+                used_path.read_text(encoding="utf-8"), encoding="utf-8"
+            )
+            app.logger.info(
+                f"[v3.11.8/tag-cache] 从 {used_path} 同步到 {_TAG_MAPS_CACHE_FILE}"
+            )
+        except Exception as _e:  # noqa: BLE001
+            app.logger.debug(f"[v3.11.8/tag-cache] 同步失败: {_e}")
     raw_tag_by_id = payload.get("tag_by_id")
     raw_type_by_id = payload.get("type_by_id")
     cached_at = str(payload.get("_cached_at", "") or "")

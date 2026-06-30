@@ -251,8 +251,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.11.15"
-APP_VERSION_BUILD = "20260630_v3p11p15_simpler_homepage"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.11.16"
+APP_VERSION_BUILD = "20260630_v3p11p16_poster_share_id_works_with_short_id"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -6344,10 +6344,11 @@ STATUS_HTML = """
                 </div>
                 <div class="flex gap-2">
                     {# v3.9.67 · 海报按报告类型分文件, GESP 报告渲染琥珀色 GESP 海报, NOI/CSP 渲染紫色原版
-                       v3.11.12 · 用 share_id 替代 luogu_uid, 避免空值导致 404 #}
+                       v3.11.16 · share_id 是 task.luogu_uid 字段(可能 short_id 字母数字), 兜底 me_url #}
+                    {% set _poster_id = share_id or (me_url.split('/')[-1] if me_url else '') or luogu_uid %}
                     <a id="posterDownloadBtn"
-                       href="/me/{{ share_id }}/share-card.png?exam_type={{ 'gesp' if task_type == 'report_gesp' else 'noi_csp' }}"
-                       download="学习报告海报_{{ share_id or 'user' }}.png"
+                       href="/me/{{ _poster_id }}/share-card.png?exam_type={{ 'gesp' if task_type == 'report_gesp' else 'noi_csp' }}"
+                       download="学习报告海报_{{ _poster_id or 'user' }}.png"
                        class="app-btn app-btn-primary flex-1">⬇ 再次下载</a>
                     <button type="button" onclick="closeSharePoster()" class="app-btn app-btn-secondary flex-1">关闭</button>
                 </div>
@@ -6370,7 +6371,7 @@ STATUS_HTML = """
                 // 1) 预加载海报 PNG（matplotlib 现场渲染，可能 5-15s）
                 // v3.9.67 · GESP 报告传 exam_type=gesp, NOI/CSP 报告传 exam_type=noi_csp
                 var _exam_type = '{{ "gesp" if task_type == "report_gesp" else "noi_csp" }}';
-                var url = '/me/{{ share_id }}/share-card.png?exam_type=' + encodeURIComponent(_exam_type) + '&t=' + Date.now();
+                var url = '/me/{{ _poster_id }}/share-card.png?exam_type=' + encodeURIComponent(_exam_type) + '&t=' + Date.now();
                 var pre=new Image();
                 pre.onload=function(){
                     // 2) 加载完成 → 显示 + 自动下载
@@ -6382,12 +6383,25 @@ STATUS_HTML = """
                 };
                 pre.onerror=function(){
                     // 3) 失败：loading 隐、error 显（提示重试）
+                    // v3.11.16 · 用 fetch 拿真实 HTTP status（<img onerror 拿不到）
+                    var _retry_url = '/me/{{ _poster_id }}/share-card.png?exam_type=' + encodeURIComponent(_exam_type);
+                    fetch(_retry_url, {method:'GET', cache:'no-store'}).then(function(r){
+                        var _code = r.status;
+                        var _hint = (_code===404) ? '（学员档案或海报缓存未找到，请重新生成报告）'
+                                  : (_code===500) ? '（服务器渲染失败，请查看服务端日志）'
+                                  : '（HTTP ' + _code + '）';
+                        if(errorBox){
+                            errorBox.textContent='海报生成失败 ' + _hint + ' · 请稍后重试或联系管理员';
+                            errorBox.style.display='';
+                        }
+                    }).catch(function(){
+                        if(errorBox){
+                            errorBox.textContent='海报生成失败（网络错误）· 请稍后重试或联系管理员';
+                            errorBox.style.display='';
+                        }
+                    });
                     if(loading) loading.style.display='none';
                     img.style.display='none';
-                    if(errorBox){
-                        errorBox.textContent='海报生成失败（HTTP '+(pre.failedStatus||'?')+'）· 请稍后重试或联系管理员';
-                        errorBox.style.display='';
-                    }
                 };
                 pre.src=url;
 
@@ -6396,7 +6410,7 @@ STATUS_HTML = """
                         // 优先复用"再次下载"按钮（带 download 属性）
                         if(btn){
                             btn.href=finalUrl;
-                            btn.setAttribute('download','学习报告海报_{{ share_id or 'user' }}.png');
+                            btn.setAttribute('download','学习报告海报_{{ _poster_id or 'user' }}.png');
                             btn.click();
                             return;
                         }
@@ -6405,7 +6419,7 @@ STATUS_HTML = """
                     try{
                         var a=document.createElement('a');
                         a.href=finalUrl;
-                        a.download='学习报告海报_{{ share_id or 'user' }}.png';
+                        a.download='学习报告海报_{{ _poster_id or 'user' }}.png';
                         a.style.display='none';
                         document.body.appendChild(a);a.click();document.body.removeChild(a);
                     }catch(e){console.error('[poster download]',e);}
@@ -6477,8 +6491,8 @@ def status_page(task_id):
     # v3.5.2 · 统一入口生成的报告支持跳回 /me/<uid>（3 版本报告）
     luogu_uid = str(request.args.get("luogu_uid", "") or task.get("luogu_uid", "") or "")
     me_url = f"/me/{luogu_uid}" if luogu_uid and luogu_uid.isdigit() else ""
-    # v3.11.12 · 海报 URL 用的 id：与 me_url 一致 (Flask 路由用 <short_id>, status_page 模板也别传 luogu_uid 否则空值会 404)
-    share_id = luogu_uid if luogu_uid and luogu_uid.isdigit() else ""
+    # v3.11.16 · 海报 URL 用的 id: 与 me_url.split('/')[-1] 一致 (luogu_uid 本身可能是 short_id 字母数字)
+    share_id = luogu_uid if luogu_uid else ""
     me_url_full = me_url  # 别名, 模板里用 me_url.split('/')[-1] 取 id
 
     # v3.9.6 · 智能门控：检查该 UID 是否已生成过 parent_subscribe.html

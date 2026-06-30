@@ -251,8 +251,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.11.9"
-APP_VERSION_BUILD = "20260630_v3p11p9_parent_subscribe_banner"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.11.10"
+APP_VERSION_BUILD = "20260630_v3p11p10_legal_pages"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -17782,6 +17782,275 @@ def student_me_delete_csp(short_id: str, award_id: int):
 
 # ---- v3.5.2 模板 ----
 
+# v3.11.10 · 协议页模板（《用户协议》 + 《PIPL 知情同意书》）
+#  之前注册页是 <a href="#">死链, 改用独立路由 + 真实文案
+_LEGAL_HEAD_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ title }} · 洛谷 AI 报告</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;background:#f8fafc;color:#0f172a;line-height:1.85}
+.legal-wrap{max-width:760px;margin:0 auto;padding:32px 24px 80px}
+.legal-card{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:32px 36px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.legal-card h1{font-size:24px;font-weight:800;color:#0f172a;margin:0 0 4px;letter-spacing:.5px}
+.legal-card .sub{font-size:12px;color:#64748b;margin-bottom:24px;border-bottom:1px dashed #cbd5e1;padding-bottom:14px}
+.legal-card h2{font-size:16px;font-weight:700;color:#0d9488;margin:24px 0 8px;padding-left:10px;border-left:4px solid #14b8a6;line-height:1.5}
+.legal-card p{font-size:14px;color:#334155;margin:6px 0;text-align:justify}
+.legal-card li{font-size:14px;color:#334155;margin:4px 0;line-height:1.85}
+.legal-card .tag{display:inline-block;background:#fef3c7;color:#92400e;font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px;margin-left:6px}
+.legal-card .warn{background:#fef2f2;border-left:4px solid #ef4444;padding:10px 14px;border-radius:6px;margin:14px 0;font-size:13px;color:#991b1b}
+.legal-card .info{background:#eff6ff;border-left:4px solid #3b82f6;padding:10px 14px;border-radius:6px;margin:14px 0;font-size:13px;color:#1e3a8a}
+.legal-card .toc{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 18px;margin:18px 0;font-size:13px}
+.legal-card .toc a{color:#0d9488;text-decoration:none;display:block;padding:3px 0}
+.legal-card .toc a:hover{text-decoration:underline}
+.btn-row{margin-top:28px;display:flex;gap:12px;flex-wrap:wrap}
+.btn{flex:1;min-width:160px;text-align:center;padding:12px 18px;border-radius:10px;font-weight:700;font-size:14px;transition:.2s;text-decoration:none;cursor:pointer;border:none}
+.btn-back{background:#fff;border:1.5px solid #cbd5e1;color:#475569}
+.btn-back:hover{background:#f1f5f9}
+.btn-ok{background:linear-gradient(135deg,#10b981,#14b8a6);color:#fff;box-shadow:0 2px 8px rgba(16,185,129,.3)}
+.btn-ok:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(16,185,129,.4)}
+.toc-pin{position:sticky;top:12px}
+@media(max-width:640px){.legal-card{padding:22px 18px}.legal-card h1{font-size:20px}.btn-row{flex-direction:column}}
+</style>
+</head>
+<body>
+<div class="legal-wrap">
+  <div class="legal-card">
+"""
+
+_LEGAL_FOOT_HTML = """
+  </div>
+  <p class="text-center text-xs text-gray-400 mt-6">© 2024-2026 洛谷 AI 报告 · Powered by OpenAI Compatible API · 保留所有权利</p>
+</div>
+</body>
+</html>
+"""
+
+LEGAL_TERMS_HTML = _LEGAL_HEAD_HTML + """
+<h1>📜 用户协议</h1>
+<div class="sub">最后更新：2026-06-30 · 生效日期：2026-07-01 · 版本号 v3.11.10</div>
+
+<div class="toc">
+  <strong>📑 目录</strong>
+  <a href="#c1">1. 协议双方与接受</a>
+  <a href="#c2">2. 服务内容</a>
+  <a href="#c3">3. 账号注册与使用</a>
+  <a href="#c4">4. 用户行为规范</a>
+  <a href="#c5">5. 知识产权</a>
+  <a href="#c6">6. 隐私与个人信息</a>
+  <a href="#c7">7. 付费服务与退款</a>
+  <a href="#c8">8. 服务变更与终止</a>
+  <a href="#c9">9. 免责声明</a>
+  <a href="#c10">10. 法律适用与争议解决</a>
+  <a href="#c11">11. 联系方式</a>
+</div>
+
+<h2 id="c1">1. 协议双方与接受</h2>
+<p>1.1 本《用户协议》（以下简称"本协议"）是您（以下简称"用户"）与"洛谷 AI 报告"运营方（以下简称"我们"）之间关于使用本平台各项服务所订立的具有法律约束力的协议。</p>
+<p>1.2 <strong>一旦您点击"完成注册"按钮或以任何方式实际使用本平台服务，即视为您已充分阅读、理解并同意接受本协议全部条款。</strong>如您不同意本协议任何条款，请立即停止使用本平台服务。</p>
+<p>1.3 我们有权根据法律法规变更及服务运营需要对本协议进行修订，修订后的协议将在本页面公布，公布即生效。继续使用服务视为接受修订。</p>
+
+<h2 id="c2">2. 服务内容</h2>
+<p>2.1 本平台提供以下服务（以下统称"本服务"）：</p>
+<li>① 解析用户手动提供的洛谷个人做题记录（通过导出 ZIP 文件、粘贴 HTML 源码、输入 VJudge 账号三种方式）</li>
+<li>② 调用 OpenAI 兼容大模型 API 生成个性化 AI 学习分析报告（Markdown / HTML / PDF 格式）</li>
+<li>③ 知识点覆盖度统计、错题集整理、能力雷达图等学习辅助功能</li>
+<li>④ "家长订阅版"增值服务（含家长视角 AI 决策支持报告）</li>
+<p>2.2 本服务为<strong>非学历、非竞赛官方</strong>的学习辅助工具，所有 AI 生成内容仅供参考，不构成任何升学、考试、培训建议或承诺。</p>
+<p>2.3 解析过程<strong>完全在用户本地浏览器或服务器端进行</strong>，不会主动访问、爬取、存储洛谷或 VJudge 平台的任何接口数据，详见 <a href="/legal/pipl" class="text-teal-700 underline">《未成年人个人信息保护知情同意书》</a>。</p>
+
+<h2 id="c3">3. 账号注册与使用</h2>
+<p>3.1 您应当使用真实有效的邮箱注册账号，并妥善保管账号密码。因密码泄露导致的损失由您自行承担。</p>
+<p>3.2 一个邮箱仅能注册一个账号，账号不得转让、出借、赠与他人。</p>
+<p>3.3 14 周岁以下的未成年人注册或使用本服务，必须由<strong>监护人代为操作并陪同</strong>，且监护人需阅读并同意本协议及 <a href="/legal/pipl" class="text-teal-700 underline">《未成年人个人信息保护知情同意书》</a>全部条款。</p>
+<p>3.4 我们有权在合理怀疑账号存在被盗用、冒用、违规使用等情况时，暂停或终止该账号的服务。</p>
+
+<h2 id="c4">4. 用户行为规范</h2>
+<p>您承诺不得利用本服务从事以下行为：</p>
+<li>4.1 上传、解析、生成任何违反中华人民共和国法律法规的内容</li>
+<li>4.2 冒用他人身份、提供虚假信息</li>
+<li>4.3 试图破解、反编译、攻击本平台服务器或绕过任何安全机制</li>
+<li>4.4 利用本服务从事商业转售、批量生成、二次售卖报告等活动</li>
+<li>4.5 干扰本平台正常运营、发布任何垃圾信息或恶意内容</li>
+<p>违反上述规范的，我们有权立即停止服务、封禁账号，并保留追究法律责任的权利。</p>
+
+<h2 id="c5">5. 知识产权</h2>
+<p>5.1 本平台所有代码、UI 设计、文案、图表模板等内容的著作权归我们所有，受《中华人民共和国著作权法》保护。</p>
+<p>5.2 AI 生成的报告内容<strong>归您个人所有</strong>，可用于个人学习、家长沟通、私人存档。您不得用于商业转售。</p>
+<p>5.3 您保留对个人做题记录的所有权。我们仅在为您提供服务的必要范围内处理这些数据。</p>
+
+<h2 id="c6">6. 隐私与个人信息</h2>
+<p>详见独立文档 <a href="/legal/pipl" class="text-teal-700 underline">《未成年人个人信息保护知情同意书》</a>，该文档构成本协议不可分割的组成部分。</p>
+
+<h2 id="c7">7. 付费服务与退款</h2>
+<p>7.1 "家长订阅版"为付费服务，定价以页面公示为准（当前 ¥30 / 30 天）。</p>
+<p>7.2 兑换码一经使用即视为服务已开通，<strong>原则上不予退款</strong>。如您在 24 小时内发现服务存在重大瑕疵且未生成有效报告，可联系客服协商处理。</p>
+<p>7.3 价格调整时，已生效订阅在到期前不受影响。</p>
+
+<h2 id="c8">8. 服务变更与终止</h2>
+<p>8.1 我们保留随时修改、暂停或终止本服务（全部或部分）的权利，重大变更将提前 7 天通过站内通知。</p>
+<p>8.2 如您严重违反本协议，我们有权立即终止服务而无需事先通知。</p>
+<p>8.3 服务终止后，您的账号数据将按 <a href="/legal/pipl" class="text-teal-700 underline">《未成年人个人信息保护知情同意书》</a> 约定的方式处理。</p>
+
+<h2 id="c9">9. 免责声明</h2>
+<p>9.1 本服务<strong>按"现状"提供</strong>。我们不对服务的及时性、安全性、可靠性、准确性做出任何明示或暗示的保证。</p>
+<p>9.2 AI 生成的报告内容基于大语言模型推断，<strong>不构成任何专业意见</strong>（包括但不限于教育、心理学、医疗、法律）。基于报告所做的任何决策，后果由用户自行承担。</p>
+<p>9.3 因不可抗力（包括但不限于自然灾害、网络中断、政策法规变化、AI 服务商故障）导致的服务中断，我们不承担责任。</p>
+
+<h2 id="c10">10. 法律适用与争议解决</h2>
+<p>10.1 本协议适用中华人民共和国法律。</p>
+<p>10.2 因本协议产生的任何争议，双方应友好协商解决；协商不成的，提交<strong>运营方所在地有管辖权的人民法院</strong>诉讼解决。</p>
+
+<h2 id="c11">11. 联系方式</h2>
+<div class="info">
+📧 邮箱：service@luogu-ai-report.example<br>
+🕘 处理时间：7 个工作日内<br>
+📋 反馈前请提供：注册邮箱 + 问题截图 + 任务 ID（如有）
+</div>
+
+<div class="btn-row">
+  <a href="javascript:history.back()" class="btn btn-back">← 返回上一页</a>
+  <a href="/register" class="btn btn-ok">✓ 我已阅读并同意，返回注册</a>
+</div>
+""" + _LEGAL_FOOT_HTML
+
+LEGAL_PIPL_HTML = _LEGAL_HEAD_HTML + """
+<h1>🔒 未成年人个人信息保护知情同意书</h1>
+<div class="sub">依据《中华人民共和国个人信息保护法》(PIPL) §5.2 · 最后更新：2026-06-30 · 生效：2026-07-01</div>
+
+<div class="warn">
+  <strong>⚠️ 重要提示</strong><br>
+  本平台涉及<strong>未成年人</strong>（14 周岁以下）个人信息处理。根据 PIPL §5.2，处理不满 14 周岁未成年人个人信息应当取得<strong>监护人的明示同意</strong>。<br>
+  请监护人仔细阅读本同意书全部条款，<strong>由监护人本人完成"同意"操作</strong>。
+</div>
+
+<div class="toc">
+  <strong>📑 目录</strong>
+  <a href="#p1">1. 收集的个人信息范围</a>
+  <a href="#p2">2. 收集目的与方式</a>
+  <a href="#p3">3. 存储位置与期限</a>
+  <a href="#p4">4. 信息共享与第三方</a>
+  <a href="#p5">5. 监护人权利</a>
+  <a href="#p6">6. 信息安全保障</a>
+  <a href="#p7">7. 撤回同意</a>
+  <a href="#p8">8. 投诉与救济</a>
+  <a href="#p9">9. 特别说明</a>
+</div>
+
+<h2 id="p1">1. 我们收集哪些未成年人的个人信息</h2>
+<p>为提供 AI 学习分析服务，我们需要收集以下<strong>最小必要</strong>的个人信息：</p>
+<li>① <strong>账号信息</strong>：注册邮箱、密码（BCrypt 哈希存储）</li>
+<li>② <strong>洛谷账号标识</strong>：洛谷 UID（数字 ID）、洛谷用户名</li>
+<li>③ <strong>做题记录</strong>：通过题目列表（passed / failed）、提交记录、代码样本（由您主动提供）</li>
+<li>④ <strong>自填档案</strong>：所在城市、年级、性别、出生日期（均为可选，但部分功能依赖）</li>
+<li>⑤ <strong>家长信息（可选）</strong>：当您使用"家长订阅版"时，<strong>不收集监护人真实姓名、身份证号、联系方式</strong>，仅通过第三方支付凭证（激活码）确认订单关系</li>
+<div class="info">
+  <strong>明确不收集的信息</strong>：身份证号、人脸信息、指纹信息、定位信息、通讯录、相册、麦克风录音、设备 IMEI。
+</div>
+
+<h2 id="p2">2. 收集目的与方式</h2>
+<p>2.1 上述信息<strong>仅用于</strong>：</p>
+<li>① 生成您孩子的 AI 学习分析报告</li>
+<li>② 错题本、知识点覆盖度统计、能力雷达图等学习辅助功能</li>
+<li>③ 家长订阅版报告的 AI 二次生成</li>
+<p>2.2 <strong>收集方式</strong>：</p>
+<li>① 用户在注册表单中<strong>主动填写</strong>（邮箱、密码、城市、年级、性别、出生日期）</li>
+<li>② 用户在生成报告页面<strong>主动上传/粘贴</strong>（洛谷 ZIP / HTML 源码 / VJudge 账号）</li>
+<li>③ 用户通过激活码<strong>主动激活</strong>家长订阅版</li>
+<p>2.3 我们<strong>不会</strong>主动爬取、追踪、监控您或您孩子的任何网络行为。</p>
+
+<h2 id="p3">3. 个人信息存储位置与期限</h2>
+<p>3.1 <strong>存储位置</strong>：所有数据存储于中华人民共和国境内（腾讯云轻量服务器，43.163.26.115 节点，所在城市：广州）。</p>
+<p>3.2 <strong>存储期限</strong>：</p>
+<li>① 账号信息：自最后登录日起 <strong>180 天</strong>不活动则自动删除</li>
+<li>② 报告文件：自生成日起 <strong>90 天</strong>，到期后自动删除</li>
+<li>③ 做题记录原始数据：自最后访问日起 <strong>30 天</strong>，到期后自动删除</li>
+<p>3.3 法定情形下（如配合监管调查）的存储不受 3.2 限制，但<strong>仅限必要范围内</strong>。</p>
+
+<h2 id="p4">4. 信息共享与第三方</h2>
+<p>4.1 我们<strong>不会</strong>出售、出租、交换您的任何个人信息。</p>
+<p>4.2 仅为完成本服务，我们会在以下范围内向第三方共享<strong>必要数据</strong>：</p>
+<li>① <strong>OpenAI 兼容 AI 服务商</strong>（如 OpenAI / DeepSeek / Moonshot / SiliconFlow 等，您自行配置或使用系统默认）：<br>
+&nbsp;&nbsp;&nbsp;&nbsp;传输做题记录、代码样本，用于生成 AI 报告；<br>
+&nbsp;&nbsp;&nbsp;&nbsp;该服务商按其<strong>隐私政策</strong>处理数据，请审慎选择</li>
+<li>② <strong>支付服务商</strong>：仅获取订单号和激活码兑换记录，不获取您的银行卡号、密码等敏感支付信息</li>
+<p>4.3 法律法规要求或配合政府机关依法履职时，我们可能依法披露相关信息。</p>
+
+<h2 id="p5">5. 监护人权利（14 周岁以下未成年人特别保护）</h2>
+<p>作为监护人，您依法享有以下权利：</p>
+<li>5.1 <strong>知情权</strong>：有权随时查阅本同意书，<strong>无需账号</strong>即可阅读</li>
+<li>5.2 <strong>决定权</strong>：有权决定是否同意本同意书，<strong>不同意将无法使用本服务</strong>，但不影响孩子的正常学习</li>
+<li>5.3 <strong>查询权</strong>：登录后可查看我们保存的您孩子的全部个人信息</li>
+<li>5.4 <strong>更正权</strong>：发现信息有误可要求我们更正</li>
+<li>5.5 <strong>删除权</strong>：可随时要求我们删除您孩子的全部个人信息（7 个工作日内完成）</li>
+<li>5.6 <strong>撤回权</strong>：可随时撤回本同意书，撤回后我们将停止处理并删除相关信息</li>
+<li>5.7 <strong>解释权</strong>：对处理规则有任何疑问可要求我们解释</li>
+
+<h2 id="p6">6. 信息安全保障</h2>
+<p>6.1 我们已采取<strong>符合业界标准</strong>的技术与管理措施：</p>
+<li>① 密码 BCrypt 单向哈希存储，无法反推</li>
+<li>② 数据库连接加密、防 SQL 注入</li>
+<li>③ HTTPS 传输加密</li>
+<li>④ 服务器仅开放必要端口，关闭公网直连数据库</li>
+<li>⑤ 7 天滚动备份（仅服务器本地，不上传第三方云）</li>
+<p>6.2 但请理解：<strong>没有任何系统是 100% 安全的</strong>。如发生数据安全事件，我们将依法在 72 小时内通知您。</p>
+
+<h2 id="p7">7. 撤回同意</h2>
+<p>7.1 您可在任何时候撤回本同意书，方式：</p>
+<li>① 邮件联系 service@luogu-ai-report.example，主题"撤回 PIPL 同意"</li>
+<li>② 提供：注册邮箱 + 洛谷 UID + 孩子姓名（您填的）</li>
+<p>7.2 收到撤回请求后，我们将在 <strong>7 个工作日内</strong>：</p>
+<li>① 停止对您孩子个人信息的处理活动</li>
+<li>② 删除数据库中的账号、报告、原始数据</li>
+<li>③ 邮件回复处理结果</li>
+
+<h2 id="p8">8. 投诉与救济</h2>
+<p>8.1 如您认为我们的个人信息处理活动违反法律法规或本同意书，可通过以下渠道投诉：</p>
+<div class="info">
+📧 投诉邮箱：privacy@luogu-ai-report.example<br>
+📞 处理时效：15 个工作日内书面答复
+</div>
+<p>8.2 您也可向<strong>网信办、市场监管等部门</strong>投诉，或向人民法院提起诉讼。</p>
+
+<h2 id="p9">9. 特别说明</h2>
+<div class="warn">
+  <strong>关于 14 岁以下未成年人：</strong><br>
+  ① 注册时勾选"已阅读并同意本同意书"，<strong>必须由监护人代为操作</strong><br>
+  ② 系统会<strong>强制隐藏孩子的真实姓名</strong>（如填写则自动转 NULL）<br>
+  ③ 不收集监护人身份信息，<strong>无法证明亲子关系时不存储任何 PII</strong><br>
+  ④ 监护人撤回同意后，<strong>报告历史不可恢复</strong>
+</div>
+
+<p style="margin-top:20px;font-size:12px;color:#64748b">
+  本同意书依据《中华人民共和国个人信息保护法》(2021-08-20 通过，2021-11-01 施行) 制定。<br>
+  重点参考：§5.2（不满 14 周岁未成年人个人信息处理）、§13（合法基础）、§17（告知）、§23（敏感信息）、§24（自动化决策）、§44-50（个人权利）、§51-59（个人信息处理者的义务）。
+</p>
+
+<div class="btn-row">
+  <a href="javascript:history.back()" class="btn btn-back">← 返回上一页</a>
+  <a href="/register" class="btn btn-ok">✓ 监护人已阅读并同意，返回注册</a>
+</div>
+""" + _LEGAL_FOOT_HTML
+
+
+@app.route("/legal/terms")
+def legal_terms():
+    """v3.11.10 · 《用户协议》独立页面"""
+    from flask import render_template_string
+    return render_template_string(LEGAL_TERMS_HTML, title="用户协议")
+
+
+@app.route("/legal/pipl")
+def legal_pipl():
+    """v3.11.10 · 《未成年人个人信息保护知情同意书》独立页面"""
+    from flask import render_template_string
+    return render_template_string(LEGAL_PIPL_HTML, title="PIPL 知情同意书")
+
+
 REGISTER_HTML = """
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -17893,8 +18162,8 @@ REGISTER_HTML = """
                        {% if form.agree %}checked{% endif %}
                        class="mt-1">
                 <label for="agree" class="text-xs text-gray-600">
-                    已阅读并同意 <a href="#" class="app-link">《用户协议》</a>
-                    和 <a href="#" class="app-link">《未成年人个人信息保护知情同意书》</a>
+                    已阅读并同意 <a href="/legal/terms" target="_blank" class="app-link">《用户协议》</a>
+                    和 <a href="/legal/pipl" target="_blank" class="app-link">《未成年人个人信息保护知情同意书》</a>
                     （PIPL §5.2 · 14 岁以下需监护人陪同）
                 </label>
             </div>

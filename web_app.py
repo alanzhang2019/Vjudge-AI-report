@@ -251,8 +251,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.11.13"
-APP_VERSION_BUILD = "20260630_v3p11p13_register_next_or_home"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.11.14"
+APP_VERSION_BUILD = "20260630_v3p11p14_register_simplify_no_name_no_gender"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -12989,9 +12989,10 @@ def register_student():
     # v3.11.12 · 学员未登录访问受保护页时, 显示顶部提示横幅
     need_login_msg = ""
     if request.method == "GET" and str(request.args.get("need_login", "") or "") == "1":
+        # v3.11.14 · 去掉"免费"字样
         need_login_msg = (
             "🔒 生成报告需要先注册账号 (30 秒, 邮箱即可, 无需手机验证) — "
-            "免费注册后可永久使用本站 1/2/3 三个版本。"
+            "注册后可永久使用本站 1/2/3 三个版本。"
         )
     if request.method == "GET":
         return render_template_string(
@@ -13038,12 +13039,12 @@ def register_student():
         # 调试日志:打服务端实际收到的 city 值
         app.logger.info(f"[register] city mismatch: got {form['city']!r} (len={len(form['city'])}), _CITIES_FLAT sample={list(_CITIES_FLAT)[:3]}")
         return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error="请选择城市", form=form)
-    if not form["real_name"]:
-        return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error="姓名必填", form=form)
     if not form["grade"]:
         return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error="年级必填", form=form)
-    if form["gender"] not in ("M", "F"):
-        return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error="请选择性别", form=form)
+    # v3.11.14 · 姓名 + 性别改为可选 (用户嫌烦), 姓名空 → "学员" 占位, 性别空 → ""
+    form["real_name"] = (form.get("real_name") or "").strip() or "学员"
+    if form["gender"] not in ("M", "F", ""):
+        form["gender"] = ""
 
     # v3.10.0 · 邮箱格式校验
     if not re.match(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$", form["email"]):
@@ -18145,7 +18146,7 @@ REGISTER_HTML = """
         <div class="text-center mb-4">
             <div class="app-pill app-pill-done mb-2">v3.10.0</div>
             <h1 class="app-title">学员注册</h1>
-            <p class="app-subtitle">邮箱注册 · 6 字段</p>
+            <p class="app-subtitle">邮箱注册 · 4 字段</p>
         </div>
 
         {% if error %}
@@ -18172,14 +18173,6 @@ REGISTER_HTML = """
             </div>
 
             <div>
-                <label class="app-label"><span class="text-red-500">*</span> 姓名</label>
-                <input type="text" name="real_name" required maxlength="20"
-                       value="{{ form.real_name or '' }}"
-                       placeholder="请输入姓名"
-                       class="app-input">
-            </div>
-
-            <div>
                 <label class="app-label"><span class="text-red-500">*</span> 年级</label>
                 <select name="grade" required class="app-input">
                     <option value="">请选择年级</option>
@@ -18189,19 +18182,9 @@ REGISTER_HTML = """
                 </select>
             </div>
 
-            <div>
-                <label class="app-label"><span class="text-red-500">*</span> 性别</label>
-                <div class="grid grid-cols-2 gap-2">
-                    <label class="flex items-center justify-center gap-2 border rounded-lg px-3 py-2 cursor-pointer hover:bg-emerald-50 {% if form.gender == 'M' %}bg-emerald-50 border-emerald-500{% endif %}">
-                        <input type="radio" name="gender" value="M" {% if form.gender == 'M' %}checked{% endif %} class="text-emerald-600">
-                        <span>♂ 男生</span>
-                    </label>
-                    <label class="flex items-center justify-center gap-2 border rounded-lg px-3 py-2 cursor-pointer hover:bg-pink-50 {% if form.gender == 'F' %}bg-pink-50 border-pink-500{% endif %}">
-                        <input type="radio" name="gender" value="F" {% if form.gender == 'F' %}checked{% endif %} class="text-pink-600">
-                        <span>♀ 女生</span>
-                    </label>
-                </div>
-            </div>
+            {# v3.11.14 · 姓名 / 性别改为可选, 不在注册页收集 (后续可在学员中心补充) #}
+            <input type="hidden" name="real_name" value="" />
+            <input type="hidden" name="gender" value="" />
 
             <div class="border-t border-gray-200 pt-3 mt-3">
                 <p class="text-xs text-gray-500 mb-2">🔐 账号信息（用于登录）</p>

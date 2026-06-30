@@ -1,0 +1,23 @@
+v3.11.9: 醒目"升级家长订阅版" banner · 让功能不再被埋没
+
+用户反馈: 看到 luogu-AI-report 仓库的"加微信 + 邀请码 +
+家长订阅版"功能, 希望当前项目也能有。
+
+实际状况: 功能**已经存在** (v3.9.6 起就实现了, 跟仓库
+同源), 包括:
+  - /static/wechat_qr.png 微信二维码 (服务器 6/13 上传 97KB)
+  - 邀请码输入框 + 4 步获取说明
+  - /me/<uid>/start-parent-subscribe POST 路由
+  - /me/<uid>/parent-subscribe 完整引导页
+  - /redeem 兑换页
+  - activation_codes 表 + redeem_code()
+  - parent_subscribe.html 报告生成
+
+唯一问题: status_page 的"家长订阅版"块被 {% if me_url %}
+包住, v3.11.7 修复前 me_url 空 → 整块跳过 → 用户没看到
+入口. v3.11.7 修复后必须重新生成一次报告才能看到.
+
+修复: 在 status_page 顶部加一个始终显示的醒目 banner
+(amber → orange → rose 渐变), 不管 me_url 是否解析成功
+都能看到, 直接跳 /me/<uid>/parent-subscribe (引导页有
+完整的微信二维码 + 邀请码 + 兑换码入口).

@@ -251,8 +251,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.11.8"
-APP_VERSION_BUILD = "20260630_v3p11p8_tag_cache_fallback"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.11.9"
+APP_VERSION_BUILD = "20260630_v3p11p9_parent_subscribe_banner"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -6429,6 +6429,16 @@ STATUS_HTML = """
                 <a href="{{ html }}" target="_blank" class="app-btn app-btn-primary">🔍 查看 HTML 报告</a>
                 <button type="button" onclick="openSharePoster()" class="app-btn app-btn-amber">📤 生成海报分享</button>
             </div>
+
+            {# v3.11.9 · 醒目 banner：始终显示"升级家长订阅版"入口 (不管 me_url 是否解析成功)
+               解决老用户看不到家长版块被 {% if me_url %} 跳过时, 不知道还有这个功能的问题 #}
+            <a href="/me/{{ luogu_uid }}/parent-subscribe"
+               class="block bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 text-white text-center rounded-lg py-3 px-4 font-bold shadow-md hover:shadow-lg transition">
+                📨 升级家长订阅版 · 加微信送 ¥30 邀请码
+            </a>
+            <p class="text-[10px] text-gray-500 text-center -mt-1">
+                💡 孩子视角的报告, 家长看会更焦虑 😊 · 家长版带 AI 决策支持 + 周报
+            </p>
             {% if me_url %}
             {# v3.9.6 · 智能门控：已生成过家长订阅版 → 直接显示"查看"，不再每次让家长重输邀请码 #}
             {# v3.9.41 · 扩展：DB 里有任何已激活的 parent_invite/parent_sub 记录，也跳过表单（即使 HTML 未生成成功） #}

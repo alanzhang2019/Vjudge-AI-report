@@ -3154,8 +3154,11 @@ def _compute_leaderboard_full() -> list[dict]:
             # v3.11.21m · students 表没行时用 retry_form_json 兜底
             # (admin 批量测分绕过注册, 但提交 form 时往往有 city/province/grade)
             is_registered = bool(student)
+            # v3.11.22 · 关键修复: students 行存在但字段全空时, 也走 retry_form_json 兜底
+            # (注册时 luogu_uid 已绑定, 但注册表单未收集省份/年级 → students 行存在但 province/grade 为空)
+            # 用 retry_form_json 里更完整的字段覆盖空字段
+            _fb = form_fallback_map.get(uid, {})
             if not is_registered:
-                _fb = form_fallback_map.get(uid, {})
                 student = {
                     "real_name": _fb.get("real_name") or student_name_fb or None,
                     "school": _fb.get("school"),
@@ -3164,6 +3167,21 @@ def _compute_leaderboard_full() -> list[dict]:
                     "province": _fb.get("province"),
                     "city": _fb.get("city"),
                 }
+            else:
+                # 已注册但字段空 → 用 retry_form_json 补
+                if not (student.get("province") or "").strip() and _fb.get("province"):
+                    student["province"] = _fb["province"]
+                if not (student.get("city") or "").strip() and _fb.get("city"):
+                    student["city"] = _fb["city"]
+                if not (student.get("school") or "").strip() and _fb.get("school"):
+                    student["school"] = _fb["school"]
+                if not (student.get("grade") or "").strip() and _fb.get("grade"):
+                    student["grade"] = _fb["grade"]
+                if not (student.get("real_name") or "").strip():
+                    if _fb.get("real_name"):
+                        student["real_name"] = _fb["real_name"]
+                    elif student_name_fb and student_name_fb not in ("未知选手", "未知"):
+                        student["real_name"] = student_name_fb
             try:
                 report_dir = _resolve_task_report_dir({"task_id": task_id, "html": "", "md": "", "pdf": ""})
                 export_path = report_dir / "export_data.json"

@@ -251,8 +251,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.11.19h"
-APP_VERSION_BUILD = "20260701_v3p11p19h_parent_subscribe_accept_report_noi_csp"
+APP_VERSION = "v3.11.19i"
+APP_VERSION_BUILD = "20260701_v3p11p19i_parent_subscribe_profile_incomplete_banner"
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -8849,6 +8849,12 @@ PARENT_SUBSCRIBE_HTML = """
 <body class="app-body p-4">
 <div class="max-w-4xl mx-auto py-6 space-y-4">
 
+    {% if profile_incomplete_warning %}
+    <div class="bg-amber-50 border-l-4 border-amber-400 p-4 rounded-lg text-sm text-amber-900">
+        {{ profile_incomplete_warning|safe }}
+    </div>
+    {% endif %}
+
     <!-- 头部：付费版品牌 + 学员信息 -->
     <div class="bg-white rounded-2xl card-shadow p-6">
         <div class="flex items-start justify-between flex-wrap gap-3">
@@ -17246,6 +17252,27 @@ def start_parent_subscribe(short_id: str):
     # 同样 6 月份前生成的 NOI-CSP 报告（v3.10 之前）也因命名是 report_noi_csp.md
     # 被误判为"没有基础报告"。
     report_dir = _find_latest_report_dir(luogu_uid, student.get("real_name") or "")
+
+    # v3.11.19i · 学员档案不完整检测：避免 AI 报告"暂未填写"误导家长
+    # 场景：auto_from_parent_subscribe 创建的占位学员没填过 school/city/grade/gender/birth_date
+    # 解决：在家长订阅页顶部显示黄色提示条，引导到 /me/<uid>/settings 完善
+    _profile_missing_fields: list[str] = []
+    if not (student.get("city") or "").strip():
+        _profile_missing_fields.append("城市")
+    if not (student.get("school") or "").strip():
+        _profile_missing_fields.append("学校")
+    if not (student.get("grade") or "").strip():
+        _profile_missing_fields.append("年级")
+    if not (student.get("gender") or "").strip():
+        _profile_missing_fields.append("性别")
+    if not (student.get("birth_date") or "").strip():
+        _profile_missing_fields.append("生日")
+    profile_incomplete_warning = (
+        f"⚠️ 学员档案不完整：{ '、'.join(_profile_missing_fields) } 暂未填写，"
+        f"家长订阅版 AI 报告将显示「暂未填写」并降低个性化程度。"
+        f"建议 <a href=\"/me/{luogu_uid}/settings\" class=\"underline font-semibold\">立即完善学员信息</a> →"
+    ) if _profile_missing_fields else ""
+
     if not report_dir or not (
         (report_dir / "report.md").exists()
         or (report_dir / "report_gesp.md").exists()
@@ -17260,6 +17287,7 @@ def start_parent_subscribe(short_id: str):
             has_report=False,
             report_dir_name="",
             error_msg="还没生成过基础报告，无法生成家长订阅版。请先在生成报告页跑一次。",
+            profile_incomplete_warning=profile_incomplete_warning,
             gesp_level=gesp_level,
             gesp_score=gesp_score,
             next_level=gesp_level + 1 if gesp_level < 8 else 8,
@@ -17287,6 +17315,7 @@ def start_parent_subscribe(short_id: str):
             has_report=True,
             report_dir_name=report_dir.name,
             error_msg="未配置 OpenAI API Key。请在表单填写，或在服务端设置环境变量 OPENAI_API_KEY / OPENAI_ADMIN_KEY。",
+            profile_incomplete_warning=profile_incomplete_warning,
             gesp_level=gesp_level,
             gesp_score=gesp_score,
             next_level=gesp_level + 1 if gesp_level < 8 else 8,
@@ -17313,6 +17342,50 @@ def start_parent_subscribe(short_id: str):
         or os.environ.get("OPENAI_BASE_URL", "").strip()
         or None
     )
+
+    # 同步补全：若 export_data.json.user / .meta 有 city/school/province 但 student 表为空,
+    # 自动写回 students 表（仅对 auto_from_parent_subscribe 学员生效，
+    # 避免覆盖用户真实注册时填的资料；只在家长订阅生成时跑一次）
+    if _profile_missing_fields and report_dir and (student.get("registered_via") or "") == "auto_from_parent_subscribe":
+        try:
+            _exp_p = report_dir / "export_data.json"
+            if _exp_p.exists():
+                _exp = json.loads(_exp_p.read_text(encoding="utf-8", errors="replace"))
+                _u = _exp.get("user") or {}
+                _meta = _exp.get("meta") or {}
+                _updates: dict = {}
+                for _field, _src_field in [
+                    ("city", "city"), ("school", "school"), ("province", "province"),
+                ]:
+                    _v = (str(_u.get(_src_field) or _meta.get(_src_field) or "")).strip()
+                    if _v and not (student.get(_field) or "").strip():
+                        _updates[_field] = _v
+                if _updates and student.get("id"):
+                    from task_store import _get_conn as _ts_conn
+                    _conn = _ts_conn()
+                    try:
+                        for _k, _v in _updates.items():
+                            _conn.execute(
+                                f"UPDATE students SET {_k} = ? WHERE id = ? AND ({_k} IS NULL OR {_k} = '')",
+                                (_v, int(student["id"])),
+                            )
+                        _conn.commit()
+                        app.logger.info(
+                            f"v3.11.19i 学生档案自动补全 sid={student.get('id')} {list(_updates.keys())}"
+                        )
+                        student.update(_updates)
+                        _profile_missing_fields = [f for f in _profile_missing_fields if not (student.get({
+                            "城市": "city", "学校": "school", "年级": "grade",
+                            "性别": "gender", "生日": "birth_date",
+                        }.get(f, "")) or "").strip()]
+                        profile_incomplete_warning = (
+                            f"⚠️ 已从报告数据自动补全 {', '.join(_updates.keys())}；"
+                            f"如需修改：<a href=\"/me/{luogu_uid}/settings\" class=\"underline font-semibold\">点此设置</a>"
+                        ) if _profile_missing_fields else ""
+                    finally:
+                        _conn.close()
+        except Exception as _pf_e:
+            app.logger.debug(f"v3.11.19i student 自动补全失败: {_pf_e}")
 
     task_id = str(uuid.uuid4())
     with TASKS_LOCK:

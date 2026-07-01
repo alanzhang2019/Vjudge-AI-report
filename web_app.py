@@ -19215,13 +19215,13 @@ STUDENT_ME_HTML = """
         {# v3.9.7 · 顶部 GESP 段位进度条已删除（下面"个人成就"卡片里已有 GESP 段位 + 免初赛状态） #}
         {# v3.9.7 · 历史奖项录入模块已删除（注册表单里已经收集过，避免重复入口） #}
 
-        <!-- v3.9.75 · 醒目导航栏（QQ群 + 排行榜） -->
-        <div class="flex items-center justify-center gap-4 mb-4">
-            <a href="https://qm.qq.com/q/610931699" target="_blank" class="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm shadow-lg transition-all hover:scale-105">
-                💬 QQ 群 610931699
+        <!-- v3.9.76 · 醒目导航栏（QQ群 + 排行榜） - 更大尺寸 + 渐变背景 -->
+        <div class="flex items-stretch justify-center gap-3 mb-4 -mx-4 px-4">
+            <a href="https://qm.qq.com/q/610931699" target="_blank" class="flex-1 max-w-xs inline-flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white rounded-2xl font-extrabold text-base shadow-xl ring-2 ring-indigo-300/50 transition-all hover:scale-105 hover:shadow-2xl">
+                <span class="text-xl">💬</span> QQ 群 610931699
             </a>
-            <a href="/leaderboard" class="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-xl font-bold text-sm shadow-lg transition-all hover:scale-105">
-                🏆 AI 测评排行榜
+            <a href="/leaderboard" class="flex-1 max-w-xs inline-flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-amber-500 via-orange-500 to-red-500 hover:from-amber-600 hover:via-orange-600 hover:to-red-600 text-white rounded-2xl font-extrabold text-base shadow-xl ring-2 ring-amber-300/50 transition-all hover:scale-105 hover:shadow-2xl">
+                <span class="text-xl">🏆</span> AI 测评排行榜
             </a>
         </div>
 

@@ -1,6 +1,6 @@
-﻿# 部署脚本
+# 部署脚本
 $ErrorActionPreference = "Continue"
-$LocalFile = "c:\Users\zpy20\Desktop\项目\luoguAI\luogu-api-python\web_app.py"
+$LocalFile = "c:\Users\zpy20\Desktop\项目\luoguAI\Vjudge-AI-report\web_app.py"
 $LogFile = "c:\Users\zpy20\Desktop\项目\luoguAI\luogu-api-python\deploy.log"
 $RemoteHost = "ubuntu@43.163.26.115"
 $RemoteTmp = "/tmp/_DEPLOY_TEST.py"

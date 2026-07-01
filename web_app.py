@@ -251,8 +251,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.11.20"
-APP_VERSION_BUILD = "20260701_v3p11p20_unify_score_with_leaderboard_v3944"
+APP_VERSION = "v3.11.25"
+APP_VERSION_BUILD = "20260702_v3p11p25_leaderboard_registered_panel"
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -3042,9 +3042,11 @@ def _compute_leaderboard_full() -> list[dict]:
         if "luogu_uid" not in cols:
             return []
         # v3.11.21m · 拉 retry_form_json 用于"未注册学员"省份兜底
+        # v3.11.25 · 同步拉 tasks.student_id, 关联到邮箱注册学员(其 luogu_uid 可能为空)
         task_rows = conn.execute(
             """
-            SELECT t.task_id, t.luogu_uid, t.created_at, t.student_name, t.retry_form_json
+            SELECT t.task_id, t.luogu_uid, t.created_at, t.student_name,
+                   t.retry_form_json, t.student_id
               FROM tasks t
              WHERE t.status = 'done'
                AND (t.luogu_uid IS NOT NULL AND t.luogu_uid != '')
@@ -3058,22 +3060,51 @@ def _compute_leaderboard_full() -> list[dict]:
         # 批量测分时往往绕过注册直接调 /generate-form 或 /upload-source, 导致
         # students 表没行, 排行榜全部 "—". 这里同时把 retry_form_json 抽出来,
         # 给没 students 行的学员兜底 city/province/grade/school (无 UI 数据用 retry_form_json)
+        # v3.11.25 · 记录每个最新 task 的 student_id, 后续可直接 JOIN students 表
         form_fallback_map: dict[str, dict] = {}
-        for task_id, luogu_uid, created_at, student_name, retry_form_json in task_rows:
+        latest_student_id_map: dict[str, int | None] = {}
+        for task_id, luogu_uid, created_at, student_name, retry_form_json, student_id_db in task_rows:
             uid = str(luogu_uid).strip()
             if not uid or uid in latest_per_uid:
                 continue
             latest_per_uid[uid] = (str(task_id), uid, str(created_at or ""), str(student_name or ""))
+            latest_student_id_map[uid] = int(student_id_db) if student_id_db else None
             # 抽 retry_form_json 兜底字段
             try:
                 _f = json.loads(retry_form_json or "{}")
             except Exception:
                 _f = {}
+            # v3.11.24 · 同时也读 tasks 表的 school/grade/student_name 字段 (兜底字段, 防止 retry_form_json 为空)
+            _fb_school = ((_f.get("school") or "").strip() or (task_rows and "") or "") if isinstance(_f, dict) else ""
+            # 从 task_rows 里再取 school/grade 字段: 重新查一遍当前 task
+            try:
+                _trow = conn.execute(
+                    "SELECT school, grade, student_name FROM tasks WHERE task_id = ?",
+                    (str(task_id),),
+                ).fetchone()
+                _t_school = (_trow[0] or "").strip() if _trow else ""
+                _t_grade = (_trow[1] or "").strip() if _trow else ""
+                _t_name = (_trow[2] or "").strip() if _trow else ""
+            except Exception:
+                _t_school = _t_grade = _t_name = ""
+
             if isinstance(_f, dict) and _f:
                 form_fallback_map[uid] = {
-                    "real_name": (_f.get("student_name") or _f.get("real_name") or _f.get("name") or "").strip() or None,
-                    "school": (_f.get("school") or "").strip() or None,
-                    "grade": (_f.get("grade") or "").strip() or None,
+                    "real_name": (
+                        (_f.get("student_name") or _f.get("real_name") or _f.get("name") or "").strip()
+                        or _t_name
+                        or None
+                    ),
+                    "school": (
+                        (_f.get("school") or "").strip()
+                        or _t_school
+                        or None
+                    ),
+                    "grade": (
+                        (_f.get("grade") or "").strip()
+                        or _t_grade
+                        or None
+                    ),
                     "province": (_f.get("province") or "").strip() or None,
                     "city": (_f.get("city") or "").strip() or None,
                 }
@@ -3081,7 +3112,7 @@ def _compute_leaderboard_full() -> list[dict]:
         if not latest_per_uid:
             return []
 
-        # 3) 批量查 students 表（按 luogu_uid）
+        # 3) 批量查 students 表（按 luogu_uid + 按 student_id 两种入口都查）
         uids = list(latest_per_uid.keys())
         placeholders = ",".join("?" * len(uids))
         # v3.9.47 · 拉取 province 字段（兼容老 schema）
@@ -3093,13 +3124,15 @@ def _compute_leaderboard_full() -> list[dict]:
         # v3.11.21k · 排行榜 row 也需要 city 字段（来自 students 表注册时已选），
         # 用于报告/海报城市兜底展示；模板按需脱敏，DB 这一层原样取
         _has_city = "city" in _student_cols
-        _select_cols = ["luogu_uid", "real_name", "school", "grade", "is_minor"]
+        _select_cols = ["id", "luogu_uid", "real_name", "school", "grade", "is_minor"]
         if _has_province:
             _select_cols.append("province")
         if _has_city:
             _select_cols.append("city")
         _select_sql = ", ".join(_select_cols)
-        if _has_province or _has_city:
+        student_rows: list = []
+        # 3a) 按 luogu_uid 查 (兼容老 admin 录入的学员)
+        if uids:
             try:
                 student_rows = conn.execute(
                     f"SELECT {_select_sql} FROM students WHERE luogu_uid IN ({placeholders})",
@@ -3107,19 +3140,25 @@ def _compute_leaderboard_full() -> list[dict]:
                 ).fetchall()
             except Exception:
                 student_rows = []
-        else:
+        # 3b) v3.11.25 · 按 student_id 查 (邮箱注册学员的主键, 他们的 luogu_uid 通常为空)
+        #     这是排行榜省份/年级信息缺失的关键修复入口
+        _student_ids = sorted({int(v) for v in latest_student_id_map.values() if v})
+        if _student_ids:
+            _id_ph = ",".join("?" * len(_student_ids))
             try:
-                student_rows = conn.execute(
-                    f"SELECT luogu_uid, real_name, school, grade, is_minor FROM students WHERE luogu_uid IN ({placeholders})",
-                    uids,
+                _rows_by_id = conn.execute(
+                    f"SELECT {_select_sql} FROM students WHERE id IN ({_id_ph})",
+                    _student_ids,
                 ).fetchall()
+                student_rows = list(student_rows) + list(_rows_by_id)
             except Exception:
-                student_rows = []
-        student_map: dict[str, dict] = {}
+                pass
+        student_map: dict[str, dict] = {}  # 按 luogu_uid 索引 (老逻辑)
+        student_by_id_map: dict[int, dict] = {}  # v3.11.25 · 按 students.id 索引 (新逻辑)
         if _has_province and _has_city:
             for _row in student_rows:
-                _luogu_uid, _real_name, _school, _grade, _is_minor, _province, _city = _row
-                student_map[str(_luogu_uid)] = {
+                _id_v, _luogu_uid, _real_name, _school, _grade, _is_minor, _province, _city = _row
+                _rec = {
                     "real_name": str(_real_name or "") or None,
                     "school": str(_school or "") or None,
                     "grade": str(_grade or "") or None,
@@ -3127,30 +3166,48 @@ def _compute_leaderboard_full() -> list[dict]:
                     "province": str(_province or "").strip() or None,
                     "city": str(_city or "").strip() or None,  # v3.11.21k · 注册时已选的城市
                 }
+                if _id_v is not None:
+                    student_by_id_map[int(_id_v)] = _rec
+                if _luogu_uid:
+                    student_map[str(_luogu_uid)] = _rec
         elif _has_province:
-            for luogu_uid, real_name, school, grade, is_minor, province in student_rows:
-                student_map[str(luogu_uid)] = {
-                    "real_name": str(real_name or "") or None,
-                    "school": str(school or "") or None,
-                    "grade": str(grade or "") or None,
-                    "is_minor": int(is_minor or 0) == 1,
-                    "province": str(province or "").strip() or None,
+            for _row in student_rows:
+                _id_v, _luogu_uid, _real_name, _school, _grade, _is_minor, _province = _row
+                _rec = {
+                    "real_name": str(_real_name or "") or None,
+                    "school": str(_school or "") or None,
+                    "grade": str(_grade or "") or None,
+                    "is_minor": int(_is_minor or 0) == 1,
+                    "province": str(_province or "").strip() or None,
                     "city": None,  # 老 schema
                 }
+                if _id_v is not None:
+                    student_by_id_map[int(_id_v)] = _rec
+                if _luogu_uid:
+                    student_map[str(_luogu_uid)] = _rec
         else:
-            for luogu_uid, real_name, school, grade, is_minor in student_rows:
-                student_map[str(luogu_uid)] = {
-                    "real_name": str(real_name or "") or None,
-                    "school": str(school or "") or None,
-                    "grade": str(grade or "") or None,
-                    "is_minor": int(is_minor or 0) == 1,
+            for _row in student_rows:
+                _id_v, _luogu_uid, _real_name, _school, _grade, _is_minor = _row
+                _rec = {
+                    "real_name": str(_real_name or "") or None,
+                    "school": str(_school or "") or None,
+                    "grade": str(_grade or "") or None,
+                    "is_minor": int(_is_minor or 0) == 1,
                     "province": None,
                     "city": None,
                 }
+                if _id_v is not None:
+                    student_by_id_map[int(_id_v)] = _rec
+                if _luogu_uid:
+                    student_map[str(_luogu_uid)] = _rec
 
         # 4) 遍历每个 UID，定位 export_data.json 并算分
         for uid, (task_id, _, created_at, student_name_fb) in latest_per_uid.items():
-            student = student_map.get(uid, {})
+            # v3.11.25 · 优先用 tasks.student_id 查到邮箱注册学员(其 luogu_uid 通常为空),
+            # 再用 luogu_uid 索引查老学员(可能没 student_id 但有 luogu_uid)
+            _sid_v = latest_student_id_map.get(uid)
+            _student_by_id = student_by_id_map.get(_sid_v) if _sid_v else None
+            student = _student_by_id or student_map.get(uid, {})
             # v3.11.21m · students 表没行时用 retry_form_json 兜底
             # (admin 批量测分绕过注册, 但提交 form 时往往有 city/province/grade)
             is_registered = bool(student)
@@ -3197,9 +3254,10 @@ def _compute_leaderboard_full() -> list[dict]:
             # (AI 报告生成时, 洛谷数据已写到 export_data.json, 100% 覆盖)
             # 用于 students + retry_form_json 都没填时的最后兜底
             _si = (export_data or {}).get("student_info") or {}
+            # 姓名: 不再用黑名单排除, 因为 export_data.name 是 AI 从洛谷爬的真实姓名
             if _si and not (student.get("real_name") or "").strip():
                 _si_name = (str(_si.get("name") or "").strip() or None)
-                if _si_name and _si_name not in ("未知选手", "未知", "同学"):
+                if _si_name and _si_name not in ("", "None"):
                     student["real_name"] = _si_name
             if _si and not (student.get("school") or "").strip():
                 _si_school = (str(_si.get("school") or "").strip() or None)
@@ -3225,7 +3283,8 @@ def _compute_leaderboard_full() -> list[dict]:
                     student.get("real_name"),
                 ),
                 "school": _mask_school(student.get("school")),
-                "grade": _grade_to_label(student.get("grade")) or student.get("grade") or "—",
+                # v3.11.24 · 清理 grade 字符串 (export_data 里 "高 二" → "高二"; 去除多余空格)
+                "grade": _clean_grade_label(student.get("grade")) or student.get("grade") or "—",
                 "stage": stage,
                 "province": _mask_province(student.get("province")),  # v3.9.47 · 省份脱敏
                 # v3.11.21m · 是否在 students 表（注册过）；未注册但有 form 兜底时
@@ -3248,6 +3307,71 @@ def _compute_leaderboard_full() -> list[dict]:
     # 6) 写入 rank
     for i, r in enumerate(rows, start=1):
         r["rank"] = i
+    return rows
+
+
+def _list_registered_no_report(stage: str = "all", limit: int = 50) -> list[dict]:
+    """v3.11.25 · 列出"已注册但未参评"的学员(用于排行榜底部的"已注册学员"板块)
+
+    适用场景: 学员在 /register 注册时填了省份/年级/学校, 但还没跑过报告 →
+    排行榜主榜(按分数排)没有他们, 单独展示这一栏就能看到完整注册信息.
+
+    Args:
+        stage: 学段过滤(all/primary/junior/senior/univ), 默认 all
+        limit: 最多返回多少行, 默认 50
+    """
+    rows: list[dict] = []
+    try:
+        from admin_students import _grade_to_stage
+        conn = _get_conn()
+        # 仅取 email_self_web 注册的学员(他们一定填了省份/城市/年级)
+        # 排除有 done task 的(他们已经在主榜)
+        sql = """
+            SELECT s.id, s.email, s.real_name, s.school, s.grade, s.is_minor,
+                   s.province, s.city, s.created_at
+              FROM students s
+         LEFT JOIN tasks t ON t.student_id = s.id AND t.status = 'done'
+             WHERE (s.email IS NOT NULL AND s.email != '')
+               AND (s.email NOT LIKE 'legacy-%@noemail.local')
+               AND t.task_id IS NULL
+          ORDER BY s.id DESC
+             LIMIT ?
+        """
+        rs = conn.execute(sql, (int(limit),)).fetchall()
+        for r in rs:
+            sid, email, real_name, school, grade, is_minor, province, city, created_at = r
+            real_name = (str(real_name or "").strip() or None)
+            school = (str(school or "").strip() or None)
+            grade = (str(grade or "").strip() or None)
+            province = (str(province or "").strip() or None)
+            city = (str(city or "").strip() or None)
+            # 学段过滤
+            st = _grade_to_stage(grade)
+            if stage != "all" and st != stage:
+                continue
+            # 没填省份/城市的略过(否则全显示"未填"无意义)
+            if not province and not city and not school:
+                continue
+            # email 散列化做 me_url (用 short_id)
+            short_id = (email or "").split("@")[0][:3] + "_" + str(sid)
+            rows.append({
+                "student_id": int(sid),
+                "display_name": _mask_student_name(
+                    str(sid),
+                    int(is_minor or 0) == 1,
+                    real_name,
+                ),
+                "school": _mask_school(school),
+                "grade": _clean_grade_label(grade) or grade or "—",
+                "stage": st,
+                "province": _mask_province(province),
+                "city": city,
+                "is_minor": int(is_minor or 0) == 1,
+                "registered_at": str(created_at or ""),
+                "email_hash": short_id,
+            })
+    except Exception as _e:  # noqa: BLE001
+        app.logger.debug(f"[list_registered_no_report] {type(_e).__name__}: {_e}")
     return rows
 
 
@@ -4727,6 +4851,11 @@ def leaderboard_page():
         s = entry.get("stage")
         if s in stage_count:
             stage_count[s] += 1
+    # v3.11.25 · "已注册未参评"学员板块(底部展示注册了但还没跑报告的学员)
+    try:
+        registered_no_report = _list_registered_no_report(stage=stage, limit=30)
+    except Exception:
+        registered_no_report = []
     return render_template_string(
         LEADERBOARD_HTML,
         rows=rows,
@@ -4742,6 +4871,8 @@ def leaderboard_page():
         ],
         stage_count=stage_count,
         total=len(rows),
+        registered_no_report=registered_no_report,
+        registered_total=len(registered_no_report),
         cached_at=_LEADERBOARD_CACHE.get("ts", 0),
         ttl_seconds=_LEADERBOARD_TTL_SECONDS,
     )
@@ -5259,6 +5390,35 @@ def _fill_profile_from_session(form_data: dict) -> dict:
     return form_data
 
 
+def _get_logged_in_student_id() -> int | None:
+    """v3.11.25 · 从 session 读取当前登录学员的数据库 id (students.id).
+
+    用于在 /generate /upload-source /upload-zip 等入口创建 task 时,
+    把 students.id 写到 tasks.student_id → 让排行榜能直接 JOIN 到
+    students 表拿到省份/城市/年级/学校 (v3.10.0 改造后, 大部分学员
+    的 students.luogu_uid 为空, 排行榜按 luogu_uid 查不到 → 全部 "—").
+
+    优先级：
+      1) session["student_short_id"] (新主键, 8 位 short_id)
+      2) session["student_uid"] (老 session key, 可能是 luogu_uid 字符串)
+    """
+    try:
+        _sid = str(session.get("student_short_id") or "").strip()
+        if _sid:
+            _stu = _admin_students.get_student_by_short_id(_sid)
+            if _stu and _stu.get("id"):
+                return int(_stu["id"])
+        # 兜底: 老 session key 是 luogu_uid
+        _uid = str(session.get("student_uid") or "").strip()
+        if _uid:
+            _stu = _admin_students.get_student_by_uid(_uid)
+            if _stu and _stu.get("id"):
+                return int(_stu["id"])
+    except Exception as _e:  # noqa: BLE001
+        app.logger.debug(f"[get_logged_in_student_id] {type(_e).__name__}: {_e}")
+    return None
+
+
 @app.route("/generate", methods=["POST"])
 def generate():
     form_data = request.form.to_dict()
@@ -5292,6 +5452,10 @@ def generate():
     _g_uid = str(form_data.get("luogu_uid") or form_data.get("uid") or "").strip()
     with TASKS_LOCK:
         insert_task(task_id, status="queued", message="排队中...", luogu_uid=_g_uid)
+        # v3.11.25 · 关联到当前登录学员 (排行榜通过 tasks.student_id 取省份/年级)
+        _s_id = _get_logged_in_student_id()
+        if _s_id:
+            update_task(task_id, student_id=_s_id)
         update_task(
             task_id,
             student_name=str(form_data.get("student_name", "未知选手") or "未知选手").strip(),
@@ -5832,6 +5996,10 @@ def upload_zip_submit():
             luogu_uid=form_data.get("luogu_uid", ""),
             task_type="report_zip_upload",
         )
+        # v3.11.25 · 关联到当前登录学员 (排行榜通过 tasks.student_id 取省份/年级)
+        _s_id = _get_logged_in_student_id()
+        if _s_id:
+            update_task(task_id, student_id=_s_id)
         update_task(
             task_id,
             student_name=form_data["student_name"] or "ZIP 学员",
@@ -5941,6 +6109,10 @@ def upload_source_submit():
             luogu_uid=form_data.get("luogu_uid", ""),
             task_type="report_source_upload",
         )
+        # v3.11.25 · 关联到当前登录学员 (排行榜通过 tasks.student_id 取省份/年级)
+        _s_id = _get_logged_in_student_id()
+        if _s_id:
+            update_task(task_id, student_id=_s_id)
         update_task(
             task_id,
             student_name=form_data["student_name"] or "源码学员",
@@ -13467,6 +13639,27 @@ def _grade_to_label(grade: str | None) -> str | None:
         if v == grade:
             return label
     return grade   # 未知值原样返回
+
+
+def _clean_grade_label(grade: str | None) -> str | None:
+    """v3.11.24 · 清理 grade 字符串:
+    1) 去除所有空白字符 ("高 二" → "高二")
+    2) 标准化为标准中文 label (查 GRADES_REGISTRATION 反向匹配)
+    3) 七年级/八年级/九年级 等小学初中、 高一/高二/高三 等
+    """
+    if not grade:
+        return None
+    s = str(grade).strip()
+    if not s:
+        return None
+    # 1) 去除所有空白
+    s_clean = "".join(s.split())
+    # 2) 直接查表 (匹配 "JUNIOR_2" 等)
+    for v, label in GRADES_REGISTRATION:
+        if v == s_clean or v == s:
+            return label
+    # 3) 中文标签直接返回清理后的版本
+    return s_clean
 
 
 # v3.11.12 · 三入口都要求注册登录（1=洛谷练习页 /upload-source, 2=VJudge 已有, 3=ZIP /upload-zip）
@@ -21631,6 +21824,63 @@ LEADERBOARD_HTML = """<!doctype html>
         </div>
         {% endif %}
     </div>
+
+    <!-- v3.11.25 · 「已注册学员（未参评）」板块 ——
+         展示已注册但还没跑过报告的学员, 用其注册时填写的省份/年级/学校信息.
+         之前主榜只显示有 done task 的学员, 注册了没跑报告的学员永远不出现 →
+         排行榜看上去全是"未注册" / "—". 这个板块把他们的注册信息亮出来,
+         解决"排行榜没省份/年级"的核心痛点. -->
+    {% if registered_no_report %}
+    <div class="glass rounded-xl overflow-hidden">
+        <div class="px-4 py-3 border-b border-[rgba(148,163,184,.12)] flex items-center justify-between flex-wrap gap-2">
+            <div>
+                <h2 class="text-sm font-bold text-white flex items-center gap-2">
+                    <span class="text-base">📋</span>
+                    已注册学员（未参评）
+                </h2>
+                <p class="text-[10px] text-[#94A3B8] mt-0.5 font-mono">
+                    注册时填的省份/年级/学校 · 还没跑过报告 · 完整数据共 {{ registered_total }} 人
+                </p>
+            </div>
+            <span class="text-[10px] text-emerald-300/90 font-mono italic">
+                💡 提示：这些学员的省份/年级取自注册信息（<code class="text-emerald-300">students.province</code> / <code class="text-emerald-300">grade</code>）
+            </span>
+        </div>
+        <div class="grid grid-cols-12 gap-2 px-4 py-2.5 text-[11px] text-[#64748B] font-mono uppercase tracking-wider border-b border-[rgba(148,163,184,.12)]">
+            <div class="col-span-1">#</div>
+            <div class="col-span-2">学员</div>
+            <div class="col-span-2">学段·年级</div>
+            <div class="col-span-1">省份</div>
+            <div class="col-span-2">学校</div>
+            <div class="col-span-2">城市</div>
+            <div class="col-span-2 text-right">注册时间</div>
+        </div>
+        {% for r in registered_no_report %}
+        <div class="grid grid-cols-12 gap-2 px-4 py-2.5 items-center border-b border-[rgba(148,163,184,.06)] hover:bg-white/[.02]">
+            <div class="col-span-1 font-mono text-[#94A3B8] text-sm">·</div>
+            <div class="col-span-2">
+                <div class="text-white text-sm font-semibold truncate">{{ r.display_name }}</div>
+                <div class="text-[10px] text-[#64748B] font-mono italic">已注册 · 未参评</div>
+            </div>
+            <div class="col-span-2 text-xs text-[#94A3B8] truncate">
+                {{ r.grade }}
+            </div>
+            <div class="col-span-1 text-xs font-mono truncate">
+                <span class="text-cyan-300">{{ r.province or "—" }}</span>
+            </div>
+            <div class="col-span-2 text-xs text-[#94A3B8] truncate">
+                {{ r.school or "—" }}
+            </div>
+            <div class="col-span-2 text-xs text-[#94A3B8] truncate">
+                {{ r.city or "—" }}
+            </div>
+            <div class="col-span-2 text-right text-[10px] text-[#64748B] font-mono">
+                {{ r.registered_at[:10] if r.registered_at else "—" }}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
 
     <!-- v3.11.20 · 公式说明 + 「与个人中心同源」徽章 -->
     <div class="glass rounded-xl p-4 text-[11px] text-[#94A3B8] font-mono space-y-1.5">

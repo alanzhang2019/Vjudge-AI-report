@@ -14065,10 +14065,12 @@ def student_me(short_id: str):
     print(f"[DEBUG student_me] short_id={short_id!r}", file=sys.stderr, flush=True)
 
     # v3.9.62 · token 校验：必须带有效签名 token；已登录学员（session 匹配）可免 token
+    # v3.9.75 · 管理员豁免：admin 登录后可访问任意学员个人中心
     token = request.args.get("t", "")
     session_short = str(session.get("student_short_id") or "").strip()
     is_logged_in = (session_short and session_short == str(short_id).strip())
-    if not is_logged_in and not _verify_me_token(short_id, token):
+    is_admin = bool(session.get("admin_authed"))
+    if not is_logged_in and not is_admin and not _verify_me_token(short_id, token):
         # 无 token 或 token 错误 → 404（不暴露"链接是否有效"信息）
         app.logger.info(f"[v3.9.62 /me] reject short_id={short_id!r}: invalid/missing token")
         return render_template_string(REGISTER_INVALID_HTML,

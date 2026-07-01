@@ -3193,6 +3193,23 @@ def _compute_leaderboard_full() -> list[dict]:
                 app.logger.debug(f"[leaderboard] skip uid={uid} task={task_id}: {_e}")
                 continue
 
+            # v3.11.23 · 终极兜底: 从 export_data.json.student_info 提取 name/school/grade
+            # (AI 报告生成时, 洛谷数据已写到 export_data.json, 100% 覆盖)
+            # 用于 students + retry_form_json 都没填时的最后兜底
+            _si = (export_data or {}).get("student_info") or {}
+            if _si and not (student.get("real_name") or "").strip():
+                _si_name = (str(_si.get("name") or "").strip() or None)
+                if _si_name and _si_name not in ("未知选手", "未知", "同学"):
+                    student["real_name"] = _si_name
+            if _si and not (student.get("school") or "").strip():
+                _si_school = (str(_si.get("school") or "").strip() or None)
+                if _si_school and _si_school not in ("未知学校", "未知", ""):
+                    student["school"] = _si_school
+            if _si and not (student.get("grade") or "").strip():
+                _si_grade = (str(_si.get("grade") or "").strip() or None)
+                if _si_grade and _si_grade not in ("未知年级", "未知", ""):
+                    student["grade"] = _si_grade
+
             behavior_data = export_data.get("behavior_analysis") or {}
             score, score_label, score_source = _compute_score_from_export(export_data, behavior_data)
 

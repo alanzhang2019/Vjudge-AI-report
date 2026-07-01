@@ -7651,6 +7651,11 @@ ADMIN_HTML = """
                         <span class="ml-auto flex items-center gap-3 text-xs text-gray-500">
                             <span class="text-emerald-700 font-bold">{{ group.task_count }} 次报告</span>
                             <span>最近：{{ group.latest_time }}</span>
+                            {% if group.luogu_uid %}
+                            <a href="/me/{{ group.luogu_uid }}" target="_blank" class="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors">
+                                <span>👤</span> 个人中心
+                            </a>
+                            {% endif %}
                         </span>
                     </summary>
                     <div class="overflow-x-auto bg-gray-50/50">

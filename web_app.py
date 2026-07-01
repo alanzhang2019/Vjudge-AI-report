@@ -251,8 +251,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.11.19m"
-APP_VERSION_BUILD = "20260701_v3p11p19m_hide_uid_on_public_pages_and_remove_pdf_for_students"
+APP_VERSION = "v3.11.20"
+APP_VERSION_BUILD = "20260701_v3p11p20_unify_score_with_leaderboard_v3944"
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -2903,6 +2903,60 @@ def _compute_score_from_export(export_data: dict, behavior_data: dict | None) ->
         else:
             score = 0
         return (score, f"预估 {score}/1000（兜底）", "fallback_6dim_mean")
+
+
+def _override_achievements_with_export_v3944(achievements: dict, latest_dir) -> bool:
+    """v3.11.20 · 个人中心 / 学员报告统一改用「排行榜同源」综合分。
+
+    之前个人中心 / /r/<uid> 报告页的 ai_score_thousand 走两条不同路径：
+      · report.md → 6 维均值 × 10（来自 AI 生成报告）
+      · export_data.json 兜底 → 6 维均值 × 10（来自提交数据）
+    这导致学员在「个人中心看到的分」和「排行榜展示的分」不一致。
+
+    本函数强制从 export_data.json 重新调用 _compute_score_from_export()
+    (v3.9.44 综合分：6 维 + 反刷题 3 维加权)，与排行榜数据源完全一致。
+    同步覆盖 6 维 / ai_score_thousand / ai_score_label / ai_score_source。
+
+    Args:
+        achievements: dict (in/out)  学员成就字典
+        latest_dir:   Path          最新报告目录（含 export_data.json）
+
+    Returns:
+        bool: True=已重算；False=export_data 不可用 / 重算异常
+    """
+    try:
+        if not latest_dir:
+            return False
+        _exp_path = latest_dir / "export_data.json"
+        if not _exp_path.exists():
+            return False
+        import json as _json_ov
+        try:
+            _exp = _json_ov.loads(_exp_path.read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            return False
+        if not isinstance(_exp, dict) or not _exp:
+            return False
+
+        _behavior = _exp.get("behavior_analysis") or {}
+        _score, _label, _src = _compute_score_from_export(_exp, _behavior)
+        if not _score:
+            return False
+
+        # v3.11.20 · 同步 6 维：用 export_data 的 6 维覆盖（与排行榜同源）
+        _six = _exp.get("six_dimension_scores") or {}
+        if isinstance(_six, dict) and _six:
+            achievements["six_dim"] = {k: int(v) for k, v in _six.items() if isinstance(v, (int, float))}
+            achievements["six_dim_source"] = "export_data"
+
+        # v3.11.20 · 用排行榜同源综合分覆盖 ai_score_thousand
+        achievements["ai_score_thousand"] = _score
+        achievements["ai_score_label"] = f"预估 {_score}/1000（v3.9.44 综合分 · 与排行榜同源）"
+        achievements["ai_score_source"] = _src  # comprehensive_v3944
+        return True
+    except Exception as _eov:
+        app.logger.debug(f"[override_score_v31120] 失败（不影响兜底逻辑）: {_eov}")
+        return False
 
 
 def compute_leaderboard(stage: str = "all", limit: int = 20, period: str = "month") -> list[dict]:
@@ -13630,6 +13684,11 @@ def student_me(short_id: str):
                     achievements["six_dim_source"] = "report_md"
                 if ext.get("ai_score_thousand"):
                     achievements["ai_score_source"] = "report_md"
+                # v3.11.20 · 个人中心统一用「排行榜同源」综合分（v3.9.44）
+                # 覆盖：six_dim / ai_score_thousand / ai_score_label / ai_score_source
+                # export_data 不存在 / 解析失败 → 静默跳过，不影响兜底逻辑
+                if (latest / "export_data.json").exists():
+                    _override_achievements_with_export_v3944(achievements, latest)
                 # v3.9.19 · report.md 读到了但 6 维/错题为空 → 兜底 export_data.json
                 # v3.9.22 · 改成"逐字段"补全：之前是"6 维+错题都空才触发"，但 report.md 经常
                 #   有错题没 6 维（或反之），导致漏 6 维时一直空白。
@@ -14749,11 +14808,15 @@ def _extract_achievements_from_export_data(report_dir) -> dict:
         if isinstance(six, dict) and six:
             out["six_dim"] = {k: int(v) for k, v in six.items() if isinstance(v, (int, float))}
 
-        # 2) 千分制 = 6 维平均分 * 10
+        # 2) 千分制 = 与排行榜同源（v3.9.44 综合分：6 维 + 反刷题 3 维）
+        #    _compute_score_from_export 内部已做兜底（综合分失败 → 6 维均值 × 10）
+        #    保证学员个人中心分数与排行榜显示一致
         if out["six_dim"]:
-            mean_100 = sum(out["six_dim"].values()) / len(out["six_dim"])
-            out["ai_score_thousand"] = int(round(mean_100 * 10))
-            out["ai_score_label"] = f"预估 {out['ai_score_thousand']}/1000（练习阶段 · AI 报告未生成）"
+            _behavior = d.get("behavior_analysis") or {}
+            _score, _label, _src = _compute_score_from_export(d, _behavior)
+            out["ai_score_thousand"] = _score
+            out["ai_score_label"] = f"预估 {_score}/1000（v3.9.44 综合分 · 与排行榜同源）"
+            out["ai_score_source"] = _src  # comprehensive_v3944 / fallback_6dim_mean
 
         # 1.b) v3.9.24 · 6 维兜底（v3.9.19/22 已修过 report.md 缺 6 维的场景，但
         # export_data.json 自身没 6 维时仍然空白）：
@@ -16577,6 +16640,11 @@ def report_preview(luogu_uid: str):
         achievements = _extract_achievements_from_report(report_md) or empty_achievements
         ai_summary = _extract_ai_summary(report_md) or ""
         suggestions = _extract_top_suggestions(report_md) or []
+
+        # v3.11.20 · /r/<uid> 报告页统一用「排行榜同源」综合分（v3.9.44）
+        # 与个人中心 /me 看到的分完全一致（数据源 = export_data.json）
+        if (latest / "export_data.json").exists():
+            _override_achievements_with_export_v3944(achievements, latest)
 
         # v3.9.29 · 3 级兜底：之前只读 report.md，没匹配到 6 维/AI 评分就一直空。
         # 跟 /me 路由一致：逐字段补全（report.md 已读到的优先，否则 export_data.json 兜底）。
@@ -18495,16 +18563,21 @@ STUDENT_ME_HTML = """
             <h2 class="text-lg font-bold text-gray-800 mb-3">🏅 我的个人成就</h2>
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                {# v3.9.31 · 标题从「AI 评测分」改为「能力总分（6 维均分）」——之前误导
-                    用户以为是 AI 给的分数，实际是 6 维均分 × 10 算的派生值。
-                    6 维本身来自学员练习数据（export_data.json），不是 AI 评的。 #}
+                {# v3.11.20 · 标题改为「能力总分（v3.9.44 综合分）」，与排行榜同源
+                    公式: 6 维均分 × 0.6 + 难度浓度 × 0.2 + 提效效率 × 0.1 + 知识广度 × 0.1
+                    来源: 排行榜同款 _compute_score_from_export()，保证学员看到的分数
+                    与排行榜显示完全一致（v3.9.44 反刷题加权已加进综合分） #}
                 <div class="bg-gradient-to-br from-amber-50 to-yellow-50 border border-amber-200 rounded-xl p-4 text-center">
-                    <div class="text-xs text-amber-700 font-bold" title="数据来源: {{ achievements.report_dir or '暂无' }}">📊 能力总分（6 维均分 × 10）</div>
+                    <div class="text-xs text-amber-700 font-bold" title="数据来源: {{ achievements.report_dir or '暂无' }}">📊 能力总分（v3.9.44 综合分）</div>
                     {% if achievements.ai_score_thousand is not none %}
                     <div class="text-4xl font-extrabold text-amber-700 mt-1">{{ achievements.ai_score_thousand }}</div>
                     <div class="text-xs text-amber-600 mt-1 px-1 break-words leading-snug">{{ achievements.ai_score_label }} · 满分 1000</div>
-                    {# v3.9.31 · label 区分数据源（之前「AI 报告未生成」红色警示容易让人以为 723 是瞎编的） #}
-                    {% if achievements.six_dim_source == 'export_data' %}
+                    {# v3.11.20 · 标记「与排行榜同源」，方便学员核对 #}
+                    {% if achievements.ai_score_source == 'comprehensive_v3944' %}
+                    <div class="text-[10px] text-emerald-700 mt-1.5 bg-emerald-50 rounded px-1.5 py-0.5">
+                        🏆 与排行榜同源（v3.9.44 综合分）
+                    </div>
+                    {% elif achievements.six_dim_source == 'export_data' %}
                     <div class="text-[10px] text-sky-700 mt-1.5 bg-sky-50 rounded px-1.5 py-0.5">
                         ℹ️ 6 维数据来自 export_data.json（练习阶段真实记录）
                     </div>
@@ -20834,19 +20907,22 @@ LEADERBOARD_HTML = """<!doctype html>
         {% endif %}
     </div>
 
-    <!-- 公式说明 -->
+    <!-- v3.11.20 · 公式说明 + 「与个人中心同源」徽章 -->
     <div class="glass rounded-xl p-4 text-[11px] text-[#94A3B8] font-mono space-y-1.5">
-        <div class="text-white text-xs font-semibold mb-2">📐 评分公式（v3.9.44 反刷题加权）</div>
-        <div>总评分 = (6维均值 × 0.6) + (难度深度 × 0.2) + (提交效率 × 0.1) + (知识广度 × 0.1)</div>
+        <div class="flex items-center justify-between flex-wrap gap-2">
+            <div class="text-white text-xs font-semibold">📐 评分公式（v3.9.44 反刷题加权）</div>
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-400/30 text-[10px] font-mono text-emerald-300" title="个人中心「能力总分」与本榜单使用同一函数 _compute_score_from_export() 计算">🏆 与个人中心同源</span>
+        </div>
+        <div>总评分 = (6维均值 × 0.6) + (难度浓度 × 0.2) + (提效效率 × 0.1) + (知识广度 × 0.1)</div>
         <div class="opacity-70">· 6维均值：基础算法 / 数据结构 / 图论 / DP / 字符串 / 数学（每项 0-95）</div>
-        <div class="opacity-70">· 难度深度：d≥3 题占比 + 难度加权平均（防止刷难度 1 题刷出高分）</div>
-        <div class="opacity-70">· 提交效率：AC 率 × 0.6 + 一次 AC 率 × 0.4（少 WA 加分）</div>
+        <div class="opacity-70">· 难度浓度：d≥3 题占比 + 难度加权平均（防止刷难度 1 题刷出高分）</div>
+        <div class="opacity-70">· 提效效率：AC 率 × 0.6 + 一次 AC 率 × 0.4（少 WA 加分）</div>
         <div class="opacity-70">· 知识广度：涉及的不同 tag 数（避免单 tag 刷题）</div>
-        <div class="opacity-50 mt-2">🔒 v3.9.47 · 学员姓名 U+UID后4 位；学校 hash → 学校#NNNN；<strong>省份列直接显示省名</strong>（34 个选项无法精确定位）；月榜（30 天）/ 周榜 / 总榜 防历史霸榜；PIPL §5.2 防护 · 取最近一次有效报告</div>
+        <div class="opacity-50 mt-2">🔒 v3.11.20 · 学员姓名 U+UID后4 位；学校 hash → 学校#NNNN；<strong>省份列直接显示省名</strong>（34 个选项无法精确定位）；月榜（30 天）/ 周榜 / 总榜 防历史霸榜；PIPL §5.2 防护 · 取最近一次有效报告</div>
     </div>
 
     <div class="text-center text-[10px] text-[#64748B] font-mono pt-2">
-        © 2026 信竞 AI 报告 · v3.9.47 · 数据每 5 分钟缓存
+        © 2026 信竞 AI 报告 · v3.11.20 · 数据每 5 分钟缓存
     </div>
 </main>
 </body>

@@ -251,8 +251,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.11.19d"
-APP_VERSION_BUILD = "20260701_v3p11p19d_silent_register_for_parent_subscribe"
+APP_VERSION = "v3.11.19e"
+APP_VERSION_BUILD = "20260701_v3p11p19e_status_page_use_task_short_id"
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -6498,11 +6498,16 @@ def status_page(task_id):
                 _tail = _v[_i + len("/reports/"):]
                 _slash = _tail.find("/")
                 if _slash > 0:
-                    _guessed = _tail[:_slash].strip()
-                    # 过滤明显非 uid 的占位 (如 "tmp", "preview")
-                    if _guessed and _guessed not in ("tmp", "preview", "static"):
+                    _raw = _tail[:_slash].strip()
+                    # v3.11.19 fix · 目录名格式是 "<8位 task_id 短码>_<姓名>",
+                    #   整段 ("17fc70db_characterbox") 既不是 luogu_uid 也不是 8 位 short_id,
+                    #   拿去做 /me/<x>/start-parent-subscribe 会导致 404 "未找到对应报告目录".
+                    #   这里只取下划线前一段, 即 8 位 task_id 短码 (与 reports/ 前缀一致).
+                    _guessed = _raw.split("_", 1)[0].strip()
+                    # 过滤明显非 uid 的占位 (如 "tmp", "preview") + 8 位 hex 校验
+                    if _guessed and _guessed not in ("tmp", "preview", "static") and len(_guessed) == 8:
                         luogu_uid = _guessed
-                        app.logger.info(f"[status_page] luogu_uid 空, 从 task.{_k}={_v!r} 反推: {luogu_uid}")
+                        app.logger.info(f"[status_page] luogu_uid 空, 从 task.{_k}={_v!r} 反推 task_id 短码: {luogu_uid}")
                         break
         # 2) 试从 session 拿当前登录学员
         if not luogu_uid:
@@ -16915,20 +16920,22 @@ def _is_parent_subscribed(luogu_uid: str) -> bool:
       · redeemed_at IS NOT NULL
       · expires_at IS NULL OR expires_at > now
     """
-    if not luogu_uid or not str(luogu_uid).isdigit():
+    if not luogu_uid:
         return False
     try:
         from task_store import _get_conn
         conn = _get_conn()
         try:
+            # v3.11.19e · 同时支持 luogu_uid (数字) 和 short_id (8位 字母数字):
+            #   无感注册后学员 luogu_uid 可能为空, short_id 才是 8 位 task_id 短码.
             row = conn.execute(
                 "SELECT COUNT(*) AS n FROM activation_codes ac "
                 "JOIN students s ON s.id = ac.student_id "
                 "WHERE ac.sku IN ('parent_sub', 'parent_invite') "
-                "  AND s.luogu_uid = ? "
+                "  AND (s.luogu_uid = ? OR s.short_id = ?) "
                 "  AND ac.redeemed_at IS NOT NULL "
                 "  AND (ac.expires_at IS NULL OR ac.expires_at > datetime('now'))",
-                (str(luogu_uid).strip(),),
+                (str(luogu_uid).strip(), str(luogu_uid).strip()),
             ).fetchone()
         finally:
             conn.close()
@@ -16965,16 +16972,44 @@ def start_parent_subscribe(short_id: str):
     # 原逻辑直接 404, 但很多用户是先生成报告(没填姓名)再点家长订阅, 学员档案不在 students 表
     # 这里从 reports/<uid>/export_data.json 兜底拿姓名/城市, 立即 create_student,
     # 避免"先注册再订阅"的多余流程 (与 _build_share_card_data 的 export_data 兜底一致)
-    student = _admin_students.get_student_by_short_id(short_id) or _admin_students.get_student_by_uid(short_id) or _admin_students.get_student_by_uid(short_id)
+    # v3.11.19e fix · short_id 可能是 task_id 短码 (8 位 hex), 如 status_page 兜底反推时的
+    #  "17fc70db"; 也可能是 /me/2188303 这种 luogu_uid; 还可能是已分配的 8 位字母数字 short_id.
+    # 1) 先尝试 3 种 ID 在 students 表里查
+    student = (
+        _admin_students.get_student_by_short_id(short_id)
+        or _admin_students.get_student_by_uid(short_id)
+        or _admin_students.get_student_by_uid(short_id)
+    )
     if not student:
         try:
+            _fallback_dir = None
+            # a) 标准 _find_latest_report_dir (匹配 侧车/目录名/姓名)
             _fallback_dir = _find_latest_report_dir(short_id, "")
+            # b) 8 位 task_id 短码: reports/<8位hex>_* 的最新目录 (status_page 兜底会传过来)
+            if (not _fallback_dir) and len(short_id) == 8 and short_id.isalnum():
+                _reports_root = Path(__file__).parent / "reports"
+                _candidates = []
+                if _reports_root.exists():
+                    for _d in _reports_root.iterdir():
+                        if not _d.is_dir():
+                            continue
+                        if not _d.name.startswith(short_id + "_"):
+                            continue
+                        if (_d / "export_data.json").exists() or (_d / "report.md").exists():
+                            _candidates.append(_d)
+                if _candidates:
+                    _candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                    _fallback_dir = _candidates[0]
             if _fallback_dir and (_fallback_dir / "export_data.json").exists():
                 _exp = json.loads((_fallback_dir / "export_data.json").read_text(encoding="utf-8"))
                 _exp_meta = (_exp.get("meta") or {})
                 _fallback_name = (str(_exp_meta.get("student_name") or "").strip() or f"学员{short_id[-4:]}")
+                # c) 决定 luogu_uid vs short_id 写入策略
+                _is_task_short = len(short_id) == 8 and short_id.isalnum() and not short_id.isdigit()
+                _write_luogu_uid = "" if _is_task_short else str(short_id).strip()
+                _write_short_id = short_id if _is_task_short else None
                 _admin_students.create_student(
-                    luogu_uid=str(short_id).strip(),
+                    luogu_uid=_write_luogu_uid,
                     real_name=_fallback_name,
                     school=str(_exp_meta.get("school") or "").strip() or None,
                     grade=str(_exp_meta.get("grade") or "").strip() or None,
@@ -16982,15 +17017,25 @@ def start_parent_subscribe(short_id: str):
                     province=str(_exp_meta.get("province") or "").strip() or None,
                     is_minor=False,
                     registered_via="auto_from_parent_subscribe",
+                    short_id=_write_short_id,
                 )
-                student = _admin_students.get_student_by_uid(short_id)
-                app.logger.info(f"v3.11.19 无感注册: UID={short_id} name={_fallback_name} (from {_fallback_dir.name}/export_data.json)")
+                # d) 重读 student
+                if _is_task_short:
+                    student = _admin_students.get_student_by_short_id(short_id)
+                else:
+                    student = _admin_students.get_student_by_uid(short_id)
+                app.logger.info(f"v3.11.19e 无感注册: short_id={short_id} task_short={_is_task_short} name={_fallback_name} (from {_fallback_dir.name}/export_data.json)")
         except Exception as _e:
-            app.logger.warning(f"v3.11.19 无感注册失败: UID={short_id} {_e}")
+            app.logger.warning(f"v3.11.19e 无感注册失败: short_id={short_id} {_e}")
     if not student:
         return render_template_string(REGISTER_INVALID_HTML, message=f"UID {short_id} 未注册,且未找到对应报告目录"), 404
 
-    luogu_uid = str(short_id).strip()  # 后续所有函数都依赖 luogu_uid 变量
+    # v3.11.19e fix · 后续函数依赖 luogu_uid, 但 task_id 短码学员的 luogu_uid 字段是空的.
+    # 这里把 luogu_uid 留空, 但 luogu_uid 变量仍然赋值 short_id (8 位), 让 _is_parent_subscribed
+    # 等基于 "luogu_uid" 字符串的查询走 students.short_id 列也能匹配上 (见 _resolve_student_row).
+    # 不过 _is_parent_subscribed 内部是按 luogu_uid 数字查的, 失败就让它失败 → 走邀请码门控.
+    # 学员实际身份在 student dict 里, 后续 _build_share_card_data / _gen_xxx 都从 student 取.
+    luogu_uid = str(student.get("luogu_uid") or short_id).strip()  # 后续所有函数都依赖 luogu_uid 变量
 
     # v3.9.69 · 报告 / 海报公开显示的脱敏字段：仅姓氏 + 学校 hash 匿称
     student = dict(student)

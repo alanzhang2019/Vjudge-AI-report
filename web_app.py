@@ -251,8 +251,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.11.19e"
-APP_VERSION_BUILD = "20260701_v3p11p19e_status_page_use_task_short_id"
+APP_VERSION = "v3.11.19f"
+APP_VERSION_BUILD = "20260701_v3p11p19f_status_page_pass_task_id"
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -6579,6 +6579,9 @@ def status_page(task_id):
         ps_html_url=ps_html_url,
         # v3.9.41 · 新增：DB 层订阅判断（HTML 未生成也能识别已兑换）
         has_parent_sub_db=has_parent_sub_db,
+        # v3.11.19e fix · 模板里 {{ task_id }} (posterDownloadBtn / 海报下载 JS) 必须传,
+        #   否则渲染空字符串 → /api/task-poster/.png?exam_type=... → 404
+        task_id=task_id,
     )
 
 

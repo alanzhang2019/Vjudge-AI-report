@@ -2239,11 +2239,15 @@ INDEX_HTML = """
             </button>
         </div>
 
-        <!-- v3.9.75 · 醒目的排行榜入口 -->
-        <a href="/leaderboard" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/40 text-amber-300 font-mono text-sm font-bold hover:from-amber-500/30 hover:to-orange-500/30 hover:border-amber-500/60 hover:text-amber-200 transition-all rise d3" style="margin-top: 12px;">
-            🏆 AI 测评排行榜
-            {% if leaderboard_total %}<span class="text-[11px] opacity-70">{{ leaderboard_total }} 位学员</span>{% endif %}
-        </a>
+        <!-- v3.9.77 · 醒目的 QQ 群 + 排行榜 双入口（与个人中心同款醒目大按钮） -->
+        <div class="flex items-stretch justify-center gap-3 mb-2 rise d3" style="max-width: 560px; margin: 14px auto 0;">
+            <a href="https://qm.qq.com/q/610931699" target="_blank" class="flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white rounded-2xl font-extrabold text-base shadow-xl ring-2 ring-indigo-300/50 transition-all hover:scale-105 hover:shadow-2xl">
+                <span class="text-xl">💬</span> QQ 群 610931699
+            </a>
+            <a href="/leaderboard" class="flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-amber-500 via-orange-500 to-red-500 hover:from-amber-600 hover:via-orange-600 hover:to-red-600 text-white rounded-2xl font-extrabold text-base shadow-xl ring-2 ring-amber-300/50 transition-all hover:scale-105 hover:shadow-2xl">
+                <span class="text-xl">🏆</span> AI 测评排行榜
+            </a>
+        </div>
     </section>
 
     <!-- 主 CTA -->

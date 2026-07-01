@@ -15863,9 +15863,11 @@ def _build_share_card_data(luogu_uid_or_short_id: str, exam_type: str = "noi_csp
     report_dir_path = None
     try:
         # v3.9.68 · 先按 exam_type 找该类型专属报告目录；找不到再回退到通用最新目录
-        report_dir = _find_latest_report_dir_by_type(luogu_uid, name, _exam_type)
+        # v3.11.21y · 必须用真实 luogu_uid 查报告目录，不能用 short_id（报告目录的侧车文件是 luogu_uid.txt）
+        _lookup_uid = str(student.get("luogu_uid") or _key).strip()
+        report_dir = _find_latest_report_dir_by_type(_lookup_uid, name, _exam_type)
         if report_dir is None:
-            report_dir = _find_latest_report_dir(luogu_uid, name)
+            report_dir = _find_latest_report_dir(_lookup_uid, name)
         if report_dir is not None:
             report_dir_path = report_dir
             for _md_name in _md_candidates:
@@ -15888,25 +15890,27 @@ def _build_share_card_data(luogu_uid_or_short_id: str, exam_type: str = "noi_csp
     # v3.9.48 · AI 定级兜底：report.md 正则没抓到时，从 export_data.json 的
     # ai_score_thousand + six_dim 推算档位（CSP-J 入门 / 熟练 / CSP-S 入门 等）
     # 目的：避免海报"AI 定级"卡片显示"尚未生成报告"（实际数据齐了只是正则没匹配）
-    if not ai_eval.get("ai_level") and report_dir_path:
+    if report_dir_path:
         try:
             _exp_path = report_dir_path / "export_data.json"
             if _exp_path.exists():
                 _exp = json.loads(_exp_path.read_text(encoding="utf-8", errors="replace"))
-                _score = int(_exp.get("ai_score_thousand") or 0)
-                _six = _exp.get("six_dimension_scores") or {}
-                ai_eval["ai_level"] = _fallback_ai_level(_score, _six, gesp_level, gesp_score)
                 # v3.11.21y · 海报需要展示综合评分 (ai_score_thousand/1000) → 透传到 data
-                ai_eval["ai_score"] = _score
-                if not ai_eval.get("core_reading") and _six:
-                    # 用 6 维中最弱维度+最强维度 拼一句 1 行评语
-                    _sorted = sorted(_six.items(), key=lambda kv: kv[1])
-                    _weak_k, _weak_v = _sorted[0]
-                    _strong_k, _strong_v = _sorted[-1]
-                    ai_eval["core_reading"] = (
-                        f"6 维评分 {_strong_v}（{_strong_k}）最强、{_weak_v}（{_weak_k}）最弱，"
-                        f"建议针对性补齐短板"
-                    )
+                #   不管 ai_level 是否从 report.md 提取成功, 都要读这个字段
+                ai_eval["ai_score"] = int(_exp.get("ai_score_thousand") or 0)
+                if not ai_eval.get("ai_level"):
+                    _score = ai_eval["ai_score"]
+                    _six = _exp.get("six_dimension_scores") or {}
+                    ai_eval["ai_level"] = _fallback_ai_level(_score, _six, gesp_level, gesp_score)
+                    if not ai_eval.get("core_reading") and _six:
+                        # 用 6 维中最弱维度+最强维度 拼一句 1 行评语
+                        _sorted = sorted(_six.items(), key=lambda kv: kv[1])
+                        _weak_k, _weak_v = _sorted[0]
+                        _strong_k, _strong_v = _sorted[-1]
+                        ai_eval["core_reading"] = (
+                            f"6 维评分 {_strong_v}（{_strong_k}）最强、{_weak_v}（{_weak_k}）最弱，"
+                            f"建议针对性补齐短板"
+                        )
         except Exception as _fbe:
             app.logger.debug(f"[v3.9.48 /share-card] AI 定级兜底失败: {_fbe}")
 

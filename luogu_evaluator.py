@@ -2264,6 +2264,10 @@ def generate_chart_images(export_data: dict, output_dir: str) -> dict[str, str]:
         ks = str(k)
         if ks.isdigit():
             level = int(ks)
+            # v3.11.21q · 洛谷官方 7 档 (1-7), 数据里偶尔出现 8/9/10 (旧题/超纲),
+            # 越界题归并到 7 档 (最高档 NOI/NOI+/CTSC), 避免图表出现 "8"/"9" 这种乱码标签
+            if level > 7:
+                level = 7
             if level > 0:
                 numeric_levels.append(level)
         else:

@@ -5818,7 +5818,10 @@ def upload_source_form():
     _gate = _require_student_login()
     if _gate:
         return _gate
-    return render_template_string(UPLOAD_SOURCE_HTML)
+    _exam_type = str(request.args.get("exam_type", "")).strip().lower()
+    if _exam_type not in ("noi_csp", "gesp"):
+        _exam_type = "noi_csp"
+    return render_template_string(UPLOAD_SOURCE_HTML, exam_type=_exam_type)
 
 
 @app.route("/upload-source", methods=["POST"])
@@ -6019,10 +6022,10 @@ UPLOAD_ZIP_HTML = """
                     <div class="text-sm font-semibold text-slate-700 mb-2">📋 报告类型</div>
                     <div class="flex gap-3 text-sm">
                         <label class="flex items-center gap-1.5">
-                            <input type="radio" name="exam_type" value="noi_csp" checked> 🏆 NOI-CSP 测评
+                            <input type="radio" name="exam_type" value="noi_csp" {% if exam_type == 'noi_csp' %}checked{% endif %}> 🏆 NOI-CSP 测评
                         </label>
                         <label class="flex items-center gap-1.5">
-                            <input type="radio" name="exam_type" value="gesp"> 📘 GESP 备考
+                            <input type="radio" name="exam_type" value="gesp" {% if exam_type == 'gesp' %}checked{% endif %}> 📘 GESP 备考
                         </label>
                     </div>
                     <div class="mt-2">
@@ -6302,10 +6305,10 @@ UPLOAD_SOURCE_HTML = """
                     <div class="text-sm font-semibold text-slate-700 mb-2">📋 报告类型</div>
                     <div class="flex gap-3 text-sm">
                         <label class="flex items-center gap-1.5">
-                            <input type="radio" name="exam_type" value="noi_csp" checked> 🏆 NOI-CSP 测评
+                            <input type="radio" name="exam_type" value="noi_csp" {% if exam_type == 'noi_csp' %}checked{% endif %}> 🏆 NOI-CSP 测评
                         </label>
                         <label class="flex items-center gap-1.5">
-                            <input type="radio" name="exam_type" value="gesp"> 📘 GESP 备考
+                            <input type="radio" name="exam_type" value="gesp" {% if exam_type == 'gesp' %}checked{% endif %}> 📘 GESP 备考
                         </label>
                     </div>
                     <div class="mt-2">
@@ -8985,7 +8988,7 @@ STUDENT_REPORT_HTML = """
             <div class="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center">
                 <div class="text-4xl mb-2">📘</div>
                 <p class="text-sm text-gray-500">还没有 GESP 备考报告</p>
-                <a href="/generate-form?exam_type=gesp" class="inline-block mt-3 px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold">📝 立即生成 GESP 报告</a>
+                <a href="/upload-source?exam_type=gesp" class="inline-block mt-3 px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold">📝 立即生成 GESP 报告</a>
             </div>
             {% endif %}
         </div>
@@ -9088,7 +9091,7 @@ STUDENT_REPORT_HTML = """
                     </div>
                 </div>
                 <!-- v3.9.9 · 每题独立 AI 讲题入口（直跳 aijiangti.cn，题目已直传 + C++ 实现要求） -->
-                <a href="https://oi.aijiangti.cn/?pid={{ m.problem_id or m.pid }}&from=luogu&lang=cpp&require={{ '用C++代码实现并讲解'|urlencode }}&source={{ (m.source or '')|urlencode }}&title={{ (m.title or '')|urlencode }}&mode=problem"
+                <a href="https://aijiangti.cn/?pid={{ m.problem_id or m.pid }}&from=luogu&lang=cpp&require={{ '用C++代码实现并讲解'|urlencode }}&source={{ (m.source or '')|urlencode }}&title={{ (m.title or '')|urlencode }}&mode=problem"
                    target="_blank" rel="noopener"
                    class="ml-2 px-2.5 py-1.5 rounded-md bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-xs font-bold hover:from-blue-600 hover:to-cyan-600 whitespace-nowrap"
                    title="跳到 aijiangti.cn 生成 C++ 课件（题号/标题/来源已传入）">
@@ -14875,7 +14878,7 @@ STUDENT_ME_LITE_HTML = r"""
                             {% endif %}
                         </div>
                         <!-- v3.9.9 · 直跳 aijiangti.cn · C++ 课件生成（题号/标题/来源已直传） -->
-                        <a href="https://oi.aijiangti.cn/?pid={{ m.problem_id }}&from=luogu&lang=cpp&require={{ '用C++代码实现并讲解'|urlencode }}&source={{ (m.source or '')|urlencode }}&title={{ (m.title or '')|urlencode }}&mode=problem"
+                        <a href="https://aijiangti.cn/?pid={{ m.problem_id }}&from=luogu&lang=cpp&require={{ '用C++代码实现并讲解'|urlencode }}&source={{ (m.source or '')|urlencode }}&title={{ (m.title or '')|urlencode }}&mode=problem"
                            target="_blank" rel="noopener"
                            class="flex-shrink-0 inline-flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-xs font-bold rounded-lg hover:from-blue-600 hover:to-cyan-600 whitespace-nowrap"
                            title="跳到 aijiangti.cn 生成 C++ 课件（题目已传入）">
@@ -19382,7 +19385,7 @@ STUDENT_ME_HTML = """
                         {# v3.11.19m · 学员态隐藏 PDF 下载（仅管理员后台可下载） #}
                         <a href="{{ latest_noi_csp_card.share_url }}" target="_blank"
                            class="px-3 py-1.5 rounded-md bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold">📤 生成分享海报</a>
-                        <a href="/generate-form?exam_type=noi_csp"
+                        <a href="/upload-source"
                            class="px-3 py-1.5 rounded-md bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold">🔄 重新生成</a>
                     </div>
                 </div>
@@ -19415,7 +19418,7 @@ STUDENT_ME_HTML = """
                         {# v3.11.19m · 学员态隐藏 PDF 下载（仅管理员后台可下载） #}
                         <a href="{{ latest_gesp_card.share_url }}" target="_blank"
                            class="px-3 py-1.5 rounded-md bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold">📤 生成分享海报</a>
-                        <a href="/generate-form?exam_type=gesp"
+                        <a href="/upload-source?exam_type=gesp"
                            class="px-3 py-1.5 rounded-md bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold">🔄 重新生成</a>
                     </div>
                 </div>
@@ -19423,7 +19426,7 @@ STUDENT_ME_HTML = """
                 <div class="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center">
                     <div class="text-4xl mb-2">📘</div>
                     <p class="text-sm text-gray-500">还没有 GESP 备考报告</p>
-                    <a href="/generate-form?exam_type=gesp" class="inline-block mt-3 px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold">📝 立即生成 GESP 报告</a>
+                    <a href="/upload-source?exam_type=gesp" class="inline-block mt-3 px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold">📝 立即生成 GESP 报告</a>
                 </div>
                 {% endif %}
             </div>
@@ -20064,7 +20067,7 @@ STUDENT_ME_HTML = """
                             {% endif %}
                         </div>
                         <!-- v3.9.9 · 直跳 aijiangti.cn · C++ 课件生成（题号/标题/来源已直传） -->
-                        <a href="https://oi.aijiangti.cn/?pid={{ m.problem_id }}&from=luogu&lang=cpp&require={{ '用C++代码实现并讲解'|urlencode }}&source={{ (m.source or '')|urlencode }}&title={{ (m.title or '')|urlencode }}&mode=problem"
+                        <a href="https://aijiangti.cn/?pid={{ m.problem_id }}&from=luogu&lang=cpp&require={{ '用C++代码实现并讲解'|urlencode }}&source={{ (m.source or '')|urlencode }}&title={{ (m.title or '')|urlencode }}&mode=problem"
                            target="_blank" rel="noopener"
                            class="flex-shrink-0 inline-flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-xs font-bold rounded-lg hover:from-blue-600 hover:to-cyan-600 whitespace-nowrap"
                            title="跳到 aijiangti.cn 生成 C++ 课件（题目已传入）">
@@ -20251,7 +20254,7 @@ REPORT_PREVIEW_HTML = r"""<!doctype html>
         {% if m.summary %}<div class="text-xs text-gray-600 mt-1">💡 {{ m.summary[:60] }}{% if m.summary|length > 60 %}…{% endif %}</div>{% endif %}
         {# v3.9.9 · /r/<uid> 预览区补 AI 讲题入口（直跳 aijiangti.cn，C++ 课件生成） #}
         {% if m.problem_id %}
-        <a href="https://oi.aijiangti.cn/?pid={{ m.problem_id }}&from=luogu&lang=cpp&require={{ '用C++代码实现并讲解'|urlencode }}&source={{ (m.source or '')|urlencode }}&title={{ (m.title or '')|urlencode }}&mode=problem"
+        <a href="https://aijiangti.cn/?pid={{ m.problem_id }}&from=luogu&lang=cpp&require={{ '用C++代码实现并讲解'|urlencode }}&source={{ (m.source or '')|urlencode }}&title={{ (m.title or '')|urlencode }}&mode=problem"
            target="_blank" rel="noopener"
            class="inline-flex items-center gap-1 mt-1.5 px-2.5 py-1 bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-[11px] font-bold rounded-md hover:from-blue-600 hover:to-cyan-600"
            title="跳到 aijiangti.cn 生成 C++ 课件（题目已传入）">

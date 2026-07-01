@@ -16784,8 +16784,14 @@ def _build_parent_subscribe_data(student: dict, luogu_uid: str) -> dict:
                 reverse=True,
             )
             if _candidates:
-                _md = (_candidates[0] / "report.md").read_text(encoding="utf-8", errors="replace") \
-                    if (_candidates[0] / "report.md").exists() else ""
+                # v3.11.19h · 兼容旧版 report_noi_csp.md（v3.10 之前命名）
+                _md_path = None
+                for _cand in ("report.md", "report_gesp.md", "report_noi_csp.md"):
+                    _p = _candidates[0] / _cand
+                    if _p.exists():
+                        _md_path = _p
+                        break
+                _md = _md_path.read_text(encoding="utf-8", errors="replace") if _md_path else ""
                 # 识别报告类型
                 if "GESP 8 级版" in _md or "GESP 8 级知识地图" in _md:
                     diff_kind = "gesp"
@@ -17651,9 +17657,12 @@ def _run_parent_subscribe(
         with TASKS_LOCK:
             update_task(task_id, message=f"正在读取基础报告...", ai_progress=10)
         # v3.9.68 · 兼容 GESP 用户：优先 report.md，没有就用 report_gesp.md
+        # v3.11.19h · 兼容 NOI-CSP 旧版用户：再 fallback 到 report_noi_csp.md
         _main_md = report_dir / "report.md"
         if not _main_md.exists():
             _main_md = report_dir / "report_gesp.md"
+        if not _main_md.exists():
+            _main_md = report_dir / "report_noi_csp.md"
         report_md = _main_md.read_text(encoding="utf-8", errors="replace")
         export_data_path = report_dir / "export_data.json"
         export_data = {}

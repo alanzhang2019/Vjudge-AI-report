@@ -15896,6 +15896,8 @@ def _build_share_card_data(luogu_uid_or_short_id: str, exam_type: str = "noi_csp
                 _score = int(_exp.get("ai_score_thousand") or 0)
                 _six = _exp.get("six_dimension_scores") or {}
                 ai_eval["ai_level"] = _fallback_ai_level(_score, _six, gesp_level, gesp_score)
+                # v3.11.21y · 海报需要展示综合评分 (ai_score_thousand/1000) → 透传到 data
+                ai_eval["ai_score"] = _score
                 if not ai_eval.get("core_reading") and _six:
                     # 用 6 维中最弱维度+最强维度 拼一句 1 行评语
                     _sorted = sorted(_six.items(), key=lambda kv: kv[1])
@@ -15943,6 +15945,17 @@ def _build_share_card_data(luogu_uid_or_short_id: str, exam_type: str = "noi_csp
         except Exception as _fbe2:
             app.logger.debug(f"[v3.11.19h /share-card] stats 兜底失败: {_fbe2}")
 
+    # v3.11.21y · 海报需要展示综合评分：report.md 抽取分支没填 ai_score 时,
+    # 再从 export_data.json 取一次(取不到就 None, 海报那边会隐藏)
+    if ai_eval.get("ai_score") is None and report_dir_path:
+        try:
+            _exp_path2 = report_dir_path / "export_data.json"
+            if _exp_path2.exists():
+                _exp2 = json.loads(_exp_path2.read_text(encoding="utf-8", errors="replace"))
+                ai_eval["ai_score"] = int(_exp2.get("ai_score_thousand") or 0)
+        except Exception:
+            pass
+
     # 报告生成时间若存在则覆盖 asof
     asof = today.strftime("%Y-%m-%d")
     if ai_eval.get("report_date"):
@@ -15965,6 +15978,8 @@ def _build_share_card_data(luogu_uid_or_short_id: str, exam_type: str = "noi_csp
         "ai_level": ai_eval.get("ai_level"),
         "core_reading": ai_eval.get("core_reading"),
         "verdict": ai_eval.get("verdict"),
+        # v3.11.21y · 海报新增"综合评分"展示 (0-1000, None 表无)
+        "ai_score": int(ai_eval.get("ai_score") or 0) if ai_eval.get("ai_score") is not None else None,
         # v3.6.1 报告图表（来自 report assets/，用于海报主视觉替代 AI 核心解读文字）
         "report_assets": report_assets,
     }
@@ -16260,9 +16275,23 @@ def _render_share_card_png(data: dict, qr_url: str, exam_type: str = "noi_csp") 
 
     # 卡片主体
     ax.add_patch(_rounded(0.5, 8.30, 8.0, 5.00, COLOR_CARD, ec=COLOR_PRIMARY_LT, lw=2, r=0.25))
-    # ─ 第一行：AI 定级 label (左) + 评级徽章 (右)，同行水平 ──────
+    # ─ 第一行：AI 定级 label (左) + 综合评分 (中) + 评级徽章 (右)，同行水平 ──────
+    # v3.11.21y · 海报新增"综合评分"展示: ai_score_thousand/1000, 来自 export_data.json
     ax.text(0.85, 12.55, "AI 定级", ha="left", va="center",
             fontsize=12, color=COLOR_TEXT_LT, fontweight="bold")
+    _ai_score = int(data.get("ai_score") or 0)
+    if _ai_score > 0:
+        # 颜色按分数段: 强(>=700)绿 / 中(>=500)琥珀 / 弱(<500)红 → 复用评级色
+        if _ai_score >= 700:
+            _sc_color = COLOR_GREEN
+        elif _ai_score >= 500:
+            _sc_color = COLOR_AMBER
+        else:
+            _sc_color = COLOR_RED
+        # 13pt 琥珀/绿/红 加粗, x 紧跟 "AI 定级" label, 不挤徽章 (徽章 6.55 起)
+        ax.text(1.65, 12.55, f"·  综合评分 {_ai_score} / 1000",
+                ha="left", va="center",
+                fontsize=13, color=_sc_color, fontweight="bold")
     ax.add_patch(_rounded(6.55, 12.32, 1.85, 0.45, badge_color, r=0.20))
     ax.text(7.475, 12.55, f"●  {badge_label}", ha="center", va="center",
             fontsize=11, color="white", fontweight="bold")

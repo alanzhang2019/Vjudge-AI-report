@@ -19207,6 +19207,16 @@ STUDENT_ME_HTML = """
         {# v3.9.7 · 顶部 GESP 段位进度条已删除（下面"个人成就"卡片里已有 GESP 段位 + 免初赛状态） #}
         {# v3.9.7 · 历史奖项录入模块已删除（注册表单里已经收集过，避免重复入口） #}
 
+        <!-- v3.9.75 · 醒目导航栏（QQ群 + 排行榜） -->
+        <div class="flex items-center justify-center gap-4 mb-4">
+            <a href="https://qm.qq.com/q/610931699" target="_blank" class="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm shadow-lg transition-all hover:scale-105">
+                💬 QQ 群 610931699
+            </a>
+            <a href="/leaderboard" class="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-xl font-bold text-sm shadow-lg transition-all hover:scale-105">
+                🏆 AI 测评排行榜
+            </a>
+        </div>
+
         <!-- v3.6 · 个人成就（千分制 AI 评分 + 6 维雷达 + GESP/奖项汇总） -->
         <div class="bg-white rounded-2xl shadow p-5 mb-4" id="achievements">
             <h2 class="text-lg font-bold text-gray-800 mb-3">🏅 我的个人成就</h2>

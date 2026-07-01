@@ -251,8 +251,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.11.19k"
-APP_VERSION_BUILD = "20260701_v3p11p19k_fix_get_parent_subscribe_luogu_uid_undefined"
+APP_VERSION = "v3.11.19l"
+APP_VERSION_BUILD = "20260701_v3p11p19l_get_parent_subscribe_has_report_check_noi_csp"
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -16949,8 +16949,11 @@ def parent_subscribe(short_id: str):
     # 还没生成 → 渲染触发生成页
     data = _build_parent_subscribe_data(student, luogu_uid)
     # v3.9.68 · 兼容 GESP 用户（只有 report_gesp.md 没有 report.md）
+    # v3.11.19l · 兼容 NOI-CSP 旧版（只有 report_noi_csp.md）
     has_report = bool(report_dir and (
-        (report_dir / "report.md").exists() or (report_dir / "report_gesp.md").exists()
+        (report_dir / "report.md").exists()
+        or (report_dir / "report_gesp.md").exists()
+        or (report_dir / "report_noi_csp.md").exists()
     ))
     return render_template_string(
         PARENT_SUBSCRIBE_HTML,

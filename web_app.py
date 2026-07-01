@@ -251,8 +251,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.11.19g"
-APP_VERSION_BUILD = "20260701_v3p11p19g_admin_create_accept_short_id_only"
+APP_VERSION = "v3.11.19h"
+APP_VERSION_BUILD = "20260701_v3p11p19h_parent_subscribe_accept_report_noi_csp"
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -15279,6 +15279,41 @@ def _build_share_card_data(luogu_uid_or_short_id: str, exam_type: str = "noi_csp
         except Exception as _fbe:
             app.logger.debug(f"[v3.9.48 /share-card] AI 定级兜底失败: {_fbe}")
 
+    # v3.11.19h · 终极兜底: report.md 抽不到 + export_data.json 缺 ai_score_thousand/six_dim
+    #   时(典型:6 月份前 v3.10 之前生成的"旧版报告"),用 stats.passed 推算 CSP 档位
+    #   避免海报仍显示"尚未生成报告"
+    if not ai_eval.get("ai_level") and report_dir_path:
+        try:
+            _exp_path = report_dir_path / "export_data.json"
+            if _exp_path.exists():
+                _exp = json.loads(_exp_path.read_text(encoding="utf-8", errors="replace"))
+                _stats = _exp.get("stats") or {}
+                _passed = int(_stats.get("passed") or 0)
+                if _passed > 0:
+                    # 简单分档: v3.9 之前报告没有 AI score,只能用 AC 推算
+                    if _passed >= 200:
+                        ai_eval["ai_level"] = "NOI 级别 · 优秀"
+                    elif _passed >= 100:
+                        ai_eval["ai_level"] = "CSP-S 入门级"
+                    elif _passed >= 50:
+                        ai_eval["ai_level"] = "CSP-J 熟练级"
+                    elif _passed >= 20:
+                        ai_eval["ai_level"] = "CSP-J 入门级"
+                    elif _passed >= 5:
+                        ai_eval["ai_level"] = "基础级"
+                    else:
+                        ai_eval["ai_level"] = "起步阶段"
+                    if not ai_eval.get("core_reading"):
+                        ai_eval["core_reading"] = (
+                            f"基于 stats 推算(共 AC {_passed} 题): 旧版报告无 AI 评分维度,"
+                            f"建议重新生成基础报告以获得更精准的 6 维评测"
+                        )
+                    app.logger.info(
+                        f"v3.11.19h 海报终极兜底: passed={_passed} → {ai_eval['ai_level']} (来自旧 export_data.json)"
+                    )
+        except Exception as _fbe2:
+            app.logger.debug(f"[v3.11.19h /share-card] stats 兜底失败: {_fbe2}")
+
     # 报告生成时间若存在则覆盖 asof
     asof = today.strftime("%Y-%m-%d")
     if ai_eval.get("report_date"):
@@ -17200,10 +17235,15 @@ def start_parent_subscribe(short_id: str):
             pass  # 日志失败不影响主流程
 
     # v3.9.68 · 兼容 GESP 用户（只有 report_gesp.md 没有 report.md）。
-    # 旧逻辑直接 return 错误页，导致 GESP 用户明明已订阅却看不到内容。
+    # v3.11.19h · 兼容 NOI-CSP 旧版用户（只有 report_noi_csp.md 没有 report.md）。
+    # 旧逻辑直接 return 错误页，导致 GESP 用户明明已订阅却看不到内容，
+    # 同样 6 月份前生成的 NOI-CSP 报告（v3.10 之前）也因命名是 report_noi_csp.md
+    # 被误判为"没有基础报告"。
     report_dir = _find_latest_report_dir(luogu_uid, student.get("real_name") or "")
     if not report_dir or not (
-        (report_dir / "report.md").exists() or (report_dir / "report_gesp.md").exists()
+        (report_dir / "report.md").exists()
+        or (report_dir / "report_gesp.md").exists()
+        or (report_dir / "report_noi_csp.md").exists()
     ):
         gesp_level = int(student.get("gesp_highest_passed") or 0)
         gesp_score = int(student.get("gesp_latest_score") or 0)

@@ -63,11 +63,12 @@ def create_student(
       - luogu_uid 改为可选(邮箱注册后,新学员不再填)
       - 必填 email + short_id + password_hash(后两个不传时自动生成)
     """
-    # v3.10.0 · 校验:至少要有 email 或 luogu_uid 之一
+    # v3.10.0 · 校验:至少要有 email / luogu_uid / short_id 之一
     has_email = bool(email and str(email).strip())
     has_luogu = bool(luogu_uid and str(luogu_uid).strip())
-    if not has_email and not has_luogu:
-        raise ValueError("email 和 luogu_uid 至少要有一个")
+    has_short = bool(short_id and str(short_id).strip())
+    if not (has_email or has_luogu or has_short):
+        raise ValueError("email / luogu_uid / short_id 至少要有一个")
     # 14 岁以下 + 无授权 → real_name 强制 NULL（PIPL §5.2 防护）
     if is_minor and real_name:
         real_name = None

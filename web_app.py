@@ -251,8 +251,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.11.19l"
-APP_VERSION_BUILD = "20260701_v3p11p19l_get_parent_subscribe_has_report_check_noi_csp"
+APP_VERSION = "v3.11.19m"
+APP_VERSION_BUILD = "20260701_v3p11p19m_hide_uid_on_public_pages_and_remove_pdf_for_students"
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -8411,7 +8411,8 @@ STUDENT_REPORT_HTML = """
         </button>
         <div class="text-sm text-gray-500">🎓 学员版报告</div>
         <h1 class="text-2xl font-extrabold text-gray-800 mt-1">Hi，{{ student.masked_name or '同学' }}！</h1>
-        <p class="text-xs text-gray-400 mt-1">{{ student.city or '未填城市' }} · {{ student.grade_label or student.grade or '—' }} · UID {{ luogu_uid }}</p>
+        {# v3.11.19m · 公开位置隐藏 UID（避免分享截图/传播时泄露用户原始 UID） #}
+        <p class="text-xs text-gray-400 mt-1">{{ student.city or '未填城市' }} · {{ student.grade_label or student.grade or '—' }}</p>
         <div class="mt-4 flex items-center justify-center gap-4">
             <div>
                 <div class="medal">{% if gesp_level >= 7 %}🏆{% elif gesp_level >= 4 %}🏅{% elif gesp_level >= 1 %}⭐{% else %}🌱{% endif %}</div>
@@ -8494,10 +8495,7 @@ STUDENT_REPORT_HTML = """
                     <a href="{{ latest_noi_csp_card.html_url }}" target="_blank"
                        class="px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold">🔍 查看 HTML 报告</a>
                     {% endif %}
-                    {% if latest_noi_csp_card.has_pdf %}
-                    <a href="{{ latest_noi_csp_card.pdf_url }}" target="_blank"
-                       class="px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold">📄 下载 PDF</a>
-                    {% endif %}
+                    {# v3.11.19m · 学员态隐藏 PDF 下载（避免学员二次传播/打印给家长），仅管理员后台可下载 #}
                     <a href="{{ latest_noi_csp_card.share_url }}" target="_blank"
                        class="px-3 py-1.5 rounded-md bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold">📤 生成分享海报</a>
                 </div>
@@ -8527,10 +8525,7 @@ STUDENT_REPORT_HTML = """
                     <a href="{{ latest_gesp_card.html_url }}" target="_blank"
                        class="px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold">🔍 查看 GESP 报告</a>
                     {% endif %}
-                    {% if latest_gesp_card.has_pdf %}
-                    <a href="{{ latest_gesp_card.pdf_url }}" target="_blank"
-                       class="px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold">📄 下载 PDF</a>
-                    {% endif %}
+                    {# v3.11.19m · 学员态隐藏 PDF 下载（仅管理员后台可下载） #}
                     <a href="{{ latest_gesp_card.share_url }}" target="_blank"
                        class="px-3 py-1.5 rounded-md bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold">📤 生成分享海报</a>
                 </div>
@@ -8835,7 +8830,8 @@ PARENT_SUBSCRIBE_HTML = """
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>📨 家长订阅版 · {{ student.masked_name or luogu_uid }}</title>
+    {# v3.11.19m · 公开位置隐藏 UID（家长订阅版页/海报传播时不能泄露原始 UID） #}
+    <title>📨 家长订阅版 · {{ student.masked_name or '您家孩子' }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     {{ app_skin_head() }}
     <style>
@@ -8868,10 +8864,10 @@ PARENT_SUBSCRIBE_HTML = """
                 <h1 class="text-2xl font-extrabold text-gray-800 mt-2">
                     {{ student.masked_name or '您家孩子' }} 的 OI 决策报告
                 </h1>
+                {# v3.11.19m · 公开位置隐藏 UID（家长版报告/海报传播时不能泄露原始 UID） #}
                 <p class="text-xs text-gray-500 mt-1">
                     {{ student.city or '所在城市待补' }}{% if student.province %} · {{ student.province }}{% endif %}
                     · {{ student.grade_label or student.grade or '—' }}
-                    · UID {{ luogu_uid }}
                 </p>
             </div>
             <div class="text-right">
@@ -9191,7 +9187,8 @@ _PARENT_SUBSCRIBE_SHELL_HTML = """
             <div>
                 <span class="inline-block text-xs px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full">📨 家长专属深度报告</span>
                 <h1 class="text-2xl font-extrabold text-gray-800 mt-2">您家孩子 {{ masked_name or '—' }} 的 OI 学习深度分析</h1>
-                <p class="text-xs text-gray-500 mt-1">UID {{ luogu_uid }} · 生成于 {{ generated_at }}</p>
+                {# v3.11.19m · 公开位置隐藏 UID（家长订阅版页/海报传播时不能泄露原始 UID） #}
+                <p class="text-xs text-gray-500 mt-1">生成于 {{ generated_at }}</p>
             </div>
             <div class="flex gap-2">
                 {# v3.9.18 · 只保留「学员中心」+「首页」两个入口；原「学员版报告」「家长版报告」按钮已合并到 /me/，避免重复入口 #}
@@ -11283,7 +11280,8 @@ LIST_REPORTS_HTML = """
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>历史报告列表 · UID {{ luogu_uid }} · v3.6</title>
+    {# v3.11.19m · 公开位置隐藏 UID（历史报告列表可由外部访客通过 /r/<id> 访问） #}
+    <title>历史报告列表 · v3.6</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body{background:linear-gradient(135deg,#ecfdf5 0%,#f0f9ff 100%);min-height:100vh;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;}
@@ -11309,7 +11307,8 @@ LIST_REPORTS_HTML = """
         <div class="flex items-start justify-between gap-3 flex-wrap">
             <div>
                 <span class="inline-block px-3 py-1 bg-emerald-100 text-emerald-700 text-xs rounded-full">📁 历史报告</span>
-                <h1 class="text-2xl font-extrabold text-gray-800 mt-2">📚 UID {{ luogu_uid }} 的历史报告</h1>
+                {# v3.11.19m · 公开位置隐藏 UID（历史报告列表） #}
+                <h1 class="text-2xl font-extrabold text-gray-800 mt-2">📚 历史报告</h1>
                 <p class="text-sm text-gray-500 mt-1">共找到 <b class="text-emerald-700">{{ reports|length }}</b> 份历史报告（按时间倒序）</p>
             </div>
             <a href="/select-mode" class="text-sm text-emerald-700 hover:underline whitespace-nowrap">← 返回重新输入</a>
@@ -13282,7 +13281,8 @@ STUDYMATE_TUTOR_HTML = r"""
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>StudyMate AI 讲题 · {{ problem_id or "—" }} · UID {{ luogu_uid }}</title>
+    {# v3.11.19m · 公开位置隐藏 UID（StudyMate AI 讲题页面访客可任意访问） #}
+    <title>StudyMate AI 讲题 · {{ problem_id or "—" }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body{background:linear-gradient(135deg,#eff6ff 0%,#ecfeff 100%);min-height:100vh;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;}
@@ -13303,7 +13303,8 @@ STUDYMATE_TUTOR_HTML = r"""
             {% if has_parent_sub %}<span class="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-bold">✅ 已解锁</span>{% else %}<span class="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-bold">🔒 需家长订阅</span>{% endif %}
         </div>
         <h1 class="text-2xl font-extrabold text-gray-800">📖 {{ problem_id or "—" }} · {{ title or "(无标题)" }}</h1>
-        <p class="text-sm text-gray-500 mt-1">{% if prob_source %}来源：{{ prob_source }} · {% endif %}学员 UID {{ luogu_uid }}</p>
+        {# v3.11.19m · 公开位置隐藏 UID #}
+        <p class="text-sm text-gray-500 mt-1">{% if prob_source %}来源：{{ prob_source }} · {% endif %}StudyMate 智能讲题</p>
     </div>
 
     {% if error %}
@@ -13344,8 +13345,9 @@ STUDYMATE_TUTOR_HTML = r"""
         <h2 class="text-base font-bold text-blue-700 mb-2 flex items-center gap-2">
             <span class="pulse-dot"></span> AI 正在为你生成专属题解…
         </h2>
+        {# v3.11.19m · 公开位置隐藏 UID #}
         <p class="text-sm text-gray-600 leading-relaxed mb-3">
-            StudyMate 正在基于学员 UID <code class="font-mono">{{ luogu_uid }}</code> 的 <b>知识点盲区 / 错题历史 / 提交行为</b>，
+            StudyMate 正在基于该学员的 <b>知识点盲区 / 错题历史 / 提交行为</b>，
             为 <b>{{ problem_id }} {{ title }}</b> 生成「从暴力到正解」的专属讲解（v3.6 接入真实 LLM 后即时返回）。
         </p>
         <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
@@ -13353,7 +13355,7 @@ STUDYMATE_TUTOR_HTML = r"""
             <pre class="whitespace-pre-wrap font-mono text-[11px] leading-relaxed mt-1">题目：{{ problem_id }} {{ title }}{% if prob_source %}（{{ prob_source }}）{% endif %}
 
 学员背景：
-- UID: {{ luogu_uid }}
+- 学员标识：内部 token #{{ luogu_uid|length }} 位
 - 错因摘要：{{ summary or "(无)" }}
 
 请生成：
@@ -13913,7 +13915,8 @@ _REPORT_DATA_PREVIEW_HTML = r"""
     <div class="max-w-3xl mx-auto">
         <div class="preview-hero mb-4">
             <h1 class="text-2xl font-extrabold mb-1">📊 数据预览</h1>
-            <p class="text-sm opacity-90">UID <strong>{{ luogu_uid }}</strong> · {{ dir_name }}</p>
+            {# v3.11.19m · 公开位置隐藏 UID #}
+            <p class="text-sm opacity-90">{{ dir_name }}</p>
             <p class="text-xs opacity-75 mt-1">⚠️ AI 报告未生成 · 以下数据来自 export_data.json 练习阶段</p>
         </div>
 
@@ -15619,12 +15622,14 @@ def _render_share_card_png(data: dict, qr_url: str, exam_type: str = "noi_csp") 
 
     # ── 学员信息行 ──────────────
     # v3.9.69 · 姓名脱敏：海报是公开传播物料，姓名只显示姓氏
+    # v3.11.19m · 海报是公开传播物料，禁止显示原始 UID（避免社工/撞库）
     _masked_name = _mask_name_for_public(data.get("name"))
+    _public_tag = _mask_name_for_public(data.get("school") or "学员")
     ax.add_patch(_rounded(0.5, 13.55, 8.0, 0.55, COLOR_CARD, ec=COLOR_CARD_EDGE, lw=1, r=0.25))
     ax.text(0.85, 13.83, _masked_name, ha="left", va="center",
             fontsize=14, color=COLOR_TEXT, fontweight="bold")
-    ax.text(8.2, 13.83, f"UID  {data['uid']}", ha="right", va="center",
-            fontsize=11, color=COLOR_TEXT_LT, family="monospace")
+    ax.text(8.2, 13.83, _public_tag, ha="right", va="center",
+            fontsize=11, color=COLOR_TEXT_LT)
 
     # ── ★ 主视觉：AI 测评结果面板（v3.6 · 来自 report.md） ★ ──────────────
     ai_level = data.get("ai_level")        # 如 "CSP-S 门槛级"
@@ -18470,10 +18475,10 @@ STUDENT_ME_HTML = """
     {% endif %}
     <div class="me-hero max-w-3xl mx-auto mb-4">
         <h1 class="text-2xl font-extrabold mb-1">🎓 学员 Pro · v3.5.2</h1>
-        <p class="text-sm opacity-90">欢迎，<strong>{{ student.real_name or ('UID-' + (student.luogu_uid or '')) }}</strong></p>
+        <p class="text-sm opacity-90">欢迎，<strong>{{ student.real_name or '同学' }}</strong></p>
+        {# v3.11.19m · 公开位置隐藏 UID（避免个人中心截图/分享时泄露用户原始 UID） #}
         <p class="text-xs opacity-75 mt-1">
-            UID {{ student.luogu_uid }}
-            · {{ student.province or '' }} {{ student.city or '城市未填' }}
+            {{ student.province or '' }} {{ student.city or '城市未填' }}
             · {% if student.gender == 'M' %}男生{% elif student.gender == 'F' %}女生{% else %}性别未填{% endif %}
             · 年级 {{ student.grade_label or student.grade or '—' }}
             {% if student.email %}· 📧 {{ student.email }}{% endif %}
@@ -18653,10 +18658,7 @@ STUDENT_ME_HTML = """
                         <a href="{{ latest_noi_csp_card.html_url }}" target="_blank"
                            class="px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold">🔍 查看 HTML 报告</a>
                         {% endif %}
-                        {% if latest_noi_csp_card.has_pdf %}
-                        <a href="{{ latest_noi_csp_card.pdf_url }}" target="_blank"
-                           class="px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold">📄 下载 PDF</a>
-                        {% endif %}
+                        {# v3.11.19m · 学员态隐藏 PDF 下载（仅管理员后台可下载） #}
                         <a href="{{ latest_noi_csp_card.share_url }}" target="_blank"
                            class="px-3 py-1.5 rounded-md bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold">📤 生成分享海报</a>
                         <a href="/generate-form?exam_type=noi_csp"
@@ -18688,10 +18690,7 @@ STUDENT_ME_HTML = """
                         <a href="{{ latest_gesp_card.html_url }}" target="_blank"
                            class="px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold">🔍 查看 GESP 报告</a>
                         {% endif %}
-                        {% if latest_gesp_card.has_pdf %}
-                        <a href="{{ latest_gesp_card.pdf_url }}" target="_blank"
-                           class="px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold">📄 下载 PDF</a>
-                        {% endif %}
+                        {# v3.11.19m · 学员态隐藏 PDF 下载（仅管理员后台可下载） #}
                         <a href="{{ latest_gesp_card.share_url }}" target="_blank"
                            class="px-3 py-1.5 rounded-md bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold">📤 生成分享海报</a>
                         <a href="/generate-form?exam_type=gesp"
@@ -19454,8 +19453,9 @@ REPORT_PREVIEW_HTML = r"""<!doctype html>
   {% if not has_report %}
   <div class="bg-white rounded-2xl shadow p-8 text-center mt-8">
     <div class="text-5xl mb-3">📭</div>
+    {# v3.11.19m · 公开位置隐藏 UID（/r/<uid> 陌生人扫码落地） #}
     <h1 class="text-lg font-bold text-gray-800 mb-2">该选手暂未生成报告</h1>
-    <p class="text-sm text-gray-500 mb-5">UID {{ token }} · 暂无 AI 测评数据</p>
+    <p class="text-sm text-gray-500 mb-5">暂无 AI 测评数据</p>
     <a href="/?ref={{ ref or '' }}" class="inline-block px-5 py-2.5 bg-emerald-600 text-white text-sm font-bold rounded-lg">✨ 立即生成我的报告</a>
   </div>
   {% else %}

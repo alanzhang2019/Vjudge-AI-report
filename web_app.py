@@ -251,8 +251,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.11.19j"
-APP_VERSION_BUILD = "20260701_v3p11p19j_personal_center_show_email"
+APP_VERSION = "v3.11.19k"
+APP_VERSION_BUILD = "20260701_v3p11p19k_fix_get_parent_subscribe_luogu_uid_undefined"
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -16896,6 +16896,9 @@ def parent_subscribe(short_id: str):
     student = _admin_students.get_student_by_short_id(short_id) or _admin_students.get_student_by_uid(short_id) or _admin_students.get_student_by_uid(short_id)
     if not student:
         return render_template_string(REGISTER_INVALID_HTML, message=f"UID {short_id} 未注册"), 404
+
+    # v3.11.19k · GET 路径需要 luogu_uid 传给 _build_parent_subscribe_data / template
+    luogu_uid = str(student.get("luogu_uid") or short_id).strip()
 
     # 找该学员最近一份 report 文件夹
     report_dir = _find_latest_report_dir(short_id, student.get("real_name") or "")

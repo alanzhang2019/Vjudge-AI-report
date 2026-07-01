@@ -2238,6 +2238,12 @@ INDEX_HTML = """
                 <span class="copied-label" style="display:none">✓ 已复制</span>
             </button>
         </div>
+
+        <!-- v3.9.75 · 醒目的排行榜入口 -->
+        <a href="/leaderboard" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/40 text-amber-300 font-mono text-sm font-bold hover:from-amber-500/30 hover:to-orange-500/30 hover:border-amber-500/60 hover:text-amber-200 transition-all rise d3" style="margin-top: 12px;">
+            🏆 AI 测评排行榜
+            {% if leaderboard_total %}<span class="text-[11px] opacity-70">{{ leaderboard_total }} 位学员</span>{% endif %}
+        </a>
     </section>
 
     <!-- 主 CTA -->

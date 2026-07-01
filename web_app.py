@@ -2456,7 +2456,12 @@ INDEX_HTML = """
                     <span class="text-[18px]">{% if loop.index == 1 %}🥇{% elif loop.index == 2 %}🥈{% else %}🥉{% endif %}</span>
                 </div>
                 <div class="font-display text-[15px] font-bold text-white truncate">{{ entry.display_name }}</div>
-                <div class="text-[11px] text-[var(--ink-2)] mt-0.5 truncate">{{ entry.grade }} · {{ entry.province or '—' }} · {{ entry.school }}</div>
+                <div class="text-[11px] text-[var(--ink-2)] mt-0.5 truncate">
+                    {{ entry.grade }}
+                    {% if entry.province and entry.province != '—' %} · {{ entry.province }}{% endif %}
+                    {% if entry.school and entry.school != '—' %} · {{ entry.school }}{% endif %}
+                    {% if not entry.is_registered and (entry.province == '—' or not entry.province) %} · <span class="italic opacity-70">未注册</span>{% endif %}
+                </div>
                 <div class="flex items-baseline gap-1.5 mt-2">
                     <span class="font-mono font-extrabold text-2xl {% if entry.score >= 800 %}text-[var(--accent)]{% elif entry.score >= 700 %}text-[var(--amber)]{% else %}text-[var(--ink-2)]{% endif %}">{{ entry.score }}</span>
                     <span class="font-mono text-[10px] text-[var(--ink-3)]">/1000</span>
@@ -3026,9 +3031,10 @@ def _compute_leaderboard_full() -> list[dict]:
             cols = []
         if "luogu_uid" not in cols:
             return []
+        # v3.11.21m · 拉 retry_form_json 用于"未注册学员"省份兜底
         task_rows = conn.execute(
             """
-            SELECT t.task_id, t.luogu_uid, t.created_at, t.student_name
+            SELECT t.task_id, t.luogu_uid, t.created_at, t.student_name, t.retry_form_json
               FROM tasks t
              WHERE t.status = 'done'
                AND (t.luogu_uid IS NOT NULL AND t.luogu_uid != '')
@@ -3038,11 +3044,29 @@ def _compute_leaderboard_full() -> list[dict]:
 
         # 2) 每个 luogu_uid 只保留最新一份
         latest_per_uid: dict[str, tuple] = {}
-        for task_id, luogu_uid, created_at, student_name in task_rows:
+        # v3.11.21m · 兜底: 排行榜学员在注册时都填了省份/城市/年级, 但 admin
+        # 批量测分时往往绕过注册直接调 /generate-form 或 /upload-source, 导致
+        # students 表没行, 排行榜全部 "—". 这里同时把 retry_form_json 抽出来,
+        # 给没 students 行的学员兜底 city/province/grade/school (无 UI 数据用 retry_form_json)
+        form_fallback_map: dict[str, dict] = {}
+        for task_id, luogu_uid, created_at, student_name, retry_form_json in task_rows:
             uid = str(luogu_uid).strip()
             if not uid or uid in latest_per_uid:
                 continue
             latest_per_uid[uid] = (str(task_id), uid, str(created_at or ""), str(student_name or ""))
+            # 抽 retry_form_json 兜底字段
+            try:
+                _f = json.loads(retry_form_json or "{}")
+            except Exception:
+                _f = {}
+            if isinstance(_f, dict) and _f:
+                form_fallback_map[uid] = {
+                    "real_name": (_f.get("student_name") or _f.get("real_name") or _f.get("name") or "").strip() or None,
+                    "school": (_f.get("school") or "").strip() or None,
+                    "grade": (_f.get("grade") or "").strip() or None,
+                    "province": (_f.get("province") or "").strip() or None,
+                    "city": (_f.get("city") or "").strip() or None,
+                }
 
         if not latest_per_uid:
             return []
@@ -3056,10 +3080,19 @@ def _compute_leaderboard_full() -> list[dict]:
         except Exception:
             _student_cols = []
         _has_province = "province" in _student_cols
+        # v3.11.21k · 排行榜 row 也需要 city 字段（来自 students 表注册时已选），
+        # 用于报告/海报城市兜底展示；模板按需脱敏，DB 这一层原样取
+        _has_city = "city" in _student_cols
+        _select_cols = ["luogu_uid", "real_name", "school", "grade", "is_minor"]
         if _has_province:
+            _select_cols.append("province")
+        if _has_city:
+            _select_cols.append("city")
+        _select_sql = ", ".join(_select_cols)
+        if _has_province or _has_city:
             try:
                 student_rows = conn.execute(
-                    f"SELECT luogu_uid, real_name, school, grade, is_minor, province FROM students WHERE luogu_uid IN ({placeholders})",
+                    f"SELECT {_select_sql} FROM students WHERE luogu_uid IN ({placeholders})",
                     uids,
                 ).fetchall()
             except Exception:
@@ -3073,7 +3106,18 @@ def _compute_leaderboard_full() -> list[dict]:
             except Exception:
                 student_rows = []
         student_map: dict[str, dict] = {}
-        if _has_province:
+        if _has_province and _has_city:
+            for _row in student_rows:
+                _luogu_uid, _real_name, _school, _grade, _is_minor, _province, _city = _row
+                student_map[str(_luogu_uid)] = {
+                    "real_name": str(_real_name or "") or None,
+                    "school": str(_school or "") or None,
+                    "grade": str(_grade or "") or None,
+                    "is_minor": int(_is_minor or 0) == 1,
+                    "province": str(_province or "").strip() or None,
+                    "city": str(_city or "").strip() or None,  # v3.11.21k · 注册时已选的城市
+                }
+        elif _has_province:
             for luogu_uid, real_name, school, grade, is_minor, province in student_rows:
                 student_map[str(luogu_uid)] = {
                     "real_name": str(real_name or "") or None,
@@ -3081,6 +3125,7 @@ def _compute_leaderboard_full() -> list[dict]:
                     "grade": str(grade or "") or None,
                     "is_minor": int(is_minor or 0) == 1,
                     "province": str(province or "").strip() or None,
+                    "city": None,  # 老 schema
                 }
         else:
             for luogu_uid, real_name, school, grade, is_minor in student_rows:
@@ -3089,12 +3134,26 @@ def _compute_leaderboard_full() -> list[dict]:
                     "school": str(school or "") or None,
                     "grade": str(grade or "") or None,
                     "is_minor": int(is_minor or 0) == 1,
-                    "province": None,  # 老 schema 没有 province
+                    "province": None,
+                    "city": None,
                 }
 
         # 4) 遍历每个 UID，定位 export_data.json 并算分
         for uid, (task_id, _, created_at, student_name_fb) in latest_per_uid.items():
             student = student_map.get(uid, {})
+            # v3.11.21m · students 表没行时用 retry_form_json 兜底
+            # (admin 批量测分绕过注册, 但提交 form 时往往有 city/province/grade)
+            is_registered = bool(student)
+            if not is_registered:
+                _fb = form_fallback_map.get(uid, {})
+                student = {
+                    "real_name": _fb.get("real_name") or student_name_fb or None,
+                    "school": _fb.get("school"),
+                    "grade": _fb.get("grade"),
+                    "is_minor": False,
+                    "province": _fb.get("province"),
+                    "city": _fb.get("city"),
+                }
             try:
                 report_dir = _resolve_task_report_dir({"task_id": task_id, "html": "", "md": "", "pdf": ""})
                 export_path = report_dir / "export_data.json"
@@ -3124,6 +3183,11 @@ def _compute_leaderboard_full() -> list[dict]:
                 "grade": _grade_to_label(student.get("grade")) or student.get("grade") or "—",
                 "stage": stage,
                 "province": _mask_province(student.get("province")),  # v3.9.47 · 省份脱敏
+                # v3.11.21m · 是否在 students 表（注册过）；未注册但有 form 兜底时
+                # 模板给"未注册"灰色标签, 区别于"已注册但未填"
+                "is_registered": is_registered,
+                # v3.11.21k · 城市（注册时已选, 不公开展示, 仅供报告/海报内部兜底用）
+                "city": (student.get("city") or "").strip() or None,
                 "score": int(score),
                 "score_label": score_label,
                 "score_source": score_source,
@@ -3954,14 +4018,9 @@ def run_generation(task_id: str, form: dict):
                     )
             except Exception:
                 pass
-            return jsonify({
-                "ok": False,
-                "blocked_by_killswitch": True,
-                "message": ks_err.get("message", "洛谷接入已暂时关闭"),
-                "reason": ks_err.get("reason", ""),
-                "updated_at": ks_err.get("updated_at", ""),
-                "updated_by": ks_err.get("updated_by", ""),
-            }), 503  # 503 Service Unavailable · 让前端 fetch() 一眼看到非 2xx
+            # v3.11.21p · 后台线程里没有 app context, 不能 jsonify().
+            # 错误状态已写到 tasks 表, 前端 /status/<task_id> 轮询会读到, 不需要再返响应.
+            return
         # v3.9.65 · GESP auto 模式：按学员真考历史兜底"就高不就低"的目标级别
         # （之前表单默认 auto，但代码没实现该逻辑，导致已通过 5 级也被压到 1 级）
         if exam_type == "gesp" and str(target_gesp_level).strip().lower() == "auto":
@@ -5014,10 +5073,164 @@ def _debug_inject_temp_cookies():
     return redirect(url_for("generate_form", _pwd_login=1))
 
 
+# ============================================================
+# v3.11.21n · 24h 限流共用 helper
+# 用法: 在 4 个入口 (/generate, /generate-form, /upload-source, /upload-zip) 开头调用
+#       如果返回非 None, 直接 return _rate_resp
+# 行为: 同一 UID + 同一 exam_type 24h 内已生成过 → 引导到现有 /me/<uid> 报告页
+#       NOI-CSP ↔ GESP 互不限制（v3.9.64 规则保留, 仅 /generate-form 走细分）
+#       /generate /upload-source /upload-zip 走"24h 任意报告"模式（v3.8 原意）,
+#       因为这 3 个入口都只生成 noi_csp 报告, 不需要细分 GESP
+# 返回: None = 通过限流
+#       Response = 限流触发, 调用方直接 return
+# ============================================================
+def _check_24h_rate_limit(luogu_uid: str, exam_type: str, mode: str = "strict"):
+    """v3.11.21n · 共用 24h 限流（被 /generate, /generate-form, /upload-source, /upload-zip 调用）
+
+    Args:
+        luogu_uid: 洛谷 UID（已校验 6-10 位数字）
+        exam_type: "noi_csp" 或 "gesp"（其它值自动归一为 noi_csp）
+        mode: 限流模式
+            - "strict" (默认): 只查同一 task_type（NOI-CSP / GESP 互不限制）
+              用于 /generate-form, 用户可手动切换
+            - "any": 24h 内任意 done 报告都算
+              用于 /generate, /upload-source, /upload-zip（这 3 个入口都只生成 noi_csp）,
+              避免通过"上传源码/zip 入口"绕过 /generate-form 的细分限流
+
+    Returns:
+        None: 限流通过, 调用方可继续创建任务
+        flask.Response: 限流触发, 调用方直接 return
+    """
+    if not luogu_uid:
+        return None
+    if exam_type not in ("noi_csp", "gesp"):
+        exam_type = "noi_csp"
+    if mode == "any":
+        _rate_task_type = ""  # 不限类型
+    else:
+        _rate_task_type = "report_gesp" if exam_type == "gesp" else "report_noi_csp"
+    try:
+        from task_store import get_latest_done_task_for_uid
+        existing = get_latest_done_task_for_uid(luogu_uid, since_hours=24, task_type=_rate_task_type)
+    except Exception as _e:
+        app.logger.warning(f"[24h rate limit] 查询失败: {_e}")
+        return None  # 限流检查失败不阻塞生成（防 DB 异常拖死主链路）
+    if not existing:
+        return None  # 通过
+
+    # 限流触发 → 跳到现有报告页
+    try:
+        from datetime import datetime as _dt, timedelta as _td
+        last = _dt.strptime(existing.get("created_at") or "", "%Y-%m-%d %H:%M:%S")
+        next_at = last + _td(hours=24)
+        remain = next_at - _dt.now()
+        remain_min = max(1, int(remain.total_seconds() // 60))
+        remain_txt = f"约 {remain_min // 60} 小时 {remain_min % 60} 分钟后可重新生成"
+    except Exception:
+        remain_txt = "明天再来生成新报告"
+
+    if mode == "any":
+        exam_label = "24 小时内已生成过报告"
+        switch_hint = ""
+    else:
+        exam_label = "GESP 备考" if exam_type == "gesp" else "NOI-CSP"
+        switch_hint = "如需重新生成，请切换到另一种报告类型（NOI-CSP ↔ GESP），或等待冷却时间结束。"
+
+    msg = (
+        f"⚠️ UID {luogu_uid} {exam_label}（{remain_txt}）。"
+        f"{switch_hint}"
+    )
+    # 三种返回格式, 按入口渲染能力区分:
+    # - JSON (upload-source / upload-zip)
+    # - 重定向到 /me/<uid> (generate)
+    # - 完整 HTML 错误页 (generate-form)
+    # 注: student_me 路由参数名是 short_id, 但 get_student_by_short_id() 会 fallback 到 get_student_by_uid(),
+    #     所以可以直接传 luogu_uid 字符串当 short_id (参考原 /generate-form L10428 实现)
+    from flask import request as _req
+    _is_upload_api = _req and _req.path.startswith(("/upload-source", "/upload-zip"))
+    accept = (_req.headers.get("Accept") or "").lower() if _req else ""
+    if _is_upload_api or "application/json" in accept:
+        from flask import jsonify, url_for as _uf
+        me_url = _uf("student_me", short_id=luogu_uid)
+        return jsonify({
+            "ok": False,
+            "rate_limited": True,
+            "message": msg,
+            "me_url": me_url,
+            "remain_minutes": remain_min if 'remain_min' in dir() else None,
+        }), 429
+    if _req and _req.path == "/generate":
+        # 旧 /generate 入口: 直接重定向到 me 页 (避免阻塞后台线程)
+        from flask import redirect, url_for as _uf
+        return redirect(_uf("student_me", short_id=luogu_uid))
+    # /generate-form: 渲染完整 HTML (含 info banner)
+    from flask import render_template_string, url_for as _uf
+    return render_template_string(
+        GENERATE_FORM_HTML,
+        form=_req.form.to_dict() if _req else {},
+        pwd_login_2fa=None,
+        server_key_hint=_get_server_key_hint(),
+        gesp_default_year=date.today().year,
+        error=None,
+        info=msg,
+        info_me_url=_uf("student_me", short_id=luogu_uid),
+    ), 429
+
+
+def _fill_profile_from_session(form_data: dict) -> dict:
+    """v3.11.21r · 从 session 拉省份/城市/年级/学校，注入 form_data 兜底
+
+    适用入口：/generate, /upload-source, /upload-zip (均要求登录, 但 form 表单本身
+    不带省份/城市下拉, 学员注册时填的省份会丢). 该 helper 在 3 个入口的
+    _require_student_login() 之后调用, 把 students 表的省份/城市等补到
+    form_data 里 → 写入 retry_form_json → 排行榜下次刷新就能拿到.
+
+    Returns:
+        form_data 自身 (链式调用方便)
+    """
+    if not isinstance(form_data, dict):
+        form_data = {}
+    try:
+        _sid = str(session.get("student_short_id") or "").strip()
+        _uid = str(session.get("student_uid") or "").strip()
+        if not _sid and not _uid:
+            return form_data
+        _stu = None
+        if _sid:
+            _stu = _admin_students.get_student_by_short_id(_sid)
+        if not _stu and _uid:
+            _stu = _admin_students.get_student_by_uid(_uid)
+        if not _stu:
+            return form_data
+        # 已填的不覆盖, 让 form 表单优先级最高 (前端可能改了)
+        for _k in ("province", "city", "grade", "school", "student_name", "real_name"):
+            if form_data.get(_k):
+                continue
+            _v = (_stu.get(_k) or "").strip() if _stu.get(_k) else ""
+            if _v:
+                form_data[_k] = _v
+    except Exception as _e:  # noqa: BLE001
+        app.logger.debug(f"[fill_profile_from_session] {type(_e).__name__}: {_e}")
+    return form_data
+
+
 @app.route("/generate", methods=["POST"])
 def generate():
     form_data = request.form.to_dict()
     task_id = str(uuid.uuid4())
+
+    # v3.11.21r · 从 session 补省份/城市/年级/学校 (排行榜兜底)
+    _fill_profile_from_session(form_data)
+
+    # v3.11.21n · 24h 限流（与 /generate-form 走同一套, 避免通过旧入口绕过）
+    # mode="any": 24h 内任意 done 报告都算, 因为 /generate 只能生成 noi_csp
+    _rate_resp = _check_24h_rate_limit(
+        str(form_data.get("luogu_uid") or form_data.get("uid") or "").strip(),
+        (form_data.get("exam_type") or "noi_csp").strip(),
+        mode="any",
+    )
+    if _rate_resp is not None:
+        return _rate_resp
 
     # v3.9.52 · 若 session 里有临时 cookies（密码登录存的），合并进 form_data
     # 这样 run_generation 阶段可以直接 build_cookie_dict() 用
@@ -5511,10 +5724,18 @@ def upload_zip_submit():
     _gate = _require_student_login()
     if _gate:
         return _gate
+    # v3.11.21n · 24h 限流（与 /generate-form 走同一套, 避免通过 ZIP 入口绕过）
+    # mode="any": 24h 内任意 done 报告都算, ZIP 入口只生成 noi_csp
+    _rate_resp = _check_24h_rate_limit(
+        (request.form.get("luogu_uid") or "").strip(),
+        (request.form.get("exam_type") or "noi_csp").strip(),
+        mode="any",
+    )
+    if _rate_resp is not None:
+        return _rate_resp
     upload = request.files.get("zip_file")
     if upload is None or not upload.filename:
         return jsonify({"ok": False, "message": "未选择文件"}), 400
-
     filename = (upload.filename or "").strip()
     if not filename.lower().endswith(".zip"):
         return jsonify({"ok": False, "message": "只接受 .zip 文件"}), 400
@@ -5554,6 +5775,8 @@ def upload_zip_submit():
         "_source": "zip_upload",
         "_zip_filename": filename,
     }
+    # v3.11.21r · 从 session 补省份/城市 (form 没收集这两项, 排行榜兜底)
+    _fill_profile_from_session(form_data)
 
     # 创建任务 (复用 insert_task, task_type 用 report_zip_upload)
     with TASKS_LOCK:
@@ -5605,6 +5828,15 @@ def upload_source_submit():
     _gate = _require_student_login()
     if _gate:
         return _gate
+    # v3.11.21n · 24h 限流（与 /generate-form 走同一套, 避免通过 HTML 源码入口绕过）
+    # mode="any": 24h 内任意 done 报告都算, 源码入口只生成 noi_csp
+    _rate_resp = _check_24h_rate_limit(
+        (request.form.get("luogu_uid") or "").strip(),
+        (request.form.get("exam_type") or "noi_csp").strip(),
+        mode="any",
+    )
+    if _rate_resp is not None:
+        return _rate_resp
     source = (request.form.get("html_source") or "").strip()
     if not source:
         return jsonify({"ok": False, "message": "未粘贴 HTML 源码"}), 400
@@ -5633,6 +5865,8 @@ def upload_source_submit():
         "_source": "html_source_upload",
         "_source_len": len(source),
     }
+    # v3.11.21r · 从 session 补省份/城市 (form 没收集这两项, 排行榜兜底)
+    _fill_profile_from_session(form_data)
 
     # v3.11.3 · 同步从源码轻解析 uid/name, 写入 task.luogu_uid
     # 这样 status_page 的兜底分支能拿到 me_url, 展示「家长订阅版」入口
@@ -6589,10 +6823,30 @@ def status_page(task_id):
         try:
             _stu = _admin_students.get_student_by_uid(luogu_uid)
             _stu_name = (_stu.get("real_name") or "") if _stu else ""
-            _latest = _find_latest_report_dir(luogu_uid, _stu_name)
+            # v3.11.21 · 改用 _by_type(parent_subscribe) 找家长订阅版目录, 避免被无后缀的
+            #   NOI-CSP dir 抢先返回导致 has_parent_sub_html 永远 False.
+            #   同时容错: 若 _by_type 找不到, 再扫所有该学员的 dir 兜底, 防止短期升级阶段
+            #   旧 report 目录结构没生成 _parent_subscribe 后缀时漏判.
+            _latest = _find_latest_report_dir_by_type(luogu_uid, _stu_name, "parent_subscribe")
+            if not _latest:
+                _latest = _find_latest_report_dir(luogu_uid, _stu_name)
             if _latest and (_latest / "parent_subscribe.html").exists():
                 has_parent_sub_html = True
                 ps_html_url = f"/reports/{_latest.name}/parent_subscribe.html"
+            else:
+                # v3.11.21 · 兜底: 扫 reports/<uid>_*_已知选手 全部 dir, 找 parent_subscribe.html
+                # 适配同一 UID 多份历史报告（无 _parent_subscribe 后缀的旧版 dir）
+                try:
+                    from pathlib import Path as _P_ps
+                    _reports_root = _P_ps("reports")
+                    for _d in _reports_root.iterdir():
+                        if _d.is_dir() and _d.name.startswith(f"{luogu_uid}_"):
+                            if (_d / "parent_subscribe.html").exists():
+                                has_parent_sub_html = True
+                                ps_html_url = f"/reports/{_d.name}/parent_subscribe.html"
+                                break
+                except Exception as _e2:
+                    app.logger.debug(f"[status_page] parent_subscribe.html 兜底扫描失败: {_e2}")
         except Exception as _e:
             app.logger.debug(f"[status_page] has_parent_sub_html check failed: {_e}")
         # v3.9.41 · DB 层订阅判断（独立于 HTML 是否生成成功）
@@ -8073,6 +8327,147 @@ def admin_students_new():
     return render_template_string(ADMIN_STUDENTS_NEW_HTML, error="", form={})
 
 
+# ============================================================
+# v3.11.21m · admin 批量回填省份/城市/年级/学校
+# 场景: admin 后台一键测分生成的 task 没填省份/城市, 排行榜上
+#       这些学员会显示 "未注册" + "—". 此入口列出所有"students 表
+#       没行"但有 done task 的学员, admin 一次性填好省份/城市/年级/
+#       学校/姓名, 自动 upsert students + 同步更新最新 task 的
+#       retry_form_json (兜底字段), 排行榜下次刷新就能显示
+# ============================================================
+@app.route("/admin/students/batch-backfill", methods=["GET", "POST"])
+def admin_students_batch_backfill():
+    auth_redirect = require_admin_auth()
+    if auth_redirect is not None:
+        return auth_redirect
+
+    if request.method == "POST":
+        # 收集提交数据
+        submitted_uids = request.form.getlist("luogu_uid")
+        ok, fail = [], []
+        for uid in submitted_uids:
+            uid_clean = (uid or "").strip()
+            if not uid_clean:
+                continue
+            real_name = (request.form.get(f"name_{uid_clean}", "") or "").strip() or None
+            school    = (request.form.get(f"school_{uid_clean}", "") or "").strip() or None
+            grade     = (request.form.get(f"grade_{uid_clean}", "") or "").strip() or None
+            province  = (request.form.get(f"province_{uid_clean}", "") or "").strip() or None
+            city      = (request.form.get(f"city_{uid_clean}", "") or "").strip() or None
+            # 必填校验
+            if not province:
+                fail.append((uid_clean, "省份未填"))
+                continue
+            try:
+                # v3.11.21m · upsert: 已存在则 UPDATE 省份等字段, 不存在则 INSERT
+                _existing = _admin_students.get_student_by_uid(uid_clean)
+                if _existing:
+                    _conn = _get_conn()
+                    _conn.execute(
+                        """
+                        UPDATE students
+                           SET real_name = COALESCE(?, real_name),
+                               school    = COALESCE(?, school),
+                               grade     = COALESCE(?, grade),
+                               city      = COALESCE(?, city),
+                               province  = COALESCE(?, province)
+                         WHERE id = ?
+                        """,
+                        (real_name, school, grade, city, province, int(_existing["id"])),
+                    )
+                    _conn.commit()
+                else:
+                    _admin_students.create_student(
+                        luogu_uid=uid_clean,
+                        real_name=real_name,
+                        school=school,
+                        grade=grade,
+                        city=city,
+                        province=province,
+                        is_minor=False,
+                        registered_via="admin_backfill",  # 标记为 admin 批量回填, 区别于真注册
+                    )
+                # 同步更新最新 task 的 retry_form_json (供 export_data.json 二次回读)
+                try:
+                    _conn = _get_conn()
+                    _row = _conn.execute(
+                        "SELECT task_id, retry_form_json FROM tasks WHERE luogu_uid=? AND status='done' ORDER BY created_at DESC LIMIT 1",
+                        (uid_clean,),
+                    ).fetchone()
+                    if _row:
+                        try:
+                            _f = json.loads(_row["retry_form_json"] or "{}")
+                        except Exception:
+                            _f = {}
+                        if not isinstance(_f, dict):
+                            _f = {}
+                        _f["real_name"] = real_name or _f.get("real_name")
+                        _f["student_name"] = real_name or _f.get("student_name")
+                        _f["school"] = school or _f.get("school")
+                        _f["grade"] = grade or _f.get("grade")
+                        _f["province"] = province
+                        _f["city"] = city or _f.get("city")
+                        _conn.execute(
+                            "UPDATE tasks SET retry_form_json=? WHERE task_id=?",
+                            (json.dumps(_f, ensure_ascii=False), _row["task_id"]),
+                        )
+                        _conn.commit()
+                except Exception as _e:  # noqa: BLE001
+                    app.logger.warning(f"[batch-backfill] sync retry_form_json failed for uid={uid_clean}: {_e}")
+                ok.append(uid_clean)
+            except Exception as exc:  # noqa: BLE001
+                fail.append((uid_clean, str(exc)))
+        # 失效排行榜缓存, 让新省份立即生效
+        try:
+            global _LEADERBOARD_CACHE
+            _LEADERBOARD_CACHE = {"ts": 0.0, "data": []}
+        except Exception:
+            pass
+        notice = f"回填完成：成功 {len(ok)} 人, 失败 {len(fail)} 人"
+        notice_type = "success" if not fail else "warning"
+        return redirect(url_for("admin_students_batch_backfill", notice=notice, notice_type=notice_type))
+
+    # GET: 列出"students 表没行"但有 done task 的学员
+    conn = _get_conn()
+    rows = conn.execute(
+        """
+        SELECT t.luogu_uid, t.student_name, t.retry_form_json, t.created_at,
+               (SELECT COUNT(*) FROM tasks t2 WHERE t2.luogu_uid = t.luogu_uid AND t2.status='done') AS done_count
+          FROM tasks t
+         WHERE t.status = 'done'
+           AND (t.luogu_uid IS NOT NULL AND t.luogu_uid != '')
+           AND NOT EXISTS (SELECT 1 FROM students s WHERE s.luogu_uid = t.luogu_uid)
+         GROUP BY t.luogu_uid
+         ORDER BY t.created_at DESC
+         LIMIT 200
+        """,
+    ).fetchall()
+    students_unregistered = []
+    for r in rows:
+        uid = str(r["luogu_uid"]).strip()
+        try:
+            f = json.loads(r["retry_form_json"] or "{}")
+        except Exception:
+            f = {}
+        students_unregistered.append({
+            "luogu_uid": uid,
+            "uid_tail": _uid_tail(uid),
+            "student_name": r["student_name"] or (f.get("student_name") or f.get("real_name") if isinstance(f, dict) else "") or "",
+            "school": (f.get("school") if isinstance(f, dict) else "") or "",
+            "grade": (f.get("grade") if isinstance(f, dict) else "") or "",
+            "done_count": int(r["done_count"] or 0),
+            "latest_at": str(r["created_at"] or ""),
+        })
+    return render_template_string(
+        ADMIN_STUDENTS_BATCH_BACKFILL_HTML,
+        students=students_unregistered,
+        cities=CITIES_REGISTRATION,
+        grades=GRADES_REGISTRATION,
+        notice=request.args.get("notice", ""),
+        notice_type=request.args.get("notice_type", "info"),
+    )
+
+
 @app.route("/admin/students/<int:student_id>")
 def admin_students_detail(student_id: int):
     auth_redirect = require_admin_auth()
@@ -8466,7 +8861,8 @@ STUDENT_REPORT_HTML = """
         <div class="text-sm text-gray-500">🎓 学员版报告</div>
         <h1 class="text-2xl font-extrabold text-gray-800 mt-1">Hi，{{ student.masked_name or '同学' }}！</h1>
         {# v3.11.19m · 公开位置隐藏 UID（避免分享截图/传播时泄露用户原始 UID） #}
-        <p class="text-xs text-gray-400 mt-1">{{ student.city or '未填城市' }} · {{ student.grade_label or student.grade or '—' }}</p>
+        {# v3.11.21k · 城市直接采用 students 表注册时已选值，无则不显示兜底文案避免误导 #}
+        <p class="text-xs text-gray-400 mt-1">{% if student.city %}{{ student.city }}{% endif %} · {{ student.grade_label or student.grade or '—' }}</p>
         <div class="mt-4 flex items-center justify-center gap-4">
             <div>
                 <div class="medal">{% if gesp_level >= 7 %}🏆{% elif gesp_level >= 4 %}🏅{% elif gesp_level >= 1 %}⭐{% else %}🌱{% endif %}</div>
@@ -8558,7 +8954,8 @@ STUDENT_REPORT_HTML = """
             <div class="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center">
                 <div class="text-4xl mb-2">🏆</div>
                 <p class="text-sm text-gray-500">还没有 NOI-CSP 报告</p>
-                <a href="/generate-form" class="inline-block mt-3 px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold">📝 立即生成</a>
+                {# v3.11.21k · 默认进入「洛谷练习页版」(粘贴源码即可生成), 不再默认跳老 form #}
+                <a href="/upload-source" class="inline-block mt-3 px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold">📋 立即生成（粘贴练习页源码）</a>
             </div>
             {% endif %}
         </div>
@@ -9442,7 +9839,8 @@ ADMIN_STUDENTS_LIST_HTML = """
     <div class="max-w-6xl mx-auto">
         <div class="flex items-center justify-between mb-6">
             <h1 class="text-3xl font-bold text-blue-900">学员档案</h1>
-            <div class="flex items-center gap-4">
+            <div class="flex items-center gap-3">
+                <a href="/admin/students/batch-backfill" class="bg-amber-500 text-white px-4 py-2 rounded-lg hover:bg-amber-600 text-sm">📍 批量回填省份</a>
                 <a href="/admin/students/new" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">+ 新建学员</a>
                 <a href="/admin" class="text-blue-600 hover:underline">返回后台</a>
             </div>
@@ -9533,6 +9931,178 @@ ADMIN_STUDENTS_LIST_HTML = """
             {% endif %}
         </div>
     </div>
+</body>
+</html>
+"""
+
+
+# v3.11.21m · admin 批量回填省份/城市/年级/学校
+# (排行榜学员"未注册"灰色提示 → 一次性回填后正常显示)
+ADMIN_STUDENTS_BATCH_BACKFILL_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>批量回填省份 · Admin · 洛谷 AI 评测</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .row-card { transition: background 0.15s; }
+        .row-card:hover { background: #f8fafc; }
+        .city-select { min-width: 110px; }
+        .province-select { min-width: 100px; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+<div class="max-w-7xl mx-auto px-4 py-6">
+    <div class="flex items-center justify-between mb-5">
+        <div>
+            <h1 class="text-2xl font-bold text-slate-800">📍 批量回填省份/城市/年级/学校</h1>
+            <p class="text-sm text-slate-500 mt-1">
+                列出所有 <b>"students 表没行但有 done task"</b> 的学员（通常是 admin 后台一键测分时绕过注册流程产生的）。
+                <br>填好省份+城市+年级后批量提交，自动 upsert students + 同步更新最新 task 的 retry_form_json（兜底字段），下次刷新排行榜即生效。
+            </p>
+        </div>
+        <a href="/admin/students" class="text-sm text-blue-600 hover:underline">← 返回学员列表</a>
+    </div>
+
+    {% if notice %}
+    <div class="mb-4 px-4 py-2.5 rounded-lg
+                {% if notice_type == 'success' %}bg-emerald-50 text-emerald-700 border border-emerald-200
+                {% elif notice_type == 'warning' %}bg-amber-50 text-amber-700 border border-amber-200
+                {% else %}bg-blue-50 text-blue-700 border border-blue-200{% endif %}">
+        {{ notice }}
+    </div>
+    {% endif %}
+
+    {% if not students %}
+    <div class="bg-white rounded-xl border border-slate-200 p-8 text-center">
+        <div class="text-5xl mb-3">🎉</div>
+        <p class="text-slate-700 font-semibold">没有需要回填的学员</p>
+        <p class="text-sm text-slate-500 mt-1">所有"有 done task" 的学员都已经在 students 表里注册过了。</p>
+    </div>
+    {% else %}
+    <form method="post" id="backfill-form" class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div class="bg-slate-100 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
+            <div class="text-sm font-semibold text-slate-700">
+                共 <span class="text-blue-600">{{ students|length }}</span> 个待回填学员
+            </div>
+            <div class="flex gap-2">
+                <button type="button" onclick="setBatch('province', '')" class="text-xs px-2 py-1 bg-slate-200 hover:bg-slate-300 rounded">清空省份</button>
+                <button type="submit" class="text-sm px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded font-semibold">
+                    💾 批量提交
+                </button>
+            </div>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="bg-slate-50 text-slate-600 text-xs uppercase tracking-wider">
+                        <th class="px-3 py-2 text-left w-12">#</th>
+                        <th class="px-3 py-2 text-left">UID</th>
+                        <th class="px-3 py-2 text-left">姓名</th>
+                        <th class="px-3 py-2 text-left">省份 <span class="text-red-500">*</span></th>
+                        <th class="px-3 py-2 text-left">城市</th>
+                        <th class="px-3 py-2 text-left">年级</th>
+                        <th class="px-3 py-2 text-left">学校</th>
+                        <th class="px-3 py-2 text-left">报告</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in students %}
+                    <tr class="row-card border-t border-slate-100">
+                        <td class="px-3 py-2 text-slate-400">{{ loop.index }}</td>
+                        <td class="px-3 py-2">
+                            <input type="hidden" name="luogu_uid" value="{{ s.luogu_uid }}">
+                            <span class="font-mono text-xs text-slate-700" title="{{ s.luogu_uid }}">{{ s.uid_tail }}</span>
+                        </td>
+                        <td class="px-3 py-2">
+                            <input type="text" name="name_{{ s.luogu_uid }}" value="{{ s.student_name }}"
+                                   class="border border-slate-300 rounded px-2 py-1 text-sm w-24" placeholder="姓名" />
+                        </td>
+                        <td class="px-3 py-2">
+                            <select name="province_{{ s.luogu_uid }}" data-row-uid="{{ s.luogu_uid }}"
+                                    class="province-select border border-slate-300 rounded px-2 py-1 text-sm" required>
+                                <option value="">—</option>
+                                {% for group, items in cities %}
+                                <option value="{{ group }}">{{ group }}</option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                        <td class="px-3 py-2">
+                            <select name="city_{{ s.luogu_uid }}" data-row-uid="{{ s.luogu_uid }}"
+                                    class="city-select border border-slate-300 rounded px-2 py-1 text-sm">
+                                <option value="">—</option>
+                            </select>
+                        </td>
+                        <td class="px-3 py-2">
+                            <select name="grade_{{ s.luogu_uid }}" class="border border-slate-300 rounded px-2 py-1 text-sm">
+                                <option value="">—</option>
+                                {% for gcode, glabel in grades %}
+                                <option value="{{ gcode }}" {% if s.grade == gcode %}selected{% endif %}>{{ glabel }}</option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                        <td class="px-3 py-2">
+                            <input type="text" name="school_{{ s.luogu_uid }}" value="{{ s.school }}"
+                                   class="border border-slate-300 rounded px-2 py-1 text-sm w-32" placeholder="学校名" />
+                        </td>
+                        <td class="px-3 py-2 text-xs text-slate-500">
+                            <span class="font-mono text-slate-700">{{ s.done_count }}</span> 份
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="bg-slate-50 px-4 py-3 border-t border-slate-200 flex items-center justify-between">
+            <p class="text-xs text-slate-500">
+                ⚠ 提交后立即生效：写入 students 表 + 同步更新最新 task.retry_form_json + 失效排行榜缓存（5 min TTL 立即刷新）
+            </p>
+            <button type="submit" class="text-sm px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded font-semibold">
+                💾 批量提交 ({{ students|length }} 人)
+            </button>
+        </div>
+    </form>
+    {% endif %}
+</div>
+
+<script>
+    // 复用 register 的级联数据
+    var CITIES = {{ cities|tojson }};
+    // 每个省份 → 城市列表
+    function getCities(prov) {
+        for (var i = 0; i < CITIES.length; i++) {
+            if (CITIES[i][0] === prov) return CITIES[i][1];
+        }
+        return [];
+    }
+    // 绑定省份 onchange
+    document.querySelectorAll('select.province-select').forEach(function(sel) {
+        sel.addEventListener('change', function() {
+            var uid = this.getAttribute('data-row-uid');
+            var citySel = document.querySelector('select[name="city_' + uid + '"]');
+            if (!citySel) return;
+            var prov = this.value;
+            var cities = getCities(prov);
+            citySel.innerHTML = '<option value="">—</option>';
+            cities.forEach(function(c) {
+                var opt = document.createElement('option');
+                opt.value = c; opt.textContent = c;
+                citySel.appendChild(opt);
+            });
+        });
+    });
+
+    // "批量清空省份" 按钮
+    function setBatch(field, val) {
+        document.querySelectorAll('select.province-select').forEach(function(sel) {
+            sel.value = val;
+            // 触发 change 清空城市
+            sel.dispatchEvent(new Event('change'));
+        });
+    }
+</script>
 </body>
 </html>
 """
@@ -9993,41 +10563,10 @@ def generate_form_submit():
 
     # v3.8 · 每日 1 次限流：最近 24 小时内该 UID 已生成过报告，则引导到 /me/<uid>
     # v3.9.64 · 按报告类型分别限流：NOI-CSP 和 GESP 互不限制（每天可各生成一次）
-    try:
-        from task_store import get_latest_done_task_for_uid
-        _rate_exam_type = (form.get("exam_type") or "noi_csp").strip()
-        if _rate_exam_type not in ("noi_csp", "gesp"):
-            _rate_exam_type = "noi_csp"
-        _rate_task_type = "report_gesp" if _rate_exam_type == "gesp" else "report_noi_csp"
-        existing = get_latest_done_task_for_uid(luogu_uid, since_hours=24, task_type=_rate_task_type)
-        if existing:
-            from flask import url_for as _uf
-            me_url = _uf("student_me", luogu_uid=luogu_uid)
-            # 计算剩余等待时间（精确到分钟）
-            try:
-                from datetime import datetime as _dt, timedelta as _td
-                last = _dt.strptime(existing.get("created_at") or "", "%Y-%m-%d %H:%M:%S")
-                next_at = last + _td(hours=24)
-                remain = next_at - _dt.now()
-                remain_min = max(1, int(remain.total_seconds() // 60))
-                remain_txt = f"约 {remain_min // 60} 小时 {remain_min % 60} 分钟后可重新生成"
-            except Exception:
-                remain_txt = "明天再来生成新报告"
-            return render_template_string(
-                GENERATE_FORM_HTML,
-                form=form,
-        pwd_login_2fa=None,
-                server_key_hint=_get_server_key_hint(),
-                gesp_default_year=date.today().year,
-                error=None,
-                info=(
-                    f"⚠️ UID {luogu_uid} 在最近 24 小时内已生成过「{('GESP 备考' if _rate_task_type == 'report_gesp' else 'NOI-CSP')}报告」（{remain_txt}）。"
-                    f"如需重新生成，请切换到另一种报告类型（NOI-CSP ↔ GESP），或等待冷却时间结束。"
-                ),
-                info_me_url=me_url,
-            ), 429
-    except Exception as _rate_e:
-        app.logger.warning(f"每日限流检查失败: {_rate_e}")
+    # v3.11.21n · 共用 helper 抽取（/generate /upload-source /upload-zip 三入口也走同一套限流）
+    _rate_resp = _check_24h_rate_limit(luogu_uid, (form.get("exam_type") or "noi_csp").strip())
+    if _rate_resp is not None:
+        return _rate_resp
 
     # PIPL 同意
     if not form.get("agree"):
@@ -13659,11 +14198,17 @@ def student_me(short_id: str):
         "ai_score_source": None,  # "report_md" / "export_data" / "computed_mean"
     }
     # v3.9.3 · 把 name 传给 _find_latest_report_dir，让"目录名以 _姓名 结尾"兜底分支生效
+    # v3.11.21s · 关键 bug 修复: 函数第一个参数语义是 luogu_uid (用于比对 luogu_uid.txt / 目录名)
+    #   之前传 short_id, 导致 dir 里的 luogu_uid.txt 永远匹配不上, "我的报告"和"我的排名"全空.
+    #   修复: 取 student['luogu_uid'] 显式传; 缺失时再回退 short_id (旧数据兜底).
+    _student_luogu_uid = (student.get("luogu_uid") or "").strip() if student else ""
+    _lookup_uid = _student_luogu_uid or str(short_id).strip()
+    _lookup_name = (student.get("real_name") or "") if student else ""
     try:
-        latest = _find_latest_report_dir(short_id, (student.get("real_name") or "") if student else "")
+        latest = _find_latest_report_dir(_lookup_uid, _lookup_name)
         # v3.9.64 · 按测评类型各找一份最新报告，分别提取 6 维/错题/AI 分
-        latest_noi_csp_dir = _find_latest_report_dir_by_type(short_id, (student.get("real_name") or "") if student else "", "noi_csp")
-        latest_gesp_dir = _find_latest_report_dir_by_type(short_id, (student.get("real_name") or "") if student else "", "gesp")
+        latest_noi_csp_dir = _find_latest_report_dir_by_type(_lookup_uid, _lookup_name, "noi_csp")
+        latest_gesp_dir = _find_latest_report_dir_by_type(_lookup_uid, _lookup_name, "gesp")
         achievements["latest_noi_csp_dir"] = latest_noi_csp_dir.name if latest_noi_csp_dir else None
         achievements["latest_gesp_dir"] = latest_gesp_dir.name if latest_gesp_dir else None
         # v3.9.64 · 优先用 NOI-CSP 作为主报告（沿用旧行为），如果只有 GESP 则用 GESP
@@ -13749,9 +14294,13 @@ def student_me(short_id: str):
     }
     try:
         own_stage = _admin_students._grade_to_stage(student.get("grade"))  # noqa
+        # v3.11.21u · 关键 bug 修复: find_my_rank 入参语义是 luogu_uid (内部用 str(r["luogu_uid"]) 比对),
+        #   之前传 short_id 永远匹配不上榜单 row, "我的排名"卡片一直空.
+        #   修复: 优先取 student.luogu_uid, 缺失时再回退 short_id (旧数据兜底).
+        _rank_uid = (student.get("luogu_uid") or "").strip() or str(short_id).strip()
         for p in ("month", "week", "all"):
-            my_rank["all_stage"][p] = find_my_rank(short_id, stage="all", period=p)
-            my_rank["own_stage"][p] = find_my_rank(short_id, stage=own_stage, period=p)
+            my_rank["all_stage"][p] = find_my_rank(_rank_uid, stage="all", period=p)
+            my_rank["own_stage"][p] = find_my_rank(_rank_uid, stage=own_stage, period=p)
     except Exception as _e_rank:
         app.logger.debug(f"[student_me] my_rank 计算失败: {_e_rank}")
 
@@ -14860,8 +15409,12 @@ def _extract_achievements_from_export_data(report_dir) -> dict:
             except Exception:
                 pass
 
-        # 兜底完成后：补算千分制 + 标签（无论 6 维从哪个分支来，都统一在此重算）
-        if out["six_dim"]:
+        # 兜底完成后：补算千分制 + 标签（v3.11.21 · 不要再覆盖 6 维已抽取分支算出的 v3.9.44 综合分！
+        # 之前这里 mean_100*10 会把排行榜同源 698 覆盖成 577, 导致 /r/<uid> 报告页显示的分和
+        # 排行榜不一致. 改为: 仅在"6 维来自 compute_six_dimension_scores / 完全无源"的兜底分支才补算,
+        # 6 维来自 export_data.json (L14851) 已走过 _compute_score_from_export (排行榜同源) 时,
+        # 不要再覆盖. 用 ai_score_source 标记区分)
+        if out["six_dim"] and out.get("ai_score_source") != "comprehensive_v3944":
             mean_100 = sum(out["six_dim"].values()) / len(out["six_dim"])
             out["ai_score_thousand"] = int(round(mean_100 * 10))
             if not out.get("ai_score_label") or out["ai_score_label"] == "—（AI 报告未生成）":
@@ -15111,6 +15664,10 @@ def _build_share_card_data(luogu_uid_or_short_id: str, exam_type: str = "noi_csp
 
     # v3.10.0 · 兼容 luogu_uid + short_id 两种 key
     _key = luogu_uid_or_short_id
+    # v3.11.21 · 函数体内多处用 luogu_uid 这个旧名（错把 luogu_uid_or_short_id 当 luogu_uid 写
+    # 导致 NameError, try 块 except 静默吞掉 → 海报"AI 定级"显示"尚未生成报告")。这里加别名兜底,
+    # 保留旧名继续可用（避免漏改 L15307 类的引用导致全局崩溃）。
+    luogu_uid = _key
     student = _admin_students.get_student_by_short_id(_key) or _admin_students.get_student_by_uid(_key)
 
     # v3.8 · 海报兜底：学员档案不存在时，从 reports/<uid> 找 export_data.json
@@ -16974,7 +17531,12 @@ def parent_subscribe(short_id: str):
     luogu_uid = str(student.get("luogu_uid") or short_id).strip()
 
     # 找该学员最近一份 report 文件夹
-    report_dir = _find_latest_report_dir(short_id, student.get("real_name") or "")
+    # v3.11.21 · 优先按 _by_type(parent_subscribe) 找"有 parent_subscribe.html 的 dir",
+    #   避免 _find_latest_report_dir 返回 mtime 最新的无后缀 NOI-CSP dir, 错判"还没生成"
+    #   → 误显示邀请码表单 (用户痛点: 报告已生成还让输邀请码)
+    report_dir = _find_latest_report_dir_by_type(luogu_uid, student.get("real_name") or "", "parent_subscribe")
+    if not report_dir:
+        report_dir = _find_latest_report_dir(luogu_uid, student.get("real_name") or "")
     ps_html = (report_dir / "parent_subscribe.html") if report_dir else None
     ps_md = (report_dir / "parent_subscribe.md") if report_dir else None
 
@@ -17191,7 +17753,22 @@ def start_parent_subscribe(short_id: str):
     if _is_parent_subscribed(luogu_uid):
         invite_ok = True
         short_circuit_used = True
-    elif submitted_code:
+    else:
+        # v3.11.21 · 报告兜底：即使 DB 没记录, 若该学员已存在 parent_subscribe.html
+        #   报告(可能 admin 帮生成的, 或历史遗留), 也直接放行, 避免「报告已生成还要再输邀请码」的体验断层
+        try:
+            _stu_obj = _admin_students.get_student_by_uid(luogu_uid) or {}
+            _stu_name_2 = (_stu_obj.get("real_name") or "") if isinstance(_stu_obj, dict) else ""
+            _parent_dir = _find_latest_report_dir_by_type(luogu_uid, _stu_name_2, "parent_subscribe")
+            if _parent_dir and (_parent_dir / "parent_subscribe.html").exists():
+                invite_ok = True
+                short_circuit_used = True
+                app.logger.info(
+                    f"[start-parent-subscribe] v3.11.21 HTML 兜底放行: {luogu_uid} ({_parent_dir.name})"
+                )
+        except Exception as _e_sps:
+            app.logger.debug(f"[start-parent-subscribe] HTML 兜底检查失败: {_e_sps}")
+    if not invite_ok and submitted_code:
         try:
             from task_store import _get_conn as _invite_conn
             _ic = _invite_conn()
@@ -17576,9 +18153,21 @@ def _find_latest_report_dir(luogu_uid: str, student_name: str = "") -> "Path | N
         if target_uid and target_uid in d.name:
             legacy.append(d)
             continue
-        # 4) 兜底：同姓名（多 UID 一人）
+        # 4) 兜底：同姓名（多 UID 一人）— v3.11.21 必须先排除"侧车存在但内容不匹配"的 dir
+        #   否则多个"未知选手"的 dir 互相串台（同姓名兜底把别的学员的 dir 错算成自己的）
         if safe_name and d.name.endswith(f"_{safe_name}"):
-            by_name.append(d)
+            _sidecar_block = False
+            for _s in ("luogu_uid.txt", "short_id.txt"):
+                if (d / _s).exists():
+                    try:
+                        _s_val = (d / _s).read_text(encoding="utf-8", errors="replace").strip()
+                    except Exception:
+                        _s_val = ""
+                    if _s_val and _s_val != target_uid:
+                        _sidecar_block = True
+                        break
+            if not _sidecar_block:
+                by_name.append(d)
 
     pool = exact or exact_short or legacy or by_name
     if not pool:
@@ -17681,8 +18270,23 @@ def _find_latest_report_dir_by_type(luogu_uid: str, student_name: str, exam_type
                 pass
         if not matched and target_uid and target_uid in d.name:
             matched = True
+        # v3.11.21 · 同姓名兜底: 必须先排除"侧车存在但内容不匹配"的 dir.
+        #   否则多个"未知选手"的 dir 互相串台, _by_type 错把别的学员的 dir 当成当前学员的
+        #   家长订阅版, 导致 status_page 误判 has_parent_sub_html 触发体验断层.
         if not matched and safe_name and d.name.endswith(f"_{safe_name}"):
-            matched = True
+            _sidecar_block = False
+            _sids = ["luogu_uid.txt", "short_id.txt"]
+            for _s in _sids:
+                if (d / _s).exists():
+                    try:
+                        _s_val = (d / _s).read_text(encoding="utf-8", errors="replace").strip()
+                    except Exception:
+                        _s_val = ""
+                    if _s_val and _s_val != target_uid:
+                        _sidecar_block = True
+                        break
+            if not _sidecar_block:
+                matched = True
         if matched:
             # 用目录 mtime 排序，命中其中一类即可
             if target_uid and (d / "luogu_uid.txt").exists():
@@ -17942,17 +18546,20 @@ def student_me_record_gesp(short_id: str):
     year_raw = (request.form.get("award_year") or "").strip()
     cert = (request.form.get("certificate_no") or "").strip()
 
+    # v3.11.21v · 关键 bug 修复: 之前 redirect 用 luogu_uid (未定义) 会 NameError 500,
+    #   学员自录 GESP 后会看到 500 错误. 改为 redirect 回自己的 /me/<short_id> 页面.
+    short_id = str(short_id).strip()
     # 校验
     if not level_raw.isdigit() or not (1 <= int(level_raw) <= 8):
         flash("GESP 等级必须在 1-8")
-        return redirect(url_for("student_me", short_id=luogu_uid))
+        return redirect(url_for("student_me", short_id=short_id))
     if not score_raw.isdigit() or not (0 <= int(score_raw) <= 100):
         flash("分数必须在 0-100")
-        return redirect(url_for("student_me", short_id=luogu_uid))
+        return redirect(url_for("student_me", short_id=short_id))
     this_year = date.today().year
     if not year_raw.isdigit() or not (2015 <= int(year_raw) <= this_year + 1):
         flash(f"获奖年份必须在 2015-{this_year + 1}")
-        return redirect(url_for("student_me", short_id=luogu_uid))
+        return redirect(url_for("student_me", short_id=short_id))
     level = int(level_raw)
     score = int(score_raw)
     year = int(year_raw)
@@ -17986,7 +18593,7 @@ def student_me_record_gesp(short_id: str):
                 exam_id = int(row["id"])
             else:
                 flash("系统暂无 GESP 赛事数据，请先跑 import_competitions.py")
-                return redirect(url_for("student_me", short_id=luogu_uid))
+                return redirect(url_for("student_me", short_id=short_id))
     finally:
         conn.close()
 
@@ -18003,7 +18610,7 @@ def student_me_record_gesp(short_id: str):
         flash(f"✅ GESP {level} 级 {year} 年 {score} 分 已录入")
     except Exception as e:  # noqa: BLE001
         flash(f"⚠️ GESP 录入失败：{e}")
-    return redirect(url_for("student_me", short_id=luogu_uid))
+    return redirect(url_for("student_me", short_id=short_id))
 
 
 @app.route("/me/<short_id>/record-csp", methods=["POST"])
@@ -18545,8 +19152,9 @@ STUDENT_ME_HTML = """
         <h1 class="text-2xl font-extrabold mb-1">🎓 学员 Pro · v3.5.2</h1>
         <p class="text-sm opacity-90">欢迎，<strong>{{ student.real_name or '同学' }}</strong></p>
         {# v3.11.19m · 公开位置隐藏 UID（避免个人中心截图/分享时泄露用户原始 UID） #}
+        {# v3.11.21k · 城市直接采用 students 表注册时已选值（省份 + 城市），避免「城市未填」误导 #}
         <p class="text-xs opacity-75 mt-1">
-            {{ student.province or '' }} {{ student.city or '城市未填' }}
+            {{ student.province or '' }}{% if student.city %} {{ student.city }}{% endif %}
             · {% if student.gender == 'M' %}男生{% elif student.gender == 'F' %}女生{% else %}性别未填{% endif %}
             · 年级 {{ student.grade_label or student.grade or '—' }}
             {% if student.email %}· 📧 {{ student.email }}{% endif %}
@@ -18588,7 +19196,14 @@ STUDENT_ME_HTML = """
                     {% endif %}
                     {% else %}
                     <div class="text-3xl font-extrabold text-gray-300 mt-1">—</div>
-                    <div class="text-xs text-gray-400 mt-1">暂无练习数据</div>
+                    <div class="text-xs text-gray-400 mt-1">
+                        {% if my_rank and my_rank.score %}
+                        排行榜得分 <strong class="text-amber-700">{{ my_rank.score }}</strong> / 1000
+                        · 当前 <a href="/leaderboard" class="text-amber-600 underline">#{{ my_rank.rank }}</a>
+                        {% else %}
+                        暂无练习数据 · <a href="/upload-source" class="text-emerald-600 underline">立即生成报告</a>
+                        {% endif %}
+                    </div>
                     {% endif %}
                 </div>
 
@@ -18742,7 +19357,8 @@ STUDENT_ME_HTML = """
                 <div class="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center">
                     <div class="text-4xl mb-2">🏆</div>
                     <p class="text-sm text-gray-500">还没有 NOI-CSP 报告</p>
-                    <a href="/generate-form?exam_type=noi_csp" class="inline-block mt-3 px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold">📝 立即生成</a>
+                    {# v3.11.21k · 默认进入「洛谷练习页版」 #}
+                    <a href="/upload-source" class="inline-block mt-3 px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold">📋 立即生成（粘贴练习页源码）</a>
                 </div>
                 {% endif %}
             </div>
@@ -20273,7 +20889,8 @@ PARENT_PANEL_HTML = """
                 <div>
                     <h2 class="text-base font-bold text-gray-800">
                         🏫 升学路径匹配
-                        <span class="text-xs text-gray-500 font-normal">（基于 {{ student.city or '城市未填' }} · {{ policy_match.stage_label or student.grade or '—' }}）</span>
+                        {# v3.11.21k · 城市直接采用 students 表注册时已选值, 避免「城市未填」误导 #}
+                        <span class="text-xs text-gray-500 font-normal">（基于 {{ student.city or '' }}{% if policy_match.stage_label or student.grade %} · {{ policy_match.stage_label or student.grade or '—' }}{% endif %}）</span>
                     </h2>
                     <p class="text-xs text-gray-500 mt-1">
                         {% if policy_match.matches %}
@@ -20877,11 +21494,23 @@ LEADERBOARD_HTML = """<!doctype html>
             <div class="col-span-2 text-xs text-[#94A3B8] truncate">
                 {{ entry.grade }}
             </div>
-            <div class="col-span-1 text-xs text-cyan-300 font-mono truncate" title="省份（中国一级行政区，34 个选项，无法精确定位到人）">
-                {{ entry.province or '—' }}
+            <div class="col-span-1 text-xs font-mono truncate" title="省份（中国一级行政区，34 个选项，无法精确定位到人）">
+                {% if entry.province and entry.province != '—' %}
+                    <span class="text-cyan-300">{{ entry.province }}</span>
+                {% elif not entry.is_registered %}
+                    <span class="text-slate-500 italic" title="学员未走 /register 流程注册账号（admin 批量测分常见），提交 form 时若填了省份/城市会自动回填到本表">未注册</span>
+                {% else %}
+                    <span class="text-slate-500">—</span>
+                {% endif %}
             </div>
             <div class="col-span-2 text-xs text-[#94A3B8] truncate">
-                {{ entry.school }}
+                {% if entry.school and entry.school != '—' %}
+                    {{ entry.school }}
+                {% elif not entry.is_registered %}
+                    <span class="text-slate-500 italic">未注册</span>
+                {% else %}
+                    <span class="text-slate-500">—</span>
+                {% endif %}
             </div>
             <div class="col-span-2 text-right">
                 <div class="font-mono font-extrabold text-lg

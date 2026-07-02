@@ -252,7 +252,7 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
 APP_VERSION = "v3.11.25"
-APP_VERSION_BUILD = "20260702_v3p11p25_fix_difficulty_9_levels"
+APP_VERSION_BUILD = "20260702_v3p11p26_fix_24h_rate_limit_empty_uid_bypass"
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -5276,9 +5276,17 @@ def _check_24h_rate_limit(luogu_uid: str, exam_type: str, mode: str = "strict"):
     Returns:
         None: 限流通过, 调用方可继续创建任务
         flask.Response: 限流触发, 调用方直接 return
+
+    v3.11.26 · 去掉"空 luogu_uid 直接放行"的 fast-path (旧实现被 /upload-source
+              模板漏填 + 后端 _extract_user 兜底在限流之后的组合绕过).
+              现在 luogu_uid 为空会记 warning 并返回 None (因 get_latest_done_task_for_uid
+              对空 uid 也早返回, 不会误伤); 真正的兜底由调用方在校验后传入非空 uid.
     """
-    if not luogu_uid:
-        return None
+    uid = str(luogu_uid or "").strip()
+    if not uid:
+        # 防御性警告: 调用方应保证 luogu_uid 非空. 当前放过 (因 SQL 层也会早返回 None),
+        # 但留下 warning 方便排查"前端漏填 + 后端没兜底"的 BUG.
+        app.logger.warning("[24h rate limit] 空 luogu_uid 被传入 (疑似调用方 bug, 未做限流)")
     if exam_type not in ("noi_csp", "gesp"):
         exam_type = "noi_csp"
     if mode == "any":
@@ -5287,7 +5295,7 @@ def _check_24h_rate_limit(luogu_uid: str, exam_type: str, mode: str = "strict"):
         _rate_task_type = "report_gesp" if exam_type == "gesp" else "report_noi_csp"
     try:
         from task_store import get_latest_done_task_for_uid
-        existing = get_latest_done_task_for_uid(luogu_uid, since_hours=24, task_type=_rate_task_type)
+        existing = get_latest_done_task_for_uid(uid, since_hours=24, task_type=_rate_task_type)
     except Exception as _e:
         app.logger.warning(f"[24h rate limit] 查询失败: {_e}")
         return None  # 限流检查失败不阻塞生成（防 DB 异常拖死主链路）
@@ -5361,6 +5369,11 @@ def _fill_profile_from_session(form_data: dict) -> dict:
     _require_student_login() 之后调用, 把 students 表的省份/城市等补到
     form_data 里 → 写入 retry_form_json → 排行榜下次刷新就能拿到.
 
+    v3.11.26 · 同时补 luogu_uid: 旧版只有 /upload-source 在限流检查之后再用
+              _extract_user 抽 uid, 一旦 form.luogu_uid 留空, 限流就被绕过.
+              这里统一在 24h 限流检查之前先补 luogu_uid, 调用方拿到的 form_data
+              里一定有非空 luogu_uid (登录态学员). 仍为空时调用方应自行 400 拒绝.
+
     Returns:
         form_data 自身 (链式调用方便)
     """
@@ -5385,6 +5398,12 @@ def _fill_profile_from_session(form_data: dict) -> dict:
             _v = (_stu.get(_k) or "").strip() if _stu.get(_k) else ""
             if _v:
                 form_data[_k] = _v
+        # v3.11.26 · 兜底补 luogu_uid (form 没填就从 students 表拉),
+        # 避免 24h 限流被"空 uid 放行"绕过
+        if not (form_data.get("luogu_uid") or form_data.get("uid") or "").strip():
+            _stu_uid = (_stu.get("luogu_uid") or "").strip()
+            if _stu_uid:
+                form_data["luogu_uid"] = _stu_uid
     except Exception as _e:  # noqa: BLE001
         app.logger.debug(f"[fill_profile_from_session] {type(_e).__name__}: {_e}")
     return form_data
@@ -5425,12 +5444,17 @@ def generate():
     task_id = str(uuid.uuid4())
 
     # v3.11.21r · 从 session 补省份/城市/年级/学校 (排行榜兜底)
+    # v3.11.26 · 顺带补 luogu_uid, 必须在 24h 限流之前完成, 否则空 uid 绕过限流
     _fill_profile_from_session(form_data)
 
     # v3.11.21n · 24h 限流（与 /generate-form 走同一套, 避免通过旧入口绕过）
     # mode="any": 24h 内任意 done 报告都算, 因为 /generate 只能生成 noi_csp
+    _rate_luogu_uid = str(form_data.get("luogu_uid") or form_data.get("uid") or "").strip()
+    if not _rate_luogu_uid or not _rate_luogu_uid.isdigit() or not (6 <= len(_rate_luogu_uid) <= 10):
+        # v3.11.26 · 没有有效 luogu_uid 直接 400, 避免空 uid 绕过限流
+        return jsonify({"ok": False, "message": "请填写 6-10 位洛谷 UID"}), 400
     _rate_resp = _check_24h_rate_limit(
-        str(form_data.get("luogu_uid") or form_data.get("uid") or "").strip(),
+        _rate_luogu_uid,
         (form_data.get("exam_type") or "noi_csp").strip(),
         mode="any",
     )
@@ -5933,10 +5957,18 @@ def upload_zip_submit():
     _gate = _require_student_login()
     if _gate:
         return _gate
+    # v3.11.26 · 兜底: ZIP 入口的 form.luogu_uid 必填, 防止空 uid 绕过 24h 限流
+    #   (ZIP 内的 manifest.json 含 uid, 但 _extract_user 类抽取放到后台 run_zip_generation 里)
+    _luogu_uid = (request.form.get("luogu_uid") or "").strip()
+    if not _luogu_uid or not _luogu_uid.isdigit() or not (6 <= len(_luogu_uid) <= 10):
+        return jsonify({
+            "ok": False,
+            "message": "请填写 6-10 位洛谷 UID (ZIP 内 manifest 抽取是异步的, 必须先在表单填写)",
+        }), 400
     # v3.11.21n · 24h 限流（与 /generate-form 走同一套, 避免通过 ZIP 入口绕过）
     # mode="any": 24h 内任意 done 报告都算, ZIP 入口只生成 noi_csp
     _rate_resp = _check_24h_rate_limit(
-        (request.form.get("luogu_uid") or "").strip(),
+        _luogu_uid,
         (request.form.get("exam_type") or "noi_csp").strip(),
         mode="any",
     )
@@ -6044,20 +6076,11 @@ def upload_source_submit():
     _gate = _require_student_login()
     if _gate:
         return _gate
-    # v3.11.21n · 24h 限流（与 /generate-form 走同一套, 避免通过 HTML 源码入口绕过）
-    # mode="any": 24h 内任意 done 报告都算, 源码入口只生成 noi_csp
-    _rate_resp = _check_24h_rate_limit(
-        (request.form.get("luogu_uid") or "").strip(),
-        (request.form.get("exam_type") or "noi_csp").strip(),
-        mode="any",
-    )
-    if _rate_resp is not None:
-        return _rate_resp
+    # v3.11.26 · 兜底抽 luogu_uid (form 留空时从源码 _extract_user 抽)
+    #   必须在 24h 限流检查之前完成, 否则空 uid 会绕过限流 (参见 v3.11.26 修复说明).
     source = (request.form.get("html_source") or "").strip()
     if not source:
         return jsonify({"ok": False, "message": "未粘贴 HTML 源码"}), 400
-
-    # 长度校验 (防滥用 + 防误传巨大文件)
     if len(source) < 80:
         return jsonify({"ok": False, "message": "源码过短, 请粘贴完整页面"}), 400
     if len(source.encode("utf-8")) > MAX_SOURCE_BYTES:
@@ -6066,6 +6089,29 @@ def upload_source_submit():
             "message": f"源码过大 ({len(source) / 1024 / 1024:.1f} MB), 上限 "
                        f"{MAX_SOURCE_BYTES / 1024 / 1024:.0f} MB",
         }), 413
+    _luogu_uid = (request.form.get("luogu_uid") or "").strip()
+    if not _luogu_uid:
+        try:
+            from html_source_parser import _extract_user
+            _uid_s, _ = _extract_user(source)
+            if _uid_s:
+                _luogu_uid = str(_uid_s).strip()
+        except Exception:  # noqa: BLE001
+            pass
+    if not _luogu_uid:
+        return jsonify({
+            "ok": False,
+            "message": "未识别到洛谷 UID, 请在表单填写, 或粘贴完整【个人练习】页源码 (含 /user/<UID>/practice)",
+        }), 400
+    # v3.11.21n · 24h 限流（与 /generate-form 走同一套, 避免通过 HTML 源码入口绕过）
+    # mode="any": 24h 内任意 done 报告都算, 源码入口只生成 noi_csp
+    _rate_resp = _check_24h_rate_limit(
+        _luogu_uid,
+        (request.form.get("exam_type") or "noi_csp").strip(),
+        mode="any",
+    )
+    if _rate_resp is not None:
+        return _rate_resp
 
     # 收集表单 (与 ZIP 模式同字段)
     form_data = {
@@ -6075,7 +6121,7 @@ def upload_source_submit():
         "student_name": (request.form.get("student_name") or "").strip(),
         "school":       (request.form.get("school")       or "").strip(),
         "grade":        (request.form.get("grade")        or "").strip(),
-        "luogu_uid":    (request.form.get("luogu_uid")    or "").strip(),
+        "luogu_uid":    _luogu_uid,
         "exam_type":         (request.form.get("exam_type")         or "noi_csp").strip(),
         "target_gesp_level": (request.form.get("target_gesp_level") or "auto").strip(),
         "_source": "html_source_upload",
@@ -6084,17 +6130,12 @@ def upload_source_submit():
     # v3.11.21r · 从 session 补省份/城市 (form 没收集这两项, 排行榜兜底)
     _fill_profile_from_session(form_data)
 
-    # v3.11.3 · 同步从源码轻解析 uid/name, 写入 task.luogu_uid
-    # 这样 status_page 的兜底分支能拿到 me_url, 展示「家长订阅版」入口
-    # + 「家长订阅版二维码添加指引」(粘贴模式不解析源码会缺这块)。
-    # 这里用 _extract_user 抽 uid/title 即可, 完整 parsed 留给后台 run_source_generation 跑
-    if not form_data["luogu_uid"] or not form_data["student_name"]:
+    # v3.11.3 · 同步从源码轻解析 name (uid 已在上方抽过, 这里只补 name)
+    if not form_data["student_name"]:
         try:
             from html_source_parser import _extract_user
-            _uid_s, _name_s = _extract_user(source)
-            if not form_data["luogu_uid"] and _uid_s:
-                form_data["luogu_uid"] = str(_uid_s)
-            if not form_data["student_name"] and _name_s:
+            _, _name_s = _extract_user(source)
+            if _name_s:
                 form_data["student_name"] = _name_s
         except Exception:  # noqa: BLE001
             pass

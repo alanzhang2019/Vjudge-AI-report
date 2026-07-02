@@ -252,7 +252,7 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
 APP_VERSION = "v3.11.25"
-APP_VERSION_BUILD = "20260702_v3p11p25_leaderboard_registered_panel"
+APP_VERSION_BUILD = "20260702_v3p11p25_fix_admin_pdf_link"
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -8378,7 +8378,7 @@ def admin_page():
             "status": row.get("status", "unknown"),
             "time": row.get("eval_time") or row.get("created_at", "-"),
             "html": row.get("html", ""),
-            "pdf": _download_report_url(str(row.get("pdf", "") or "")),
+            "pdf": row.get("pdf", ""),
             "md": row.get("md", ""),
             "rebuild_status": rebuild_state.get("status", ""),
             "rebuild_message": rebuild_state.get("message", ""),

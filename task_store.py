@@ -2162,7 +2162,7 @@ def list_columns() -> list[str]:
     return [row["name"] for row in rows]
 
 
-def get_latest_done_task_for_uid(luogu_uid: str, since_hours: int = 24, task_type: str = "") -> dict | None:
+def get_latest_done_task_for_uid(luogu_uid: str, since_hours: int = 24, task_type: str = "", task_type_list: list[str] | None = None) -> dict | None:
     """v3.8 · 查最近 N 小时内该 UID 是否已生成过报告（用于每日 1 次限流）
 
     Args:
@@ -2170,6 +2170,11 @@ def get_latest_done_task_for_uid(luogu_uid: str, since_hours: int = 24, task_typ
         since_hours: 限定 N 小时内（默认 24）
         task_type: 报告类型过滤（v3.9.64 · report_noi_csp / report_gesp）。
                    传空字符串表示不限类型（任意报告都算）。
+        task_type_list: v3.11.27 · 多 task_type 过滤（IN 查询）。
+                        用于 /upload-source 这类统一入口:
+                          noi_csp → [report_noi_csp, report_source_upload, report_zip_upload]
+                          gesp    → [report_gesp]
+                        优先级高于 task_type (传 task_type_list 时 task_type 被忽略).
 
     Returns:
         若存在已完成的报告任务，返回该任务字典；
@@ -2192,9 +2197,15 @@ def get_latest_done_task_for_uid(luogu_uid: str, since_hours: int = 24, task_typ
             return None
         threshold = (datetime.now() - timedelta(hours=int(since_hours))).strftime("%Y-%m-%d %H:%M:%S")
         # v3.9.64 · 按 task_type 过滤（不同报告类型互不限制）
+        # v3.11.27 · 支持 task_type_list (IN 查询, 用于跨入口限流)
         _type_filter = ""
         _params: list = [uid, threshold]
-        if task_type and "task_type" in cols:
+        if task_type_list and "task_type" in cols:
+            # 多类型用 IN (?, ?, ...)
+            placeholders = ",".join("?" for _ in task_type_list)
+            _type_filter = f" AND t.task_type IN ({placeholders})"
+            _params.extend(str(t) for t in task_type_list)
+        elif task_type and "task_type" in cols:
             _type_filter = " AND t.task_type = ?"
             _params.append(str(task_type))
         row = conn.execute(

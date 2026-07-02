@@ -252,7 +252,7 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
 APP_VERSION = "v3.11.25"
-APP_VERSION_BUILD = "20260702_v3p11p26_fix_24h_rate_limit_empty_uid_bypass"
+APP_VERSION_BUILD = "20260702_v3p11p28_fix_gesp_msg_and_switch_url"
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -5260,18 +5260,26 @@ def _debug_inject_temp_cookies():
 # 返回: None = 通过限流
 #       Response = 限流触发, 调用方直接 return
 # ============================================================
-def _check_24h_rate_limit(luogu_uid: str, exam_type: str, mode: str = "strict"):
+def _check_24h_rate_limit(luogu_uid: str, exam_type: str, mode: str = "strict",
+                          task_type_list: list[str] | None = None):
     """v3.11.21n · 共用 24h 限流（被 /generate, /generate-form, /upload-source, /upload-zip 调用）
 
     Args:
         luogu_uid: 洛谷 UID（已校验 6-10 位数字）
         exam_type: "noi_csp" 或 "gesp"（其它值自动归一为 noi_csp）
         mode: 限流模式
-            - "strict" (默认): 只查同一 task_type（NOI-CSP / GESP 互不限制）
+            - "strict" (默认): 只查 task_type_list (NOI-CSP / GESP 互不限制)
               用于 /generate-form, 用户可手动切换
             - "any": 24h 内任意 done 报告都算
-              用于 /generate, /upload-source, /upload-zip（这 3 个入口都只生成 noi_csp）,
-              避免通过"上传源码/zip 入口"绕过 /generate-form 的细分限流
+              (旧设计: 源码/zip 入口只生成 noi_csp, 防止"换入口"绕过.
+               v3.11.27 后建议改用 strict + task_type_list 替代, 见下)
+        task_type_list: v3.11.27 · 直接传 task_type 列表, 优先级最高.
+            - 传 None → 按 (mode, exam_type) 自动选:
+                strict + noi_csp → [report_noi_csp, report_source_upload, report_zip_upload]
+                strict + gesp    → [report_gesp]
+                any              → [] (不限)
+            - 显式传 [] → 不限
+            - 显式传 ["xxx"] → 只查 xxx
 
     Returns:
         None: 限流通过, 调用方可继续创建任务
@@ -5281,6 +5289,11 @@ def _check_24h_rate_limit(luogu_uid: str, exam_type: str, mode: str = "strict"):
               模板漏填 + 后端 _extract_user 兜底在限流之后的组合绕过).
               现在 luogu_uid 为空会记 warning 并返回 None (因 get_latest_done_task_for_uid
               对空 uid 也早返回, 不会误伤); 真正的兜底由调用方在校验后传入非空 uid.
+
+    v3.11.27 · GESP / NOI-CSP 互不限制: 默认 strict 模式按 exam_type 选 task_type_list,
+              gesp 只查 report_gesp, noi_csp 查 [report_noi_csp, report_source_upload,
+              report_zip_upload] 三个入口的 done 报告. 学员在 /upload-source 选 GESP 不再
+              被之前 NOI-CSP 报告限流 (修复前 bug: GESP 24h 内没报告也被限流).
     """
     uid = str(luogu_uid or "").strip()
     if not uid:
@@ -5289,13 +5302,26 @@ def _check_24h_rate_limit(luogu_uid: str, exam_type: str, mode: str = "strict"):
         app.logger.warning("[24h rate limit] 空 luogu_uid 被传入 (疑似调用方 bug, 未做限流)")
     if exam_type not in ("noi_csp", "gesp"):
         exam_type = "noi_csp"
-    if mode == "any":
-        _rate_task_type = ""  # 不限类型
+    # v3.11.27 · 自动选 task_type_list (与之前 mode/exam_type 组合行为一致,
+    # 但严格模式按 exam_type 区分, 不再 24h 内任意 done 都算)
+    if task_type_list is None:
+        if mode == "any":
+            _rate_task_type_list: list[str] = []
+        else:
+            if exam_type == "gesp":
+                _rate_task_type_list = ["report_gesp"]
+            else:
+                # noi_csp: 把所有"生成 NOI-CSP 报告"的入口都算上 (历史兼容)
+                _rate_task_type_list = ["report_noi_csp", "report_source_upload", "report_zip_upload"]
     else:
-        _rate_task_type = "report_gesp" if exam_type == "gesp" else "report_noi_csp"
+        _rate_task_type_list = list(task_type_list)
     try:
         from task_store import get_latest_done_task_for_uid
-        existing = get_latest_done_task_for_uid(uid, since_hours=24, task_type=_rate_task_type)
+        if _rate_task_type_list:
+            existing = get_latest_done_task_for_uid(uid, since_hours=24,
+                                                    task_type_list=_rate_task_type_list)
+        else:
+            existing = get_latest_done_task_for_uid(uid, since_hours=24, task_type="")
     except Exception as _e:
         app.logger.warning(f"[24h rate limit] 查询失败: {_e}")
         return None  # 限流检查失败不阻塞生成（防 DB 异常拖死主链路）
@@ -5313,19 +5339,29 @@ def _check_24h_rate_limit(luogu_uid: str, exam_type: str, mode: str = "strict"):
     except Exception:
         remain_txt = "明天再来生成新报告"
 
+    # v3.11.28 · 限流提示改写: 去掉"UID/限流/冷却"等术语, 用"今天已生成"等口语;
+    #   同时返回 switch_url 让前端 alert 弹窗能直接给「切到另一种报告」按钮,
+    #   避免用户「我 GESP 还没生成, 怎么就限流了」的困惑 (他其实是 NOI-CSP 被限, GESP 没被限).
     if mode == "any":
-        exam_label = "24 小时内已生成过报告"
+        human_label = "今天已生成过 1 份报告"
         switch_hint = ""
+        other_exam = None
     else:
-        exam_label = "GESP 备考" if exam_type == "gesp" else "NOI-CSP"
-        switch_hint = "如需重新生成，请切换到另一种报告类型（NOI-CSP ↔ GESP），或等待冷却时间结束。"
+        if exam_type == "gesp":
+            human_label = "今天已生成过 1 份 GESP 备考报告"
+            switch_hint = "👉 您也可以马上试试 NOI-CSP 测评报告 (不限时, 现在就能生成)"
+            other_exam = "noi_csp"
+        else:
+            human_label = "今天已生成过 1 份 NOI-CSP 测评报告"
+            switch_hint = "👉 您也可以马上试试 GESP 备考报告 (不限时, 现在就能生成)"
+            other_exam = "gesp"
 
     msg = (
-        f"⚠️ UID {luogu_uid} {exam_label}（{remain_txt}）。"
+        f"⏰ {human_label}, 约 {remain_min // 60} 小时 {remain_min % 60} 分钟后才能再生成。\n\n"
         f"{switch_hint}"
     )
     # 三种返回格式, 按入口渲染能力区分:
-    # - JSON (upload-source / upload-zip)
+    # - JSON (upload-source / upload-zip): 含 switch_url, 前端 alert 给快捷切换按钮
     # - 重定向到 /me/<uid> (generate)
     # - 完整 HTML 错误页 (generate-form)
     # 注: student_me 路由参数名是 short_id, 但 get_student_by_short_id() 会 fallback 到 get_student_by_uid(),
@@ -5336,18 +5372,31 @@ def _check_24h_rate_limit(luogu_uid: str, exam_type: str, mode: str = "strict"):
     if _is_upload_api or "application/json" in accept:
         from flask import jsonify, url_for as _uf
         me_url = _uf("student_me", short_id=luogu_uid)
+        # v3.11.28 · switch_url 给前端 alert 弹窗"切到另一报告"按钮用.
+        # 学员当前被 exam_type 限流 → 给一张反方向报告的入口, 立刻能跑.
+        switch_url = None
+        if other_exam and _req:
+            try:
+                # 同一入口上, 改 exam_type 参数 → GESP<->NOI-CSP 互不限制
+                _path = _req.path
+                if _path in ("/upload-source", "/upload-zip"):
+                    switch_url = f"{_path}?exam_type={other_exam}"
+            except Exception:
+                pass
         return jsonify({
             "ok": False,
             "rate_limited": True,
             "message": msg,
             "me_url": me_url,
+            "switch_url": switch_url,
+            "switch_exam_type": other_exam,
             "remain_minutes": remain_min if 'remain_min' in dir() else None,
         }), 429
     if _req and _req.path == "/generate":
         # 旧 /generate 入口: 直接重定向到 me 页 (避免阻塞后台线程)
         from flask import redirect, url_for as _uf
         return redirect(_uf("student_me", short_id=luogu_uid))
-    # /generate-form: 渲染完整 HTML (含 info banner)
+    # /generate-form: 渲染完整 HTML (rate_limited=True 用红色提示框而非绿色"登录成功")
     from flask import render_template_string, url_for as _uf
     return render_template_string(
         GENERATE_FORM_HTML,
@@ -5357,6 +5406,7 @@ def _check_24h_rate_limit(luogu_uid: str, exam_type: str, mode: str = "strict"):
         gesp_default_year=date.today().year,
         error=None,
         info=msg,
+        rate_limited=True,  # v3.11.28 · 让模板用红色"限流"框而非绿色"登录成功"
         info_me_url=_uf("student_me", short_id=luogu_uid),
     ), 429
 
@@ -5448,7 +5498,7 @@ def generate():
     _fill_profile_from_session(form_data)
 
     # v3.11.21n · 24h 限流（与 /generate-form 走同一套, 避免通过旧入口绕过）
-    # mode="any": 24h 内任意 done 报告都算, 因为 /generate 只能生成 noi_csp
+    # v3.11.27 · 改 mode="strict" + 按 exam_type 自动选 task_type_list (GESP/NOI-CSP 互不限制)
     _rate_luogu_uid = str(form_data.get("luogu_uid") or form_data.get("uid") or "").strip()
     if not _rate_luogu_uid or not _rate_luogu_uid.isdigit() or not (6 <= len(_rate_luogu_uid) <= 10):
         # v3.11.26 · 没有有效 luogu_uid 直接 400, 避免空 uid 绕过限流
@@ -5456,7 +5506,7 @@ def generate():
     _rate_resp = _check_24h_rate_limit(
         _rate_luogu_uid,
         (form_data.get("exam_type") or "noi_csp").strip(),
-        mode="any",
+        mode="strict",
     )
     if _rate_resp is not None:
         return _rate_resp
@@ -5966,11 +6016,11 @@ def upload_zip_submit():
             "message": "请填写 6-10 位洛谷 UID (ZIP 内 manifest 抽取是异步的, 必须先在表单填写)",
         }), 400
     # v3.11.21n · 24h 限流（与 /generate-form 走同一套, 避免通过 ZIP 入口绕过）
-    # mode="any": 24h 内任意 done 报告都算, ZIP 入口只生成 noi_csp
+    # v3.11.27 · 改 mode="strict" + 按 exam_type 自动选 task_type_list
     _rate_resp = _check_24h_rate_limit(
         _luogu_uid,
         (request.form.get("exam_type") or "noi_csp").strip(),
-        mode="any",
+        mode="strict",
     )
     if _rate_resp is not None:
         return _rate_resp
@@ -6019,14 +6069,16 @@ def upload_zip_submit():
     # v3.11.21r · 从 session 补省份/城市 (form 没收集这两项, 排行榜兜底)
     _fill_profile_from_session(form_data)
 
-    # 创建任务 (复用 insert_task, task_type 用 report_zip_upload)
+    # 创建任务 (复用 insert_task, task_type 按 exam_type 区分, v3.11.27)
+    _eff_task_type = "report_gesp" if (form_data.get("exam_type") or "noi_csp") == "gesp" \
+                                  else "report_zip_upload"
     with TASKS_LOCK:
         insert_task(
             task_id,
             status="queued",
             message="📦 ZIP 已接收, 排队解析中...",
             luogu_uid=form_data.get("luogu_uid", ""),
-            task_type="report_zip_upload",
+            task_type=_eff_task_type,
         )
         # v3.11.25 · 关联到当前登录学员 (排行榜通过 tasks.student_id 取省份/年级)
         _s_id = _get_logged_in_student_id()
@@ -6049,7 +6101,12 @@ def upload_zip_submit():
     register_active_generation_task(task_id, thread)
     thread.start()
 
-    return redirect(url_for("status_page", task_id=task_id))
+    # v3.11.27 · 成功路径返回 JSON 200 + status_url (与 /upload-source 对齐)
+    return jsonify({
+        "ok": True,
+        "task_id": task_id,
+        "status_url": url_for("status_page", task_id=task_id),
+    }), 200
 
 
 # v3.11.0 · /upload-source 路由 (前端源码粘贴模式)
@@ -6104,11 +6161,13 @@ def upload_source_submit():
             "message": "未识别到洛谷 UID, 请在表单填写, 或粘贴完整【个人练习】页源码 (含 /user/<UID>/practice)",
         }), 400
     # v3.11.21n · 24h 限流（与 /generate-form 走同一套, 避免通过 HTML 源码入口绕过）
-    # mode="any": 24h 内任意 done 报告都算, 源码入口只生成 noi_csp
+    # v3.11.27 · 改 mode="strict" + 按 exam_type 自动选 task_type_list:
+    #   exam_type=noi_csp → 查 [report_noi_csp, report_source_upload, report_zip_upload]
+    #   exam_type=gesp    → 只查 [report_gesp]  (与 noi_csp 互不限制, 修复"gesp 没生成也被限流"bug)
     _rate_resp = _check_24h_rate_limit(
         _luogu_uid,
         (request.form.get("exam_type") or "noi_csp").strip(),
-        mode="any",
+        mode="strict",
     )
     if _rate_resp is not None:
         return _rate_resp
@@ -6142,13 +6201,18 @@ def upload_source_submit():
 
     # 创建任务
     task_id = str(uuid.uuid4())
+    # v3.11.27 · task_type 按 exam_type 区分 (与 /generate-form 一致),
+    # 这样 24h 限流 strict 模式能按 exam_type 查; 旧值 "report_source_upload"
+    # 保留作为 noi_csp 入口的 task_type (历史数据兼容), gesp 用 "report_gesp"
+    _eff_task_type = "report_gesp" if (form_data.get("exam_type") or "noi_csp") == "gesp" \
+                                  else "report_source_upload"
     with TASKS_LOCK:
         insert_task(
             task_id,
             status="queued",
             message="📋 源码已接收, 排队解析中...",
             luogu_uid=form_data.get("luogu_uid", ""),
-            task_type="report_source_upload",
+            task_type=_eff_task_type,
         )
         # v3.11.25 · 关联到当前登录学员 (排行榜通过 tasks.student_id 取省份/年级)
         _s_id = _get_logged_in_student_id()
@@ -6171,7 +6235,13 @@ def upload_source_submit():
     register_active_generation_task(task_id, thread)
     thread.start()
 
-    return redirect(url_for("status_page", task_id=task_id))
+    # v3.11.27 · 成功路径返回 JSON 200 + status_url, 让前端 fetch 能正确跳转
+    # (旧: 302 redirect, fetch + redirect:'manual' 拿不到 Location, 用户体验差)
+    return jsonify({
+        "ok": True,
+        "task_id": task_id,
+        "status_url": url_for("status_page", task_id=task_id),
+    }), 200
 
 
 # v3.11.0 · ZIP 上传拖拽 UI
@@ -6419,9 +6489,61 @@ UPLOAD_ZIP_HTML = """
             }
         });
 
-        zipForm.addEventListener('submit', () => {
+        // v3.11.28 · 限流弹窗: 友好口语 + "切到另一报告" 快捷按钮
+        zipForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
             submitBtn.disabled = true;
+            const origText = submitBtn.textContent;
             submitBtn.textContent = '⏳ 上传中...';
+            try {
+                const fd = new FormData(zipForm);
+                const resp = await fetch(zipForm.action || '/upload-zip', {
+                    method: 'POST',
+                    body: fd,
+                    headers: { 'Accept': 'application/json' },
+                });
+                if (resp.status === 429 || resp.status === 400) {
+                    let data = {};
+                    try { data = await resp.json(); } catch (_) { /* not json */ }
+                    const msg = data.message || ('请求失败 (HTTP ' + resp.status + ')');
+                    // v3.11.28 · 多行 alert: 限流消息 + "切到另一报告"按钮
+                    let alertText = msg;
+                    if (data.switch_url) {
+                        const switchTypeLabel = data.switch_exam_type === 'gesp' ? 'GESP 备考' : 'NOI-CSP 测评';
+                        alertText += '\n\n─────────────────\n';
+                        alertText += '👉 点 [确定] 立即切到「' + switchTypeLabel + '」';
+                        if (confirm(alertText)) {
+                            window.location.href = data.switch_url;
+                            return;
+                        }
+                    } else {
+                        alert('⚠️ ' + alertText);
+                    }
+                    if (data.me_url) {
+                        setTimeout(() => {
+                            if (confirm('是否前往个人中心查看已生成的报告?')) {
+                                window.location.href = window.location.origin + data.me_url;
+                            }
+                        }, 100);
+                    }
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = origText;
+                    return;
+                }
+                if (resp.ok) {
+                    let data = {};
+                    try { data = await resp.json(); } catch (_) { /* not json */ }
+                    window.location.href = (data.status_url || '/me');
+                    return;
+                }
+                alert('请求失败 (HTTP ' + resp.status + '), 请稍后重试');
+                submitBtn.disabled = false;
+                submitBtn.textContent = origText;
+            } catch (err) {
+                alert('网络错误: ' + (err && err.message ? err.message : String(err)));
+                submitBtn.disabled = false;
+                submitBtn.textContent = origText;
+            }
         });
     </script>
 </body>
@@ -6670,9 +6792,66 @@ UPLOAD_SOURCE_HTML = """
         // 兜底: 页面加载时如果有内容 (例如浏览器自动填充), 触发一次
         updateStats();
 
-        form.addEventListener('submit', () => {
+        // v3.11.28 · 限流弹窗: 友好口语 + "切到另一报告" 快捷按钮
+        // (旧: "⚠️ UID ... NOI-CSP ... 22 小时 22 分钟后" → 用户不懂)
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
             submitBtn.disabled = true;
+            const origText = submitBtn.textContent;
             submitBtn.textContent = '⏳ 解析 + AI 生成中...';
+            try {
+                const fd = new FormData(form);
+                const resp = await fetch(form.action || '/upload-source', {
+                    method: 'POST',
+                    body: fd,
+                    headers: { 'Accept': 'application/json' },
+                });
+                if (resp.status === 429 || resp.status === 400) {
+                    let data = {};
+                    try { data = await resp.json(); } catch (_) { /* not json */ }
+                    const msg = data.message || ('请求失败 (HTTP ' + resp.status + ')');
+                    // v3.11.28 · 多行 alert: 限流消息 + "切到另一报告"按钮
+                    let alertText = msg;
+                    if (data.switch_url) {
+                        // 把"切到另一报告"作为可点击链接附在 alert 后
+                        const switchTypeLabel = data.switch_exam_type === 'gesp' ? 'GESP 备考' : 'NOI-CSP 测评';
+                        alertText += '\n\n─────────────────\n';
+                        alertText += '👉 点 [确定] 立即切到「' + switchTypeLabel + '」';
+                        // 弹窗 OK → 跳转
+                        if (confirm(alertText)) {
+                            window.location.href = data.switch_url;
+                            return;
+                        }
+                        // 用户取消 → 仅恢复按钮
+                    } else {
+                        alert('⚠️ ' + alertText);
+                    }
+                    if (data.me_url) {
+                        // 兜底: 提供"去个人中心"链接
+                        setTimeout(() => {
+                            if (confirm('是否前往个人中心查看已生成的报告?')) {
+                                window.location.href = window.location.origin + data.me_url;
+                            }
+                        }, 100);
+                    }
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = origText;
+                    return;
+                }
+                if (resp.ok) {
+                    let data = {};
+                    try { data = await resp.json(); } catch (_) { /* not json */ }
+                    window.location.href = (data.status_url || '/me');
+                    return;
+                }
+                alert('请求失败 (HTTP ' + resp.status + '), 请稍后重试');
+                submitBtn.disabled = false;
+                submitBtn.textContent = origText;
+            } catch (err) {
+                alert('网络错误: ' + (err && err.message ? err.message : String(err)));
+                submitBtn.disabled = false;
+                submitBtn.textContent = origText;
+            }
         });
     </script>
 </body>
@@ -11123,6 +11302,22 @@ GENERATE_FORM_HTML = """
     {% endif %}
 
     {% if info %}
+    {# v3.11.28 · info 区分两种: rate_limited=True(限流, 用红/黄) vs False(登录成功, 用绿).
+       旧版无论啥 info 都套绿底"登录成功", 限流信息也跟着误显成"成功" → 用户看不懂. #}
+    {% if rate_limited %}
+    <div class="bg-amber-50 border-2 border-amber-400 rounded-lg p-4 text-sm text-amber-900 shadow-sm">
+        <p class="font-bold text-base flex items-center gap-2">
+            <span class="text-2xl">⏰</span>
+            <span>今天已生成过报告</span>
+        </p>
+        <pre class="mt-2 leading-relaxed whitespace-pre-wrap font-sans">{{ info }}</pre>
+        {% if info_me_url %}
+        <a href="{{ info_me_url }}" class="inline-block mt-3 px-4 py-2 rounded-md bg-amber-600 text-white text-xs font-bold hover:bg-amber-700">
+            👉 查看已生成的报告
+        </a>
+        {% endif %}
+    </div>
+    {% else %}
     <!-- v3.9.62 · 成功提示改成绿色高亮 + 引导用户继续填写报告信息 -->
     <div class="bg-emerald-50 border-2 border-emerald-400 rounded-lg p-4 text-sm text-emerald-900 shadow-sm">
         <p class="font-bold text-base flex items-center gap-2">
@@ -11140,6 +11335,7 @@ GENERATE_FORM_HTML = """
         </a>
         {% endif %}
     </div>
+    {% endif %}
     {% endif %}
 
     {# v3.9.10 · 重试提示：报告生成失败时回到这里显示「已自动回填表单，请直接重提」 #}

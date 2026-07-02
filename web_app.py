@@ -252,7 +252,7 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
 APP_VERSION = "v3.11.25"
-APP_VERSION_BUILD = "20260702_v3p11p25_fix_orphan_pdf_link"
+APP_VERSION_BUILD = "20260702_v3p11p25_fix_difficulty_9_levels"
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -6584,8 +6584,9 @@ UPLOAD_SOURCE_HTML = """
                 <summary class="cursor-pointer text-slate-600">难度显示成中文了, 是新的吗?</summary>
                 <div class="mt-1 text-slate-500 pl-4">
                     是的, v3.11.0 起接入了 <a href="https://docs.lgapi.cn/open/judge/" target="_blank" class="underline">洛谷公开题库</a>
-                    缓存, 报告里会自动把数字 0-7 翻译成
-                    「入门 / 普及− / 普及/提高− / 普及+/提高 / 提高+/省选− / 省选/NOI− / NOI/NOI+/CTSC」。
+                    缓存, 报告里会自动把数字 0-8 翻译成
+                    「入门 / 普及− / 普及 / 普及+/提高− / 提高 / 提高+/省选− / 省选/NOI− / NOI/NOI+/CTS」,
+                    与洛谷个人主页"难易度统计"完全一致。
                 </div>
             </details>
         </div>

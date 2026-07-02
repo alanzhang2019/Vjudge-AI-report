@@ -79,22 +79,27 @@ INDEX_FIELDS = (
 INDEX_FIELDS_I18N = ("translations",)  # 保留 translations.en.title
 
 
-# v3.11.0 · 洛谷官方 8 档难度中文标签
-# (参考: https://algobeatcontest.github.io/practice 的 diffMap)
+# v3.11.0 · 洛谷官方 9 档难度中文标签 (与 luogu.com.cn 网页端"难易度统计"完全对齐)
+# 实际取数发现: problemset_open API(difficulty 0-7,合并版) 与 学员练习数据 / 网页端
+# 难易度统计(difficulty 0-8,9 档版) 不一致。学员提交数据已升级到 9 档,
+# 但旧版命名 DIFFICULTY_NAMES 还是 8 档, 导致 difficulty>=3 的标签全部错位 1 档、
+# difficulty=8 越界归到"暂无评定"。本表按 9 档展开, 顺序与洛谷网页一致。
+# (参考: https://www.luogu.com.cn/user/<uid>/practice 难易度统计)
 DIFFICULTY_NAMES: tuple = (
     "暂无评定",      # 0
     "入门",          # 1
     "普及−",         # 2
-    "普及/提高−",    # 3
-    "普及+/提高",    # 4
-    "提高+/省选−",   # 5
-    "省选/NOI−",     # 6
-    "NOI/NOI+/CTSC", # 7
+    "普及",          # 3
+    "普及+/提高−",   # 4
+    "提高",          # 5
+    "提高+/省选−",   # 6
+    "省选/NOI−",     # 7
+    "NOI/NOI+/CTS",  # 8
 )
 
 
 def get_difficulty_name(level) -> str:
-    """难度档 0-7 → 中文标签, 越界或 None 返回 '暂无评定'"""
+    """难度档 0-8 → 中文标签, 越界或 None 返回 '暂无评定'"""
     try:
         idx = int(level)
         if 0 <= idx < len(DIFFICULTY_NAMES):

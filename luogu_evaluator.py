@@ -273,15 +273,22 @@ def ensure_dir(path: str) -> str:
     return path
 
 
+# v3.11.0 · 洛谷官方 9 档难度中文标签 + 配色 (与 luogu.com.cn 网页端"难易度统计"完全对齐)
+# 实际取数发现: problemset_open API(difficulty 0-7,合并版) 与 学员练习数据 / 网页端
+# 难易度统计(difficulty 0-8,9 档版) 不一致。学员提交数据已升级到 9 档,
+# 但旧版命名/循环范围还是 0-7 共 8 档, 导致 difficulty>=3 的标签全部错位 1 档、
+# difficulty=8 越界归到"暂无评定"、最后一档题数(NOI/NOI+/CTS)被丢弃。
+# 本表按 9 档展开, 顺序与洛谷网页一致, 颜色按洛谷网页标签色取值。
 DIFFICULTY_NAME_MAP = {
     0: "暂无评定",
     1: "入门",
     2: "普及-",
-    3: "普及/提高-",
-    4: "普及+/提高",
-    5: "提高+/省选-",
-    6: "省选/NOI-",
-    7: "NOI/NOI+/CTSC",
+    3: "普及",
+    4: "普及+/提高-",
+    5: "提高",
+    6: "提高+/省选-",
+    7: "省选/NOI-",
+    8: "NOI/NOI+/CTS",
 }
 
 DIFFICULTY_COLOR_MAP = {
@@ -290,9 +297,10 @@ DIFFICULTY_COLOR_MAP = {
     2: "#F39C12",
     3: "#FFC116",
     4: "#52C41A",
-    5: "#3498DB",
-    6: "#9D4EDD",
-    7: "#0E1D69",
+    5: "#52C41A",   # 提高 (与洛谷网页"提高"绿保持一致)
+    6: "#3498DB",
+    7: "#9D4EDD",
+    8: "#0E1D69",   # NOI/NOI+/CTS (与原 NOI/NOI+/CTSC 深蓝保持一致)
 }
 
 DIFFICULTY_TEXT_COLOR_MAP = {
@@ -304,6 +312,7 @@ DIFFICULTY_TEXT_COLOR_MAP = {
     5: "#FFFFFF",
     6: "#FFFFFF",
     7: "#FFFFFF",
+    8: "#FFFFFF",
 }
 
 TAG_CHART_PALETTE = [
@@ -820,9 +829,9 @@ def build_gesp_trusted_data_summary_md(
 
     passed_levels = set(int(x) for x in (highest_passed and [highest_passed]) or [])
 
-    # 难度分布统计
+    # 难度分布统计 (v3.11.0 扩展为 0-8 共 9 档, 与洛谷网页"难易度统计"对齐)
     total_ac = 0
-    for d in range(1, 8):
+    for d in range(1, 9):
         total_ac += int(diff_hist.get(str(d), diff_hist.get(d, 0)))
     total_ac = total_ac or 1
 
@@ -841,7 +850,7 @@ def build_gesp_trusted_data_summary_md(
         '<table><thead><tr><th>洛谷难度</th><th>题数</th><th>占比</th><th>分布图</th></tr></thead><tbody>',
     ]
 
-    for level in range(1, 8):
+    for level in range(1, 9):  # v3.11.0 扩展为 0-8 共 9 档
         count = int(diff_hist.get(str(level), diff_hist.get(level, 0)))
         name = DIFFICULTY_NAME_MAP[level]
         color = DIFFICULTY_COLOR_MAP[level]
@@ -1025,7 +1034,7 @@ def build_trusted_data_summary_md(export_data: dict) -> str:
     syllabus_eval = export_data.get("syllabus_evaluation", {}) or {}
 
     total = 0
-    for level in range(1, 8):
+    for level in range(1, 9):  # v3.11.0 扩展为 0-8 共 9 档
         total += int(difficulty_histogram.get(str(level), difficulty_histogram.get(level, 0)))
     total = total or 1
     lines = [
@@ -1038,7 +1047,7 @@ def build_trusted_data_summary_md(export_data: dict) -> str:
         '<table><thead><tr><th>洛谷难度</th><th>题数</th><th>占比</th><th>分布图</th></tr></thead><tbody>',
     ])
 
-    for level in range(1, 8):
+    for level in range(1, 9):  # v3.11.0 扩展为 0-8 共 9 档
         count = int(difficulty_histogram.get(str(level), difficulty_histogram.get(level, 0)))
         name = DIFFICULTY_NAME_MAP[level]
         color = DIFFICULTY_COLOR_MAP[level]

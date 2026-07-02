@@ -7910,8 +7910,13 @@ ADMIN_HTML = """
                                         <a href="{{ task.html }}" target="_blank" class="text-emerald-700 hover:underline text-xs font-semibold">HTML</a>
                                         {% endif %}
                                         {% if task.pdf %}
-                                        {# v3.8 · admin 后台可下载 PDF（用户态报告页已隐藏，统一走海报） #}
-                                        <a href="/admin/reports/{{ task.pdf | replace('reports/', '') }}" download class="text-emerald-700 hover:underline text-xs font-semibold ml-1" title="v3.8 仅管理员可下载 PDF">PDF</a>
+                                        {# v3.8 · admin 后台可下载 PDF（用户态报告页已隐藏，统一走海报）
+                                           task.pdf 形如 '/reports/<dir>/report.pdf?v=xxx'（DB） 或 'reports/vjudge_xxx/report.pdf'（相对），
+                                           剥掉前导的 /reports/ 或 reports/ 后拼到 /admin/reports/ 下，再折叠 // 避免双斜杠 404 #}
+                                        {% set pdf_path = (task.pdf | replace('/reports/', '', 1) | replace('reports/', '', 1) | replace('//', '/') | trim('/')) %}
+                                        {% if pdf_path %}
+                                        <a href="/admin/reports/{{ pdf_path }}" download class="text-emerald-700 hover:underline text-xs font-semibold ml-1" title="v3.8 仅管理员可下载 PDF">PDF</a>
+                                        {% endif %}
                                         {% endif %}
                                         {% if task.md %}
                                         <a href="{{ task.md }}" target="_blank" class="text-emerald-700 hover:underline text-xs font-semibold ml-1">MD</a>

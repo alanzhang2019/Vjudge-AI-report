@@ -252,7 +252,7 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
 APP_VERSION = "v3.11.25"
-APP_VERSION_BUILD = "20260702_v3p11p28_fix_gesp_msg_and_switch_url"
+APP_VERSION_BUILD = "20260702_v3p11p29_fix_button_always_clickable"
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -6371,9 +6371,10 @@ UPLOAD_ZIP_HTML = """
                     </div>
                 </div>
 
+                <!-- v3.11.29 · 按钮去掉默认 disabled, 始终可点;
+                     点击时未选文件给清晰 alert (见 form submit 处理器) -->
                 <button type="submit" id="submitBtn"
-                        class="w-full py-3 px-6 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-lg shadow transition disabled:opacity-50 disabled:cursor-not-allowed"
-                        disabled>
+                        class="w-full py-3 px-6 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-lg shadow transition">
                     🚀 上传并生成报告
                 </button>
             </form>
@@ -6453,7 +6454,7 @@ UPLOAD_ZIP_HTML = """
             fileInfo.classList.remove('hidden');
             dropZone.classList.add('has-file');
             dropText.textContent = '✅ 已选择 (可重新拖拽覆盖)';
-            submitBtn.disabled = false;
+            // v3.11.29 · 按钮始终可点, 这里不再控制 disabled
         }
 
         function clearFile() {
@@ -6461,7 +6462,7 @@ UPLOAD_ZIP_HTML = """
             fileInfo.classList.add('hidden');
             dropZone.classList.remove('has-file');
             dropText.textContent = '拖拽 ZIP 文件到这里 / 点击选择';
-            submitBtn.disabled = true;
+            // v3.11.29 · 按钮始终可点, 这里不再控制 disabled
         }
 
         fileInput.addEventListener('change', e => onFile(e.target.files[0]));
@@ -6490,8 +6491,14 @@ UPLOAD_ZIP_HTML = """
         });
 
         // v3.11.28 · 限流弹窗: 友好口语 + "切到另一报告" 快捷按钮
+        // v3.11.29 · 提交前先校验: 未选文件给清晰提示, 替代之前"按钮灰着不让点"
         zipForm.addEventListener('submit', async (e) => {
             e.preventDefault();
+            // v3.11.29 · 未选文件 → 友好 alert
+            if (!fileInput.files || fileInput.files.length === 0) {
+                alert('📦 请先选择 ZIP 数据包文件\n\n方法: 拖拽 .zip 到上方区域, 或点击「拖拽 ZIP 文件到这里」选择文件');
+                return;
+            }
             submitBtn.disabled = true;
             const origText = submitBtn.textContent;
             submitBtn.textContent = '⏳ 上传中...';
@@ -6706,9 +6713,10 @@ UPLOAD_SOURCE_HTML = """
                     </div>
                 </div>
 
+                <!-- v3.11.29 · 按钮去掉默认 disabled, 始终可点;
+                     点击时空内容给清晰 alert (见 form submit 处理器) -->
                 <button type="submit" id="submitBtn"
-                        class="w-full py-3 px-6 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-lg shadow transition disabled:opacity-50 disabled:cursor-not-allowed"
-                        disabled>
+                        class="w-full py-3 px-6 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-lg shadow transition">
                     🚀 开始生成报告
                 </button>
             </form>
@@ -6770,6 +6778,8 @@ UPLOAD_SOURCE_HTML = """
         const submitBtn = document.getElementById('submitBtn');
         const form = document.getElementById('sourceForm');
 
+        // v3.11.28 · 按钮始终可点, 由 JS 校验内容, 避免"按钮灰着, 用户不知道点哪"
+        // (旧: 字符数 < 80 时按钮 disabled, 用户不知道是没贴源码还是 bug)
         function updateStats() {
             const n = ta.value.length;
             charCount.textContent = n.toLocaleString();
@@ -6778,13 +6788,13 @@ UPLOAD_SOURCE_HTML = """
             } else {
                 charSize.textContent = '';
             }
-            // 启用/禁用提交
+            // 仅改样式提示, 不再 disabled 按钮
             if (n >= 80) {
-                submitBtn.disabled = false;
                 ta.classList.add('has-content');
+                submitBtn.classList.remove('opacity-60');
             } else {
-                submitBtn.disabled = true;
                 ta.classList.remove('has-content');
+                submitBtn.classList.add('opacity-60');
             }
         }
 
@@ -6794,8 +6804,15 @@ UPLOAD_SOURCE_HTML = """
 
         // v3.11.28 · 限流弹窗: 友好口语 + "切到另一报告" 快捷按钮
         // (旧: "⚠️ UID ... NOI-CSP ... 22 小时 22 分钟后" → 用户不懂)
+        // v3.11.29 · 提交前先校验: 空内容给清晰提示, 不让请求白走一趟
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
+            // v3.11.29 · 空内容友好提示, 替代之前"按钮灰着不让点"
+            if (!ta.value || ta.value.length < 80) {
+                alert('📋 请先粘贴【洛谷个人练习】页的 HTML 源码 (字符数 ≥ 80)\n\n方法: 打开 https://www.luogu.com.cn/user/<你的UID>/practice → 右键 → 查看网页源代码 → Ctrl+A 全选 → Ctrl+C 复制 → 回到这里 Ctrl+V 粘贴');
+                ta.focus();
+                return;
+            }
             submitBtn.disabled = true;
             const origText = submitBtn.textContent;
             submitBtn.textContent = '⏳ 解析 + AI 生成中...';

@@ -252,7 +252,7 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
 APP_VERSION = "v3.11.25"
-APP_VERSION_BUILD = "20260702_v3p11p25_fix_admin_pdf_link"
+APP_VERSION_BUILD = "20260702_v3p11p25_fix_orphan_pdf_link"
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -1665,7 +1665,7 @@ def discover_orphan_report_tasks() -> list[dict]:
             "status": "done" if html_path.exists() or md_path.exists() or pdf_path.exists() else "unknown",
             "time": display_time,
             "html": _report_url(html_path) if html_path.exists() else "",
-            "pdf": _download_report_url(_report_url(pdf_path)) if pdf_path.exists() else "",
+            "pdf": _report_url(pdf_path) if pdf_path.exists() else "",
             "md": _report_url(md_path) if md_path.exists() else "",
             "rebuild_status": "",
             "rebuild_message": "该报告目录未入库，仅支持查看与下载。" if not orphan_uid else "该报告目录未入库（task_id 已丢失），但已通过学员档案反查到 UID。",

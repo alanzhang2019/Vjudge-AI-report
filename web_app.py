@@ -252,7 +252,7 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
 APP_VERSION = "v3.11.25"
-APP_VERSION_BUILD = "20260702_v3p11p29_fix_button_always_clickable"
+APP_VERSION_BUILD = "20260702_v3p11p29b_fix_native_form_redirect"
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -5997,7 +5997,12 @@ def upload_zip_form():
     _gate = _require_student_login()
     if _gate:
         return _gate
-    return render_template_string(UPLOAD_ZIP_HTML)
+    # v3.11.29 · 强制 no-cache, 避免旧版 JS
+    resp = make_response(render_template_string(UPLOAD_ZIP_HTML))
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
 
 
 @app.route("/upload-zip", methods=["POST"])
@@ -6102,11 +6107,17 @@ def upload_zip_submit():
     thread.start()
 
     # v3.11.27 · 成功路径返回 JSON 200 + status_url (与 /upload-source 对齐)
-    return jsonify({
-        "ok": True,
-        "task_id": task_id,
-        "status_url": url_for("status_page", task_id=task_id),
-    }), 200
+    # v3.11.29 · 双返回: fetch 路径 → JSON; 原生表单 → 302 重定向
+    _status_url = url_for("status_page", task_id=task_id)
+    _accept = (request.headers.get("Accept") or "").lower()
+    if "application/json" in _accept:
+        return jsonify({
+            "ok": True,
+            "task_id": task_id,
+            "status_url": _status_url,
+        }), 200
+    from flask import redirect as _redirect
+    return _redirect(_status_url, code=302)
 
 
 # v3.11.0 · /upload-source 路由 (前端源码粘贴模式)
@@ -6123,7 +6134,13 @@ def upload_source_form():
     _exam_type = str(request.args.get("exam_type", "")).strip().lower()
     if _exam_type not in ("noi_csp", "gesp"):
         _exam_type = "noi_csp"
-    return render_template_string(UPLOAD_SOURCE_HTML, exam_type=_exam_type)
+    # v3.11.29 · 强制 no-cache, 避免用户用旧版 JS (没有 fetch+alert handler) 导致
+    #   JSON 残留浏览器 → 用户"以为没生成"
+    resp = make_response(render_template_string(UPLOAD_SOURCE_HTML, exam_type=_exam_type))
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
 
 
 @app.route("/upload-source", methods=["POST"])
@@ -6237,11 +6254,21 @@ def upload_source_submit():
 
     # v3.11.27 · 成功路径返回 JSON 200 + status_url, 让前端 fetch 能正确跳转
     # (旧: 302 redirect, fetch + redirect:'manual' 拿不到 Location, 用户体验差)
-    return jsonify({
-        "ok": True,
-        "task_id": task_id,
-        "status_url": url_for("status_page", task_id=task_id),
-    }), 200
+    # v3.11.29 · 双返回: 走 fetch 路径 (Accept: application/json) → JSON,
+    #   走浏览器原生表单 (无 JS / JS 失败 / 缓存旧版本) → 302 重定向,
+    #   避免 JSON 残留在浏览器, 让用户"以为没生成".
+    _status_url = url_for("status_page", task_id=task_id)
+    _accept = (request.headers.get("Accept") or "").lower()
+    if "application/json" in _accept:
+        return jsonify({
+            "ok": True,
+            "task_id": task_id,
+            "status_url": _status_url,
+        }), 200
+    # 原生表单提交: 浏览器自动 follow 302
+    from flask import redirect as _redirect
+    resp = _redirect(_status_url, code=302)
+    return resp
 
 
 # v3.11.0 · ZIP 上传拖拽 UI

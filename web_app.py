@@ -252,7 +252,7 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
 APP_VERSION = "v3.11.25"
-APP_VERSION_BUILD = "20260702_v3p11p29b_fix_native_form_redirect"
+APP_VERSION_BUILD = "20260702_v3p11p30c_fix_parent_subscribe_luogu_uid"
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -5261,7 +5261,8 @@ def _debug_inject_temp_cookies():
 #       Response = 限流触发, 调用方直接 return
 # ============================================================
 def _check_24h_rate_limit(luogu_uid: str, exam_type: str, mode: str = "strict",
-                          task_type_list: list[str] | None = None):
+                          task_type_list: list[str] | None = None,
+                          student_short_id: str = ""):
     """v3.11.21n · 共用 24h 限流（被 /generate, /generate-form, /upload-source, /upload-zip 调用）
 
     Args:
@@ -5342,24 +5343,31 @@ def _check_24h_rate_limit(luogu_uid: str, exam_type: str, mode: str = "strict",
     # v3.11.28 · 限流提示改写: 去掉"UID/限流/冷却"等术语, 用"今天已生成"等口语;
     #   同时返回 switch_url 让前端 alert 弹窗能直接给「切到另一种报告」按钮,
     #   避免用户「我 GESP 还没生成, 怎么就限流了」的困惑 (他其实是 NOI-CSP 被限, GESP 没被限).
+    # v3.11.30 · 第二轮简化: 用更短的「今天已生成 + 倒计时 + 立即试试」三段式,
+    #   把"1 份" / "约 X 小时 Y 分钟后才能再生成" 简化成口语「X 小时后再来」
     if mode == "any":
-        human_label = "今天已生成过 1 份报告"
+        human_label = "今天已生成过报告"
         switch_hint = ""
         other_exam = None
     else:
         if exam_type == "gesp":
-            human_label = "今天已生成过 1 份 GESP 备考报告"
-            switch_hint = "👉 您也可以马上试试 NOI-CSP 测评报告 (不限时, 现在就能生成)"
+            human_label = "今天已生成过 GESP 备考报告"
+            switch_hint = "👉 现在试试 NOI-CSP 测评报告（不占今天名额）"
             other_exam = "noi_csp"
         else:
-            human_label = "今天已生成过 1 份 NOI-CSP 测评报告"
-            switch_hint = "👉 您也可以马上试试 GESP 备考报告 (不限时, 现在就能生成)"
+            human_label = "今天已生成过 NOI-CSP 测评报告"
+            switch_hint = "👉 现在试试 GESP 备考报告（不占今天名额）"
             other_exam = "gesp"
 
-    msg = (
-        f"⏰ {human_label}, 约 {remain_min // 60} 小时 {remain_min % 60} 分钟后才能再生成。\n\n"
-        f"{switch_hint}"
-    )
+    # v3.11.30 · 时间用「X 小时后再来」短格式, 不再写「约 X 小时 Y 分钟后才能再生成」(啰嗦)
+    remain_h = max(1, (remain_min + 30) // 60) if 'remain_min' in dir() else 24
+    if remain_h <= 1:
+        time_label = "1 小时内再来"
+    elif remain_h < 24:
+        time_label = f"约 {remain_h} 小时后再来"
+    else:
+        time_label = "明天再来"
+    msg = f"⏰ {human_label}\n\n🕐 {time_label}\n\n{switch_hint}".strip()
     # 三种返回格式, 按入口渲染能力区分:
     # - JSON (upload-source / upload-zip): 含 switch_url, 前端 alert 给快捷切换按钮
     # - 重定向到 /me/<uid> (generate)
@@ -5371,7 +5379,13 @@ def _check_24h_rate_limit(luogu_uid: str, exam_type: str, mode: str = "strict",
     accept = (_req.headers.get("Accept") or "").lower() if _req else ""
     if _is_upload_api or "application/json" in accept:
         from flask import jsonify, url_for as _uf
-        me_url = _uf("student_me", short_id=luogu_uid)
+        # v3.11.30 · me_url 用 student_short_id (学员真 short_id), 不是 luogu_uid
+        #   之前: me_url=/me/114545 (luogu_uid 当 short_id), 但学员实际 short_id=u68idmnw
+        #   点 me_url 会跳到 /me/114545 → 后端 fallback get_student_by_uid, 同样能找到人
+        #   但 /me/<luogu_uid> 这种 URL 不符合 v3.10.0 改 short_id 的设计, 同时暴露 UID.
+        #   修复: 优先用 student_short_id, 缺失再回退到 luogu_uid (老学员/未注册兜底).
+        _me_short = (student_short_id or "").strip() or str(luogu_uid or "").strip()
+        me_url = _uf("student_me", short_id=_me_short)
         # v3.11.28 · switch_url 给前端 alert 弹窗"切到另一报告"按钮用.
         # 学员当前被 exam_type 限流 → 给一张反方向报告的入口, 立刻能跑.
         switch_url = None
@@ -5507,6 +5521,7 @@ def generate():
         _rate_luogu_uid,
         (form_data.get("exam_type") or "noi_csp").strip(),
         mode="strict",
+        student_short_id=str(session.get("student_short_id") or "").strip(),
     )
     if _rate_resp is not None:
         return _rate_resp
@@ -6026,6 +6041,7 @@ def upload_zip_submit():
         _luogu_uid,
         (request.form.get("exam_type") or "noi_csp").strip(),
         mode="strict",
+        student_short_id=str(session.get("student_short_id") or "").strip(),
     )
     if _rate_resp is not None:
         return _rate_resp
@@ -6185,6 +6201,7 @@ def upload_source_submit():
         _luogu_uid,
         (request.form.get("exam_type") or "noi_csp").strip(),
         mode="strict",
+        student_short_id=str(session.get("student_short_id") or "").strip(),
     )
     if _rate_resp is not None:
         return _rate_resp
@@ -9582,13 +9599,19 @@ STUDENT_REPORT_HTML = """
                         {% if m.difficulty %}<span class="text-[10px] text-gray-400">难度 {{ m.difficulty }}</span>{% endif %}
                     </div>
                 </div>
-                <!-- v3.9.9 · 每题独立 AI 讲题入口（直跳 aijiangti.cn，题目已直传 + C++ 实现要求） -->
-                <a href="https://aijiangti.cn/?pid={{ m.problem_id or m.pid }}&from=luogu&lang=cpp&require={{ '用C++代码实现并讲解'|urlencode }}&source={{ (m.source or '')|urlencode }}&title={{ (m.title or '')|urlencode }}&mode=problem"
-                   target="_blank" rel="noopener"
-                   class="ml-2 px-2.5 py-1.5 rounded-md bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-xs font-bold hover:from-blue-600 hover:to-cyan-600 whitespace-nowrap"
-                   title="跳到 aijiangti.cn 生成 C++ 课件（题号/标题/来源已传入）">
+                {# v3.11.31 · 每题独立 AI 讲题入口（异步 API + 内嵌展示，不再外跳 aijiangti.cn） #}
+                <button type="button" onclick="luoguAiTutor(this)"
+                        data-pid="{{ m.problem_id or m.pid or '' }}"
+                        data-title="{{ m.title or m.problem_title or '' }}"
+                        data-source="{{ m.source or '' }}"
+                        data-lang="cpp"
+                        data-require="用C++代码实现并讲解"
+                        data-short-id="{{ token or '' }}"
+                        data-luogu-uid="{{ student.luogu_uid or token or '' }}"
+                        class="ml-2 px-2.5 py-1.5 rounded-md bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-xs font-bold hover:from-blue-600 hover:to-cyan-600 whitespace-nowrap disabled:opacity-50"
+                        title="生成 C++ 讲题（AI 实时讲解 · 内嵌在项目内）">
                     🤖 AI 讲题
-                </a>
+                </button>
             </div>
             {% endfor %}
             {% if mistakes|length > 8 %}
@@ -11059,7 +11082,11 @@ def generate_form_submit():
     # v3.8 · 每日 1 次限流：最近 24 小时内该 UID 已生成过报告，则引导到 /me/<uid>
     # v3.9.64 · 按报告类型分别限流：NOI-CSP 和 GESP 互不限制（每天可各生成一次）
     # v3.11.21n · 共用 helper 抽取（/generate /upload-source /upload-zip 三入口也走同一套限流）
-    _rate_resp = _check_24h_rate_limit(luogu_uid, (form.get("exam_type") or "noi_csp").strip())
+    _rate_resp = _check_24h_rate_limit(
+        luogu_uid,
+        (form.get("exam_type") or "noi_csp").strip(),
+        student_short_id=str(session.get("student_short_id") or "").strip(),
+    )
     if _rate_resp is not None:
         return _rate_resp
 
@@ -14401,6 +14428,326 @@ def studymate_ai_tutor():
     )
 
 
+# ============================================================================
+# v3.11.31 · AI 讲题异步 API (StudyMate async-job pattern)
+# 参考: https://github.com/alanzhang2019/StudyMate/blob/main/app/api/generate-classroom/route.ts
+# ============================================================================
+
+@app.route("/api/ai-tutor/jobs", methods=["POST"])
+def api_ai_tutor_create_job():
+    """v3.11.31 · AI 讲题异步 job 创建接口 (StudyMate 同形态)
+
+    Request JSON:
+      {
+        "problem_id": "P1001",                    # 洛谷 / Codeforces 题号
+        "title":      "A + B Problem",            # 题目标题
+        "source":     "https://...",              # 题目 URL
+        "language":   "cpp",                      # 目标语言
+        "requirement":"用 C++ 代码实现并讲解",      # 学员要求
+        "luogu_uid":  "114545",                   # 学员 UID (可选, 用于结果页)
+      }
+
+    Response 202 (StudyMate 风格):
+      {
+        "jobId":          "abc1234567",
+        "status":         "queued",
+        "step":           "queued",
+        "message":        "任务已创建, 等待 AI 讲师接管...",
+        "pollUrl":        "/api/ai-tutor/jobs/abc1234567",
+        "pollIntervalMs": 5000,
+      }
+    """
+    import ai_tutor_jobs as _ait
+    try:
+        payload = request.get_json(silent=True) or {}
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    problem_id = str(payload.get("problem_id") or payload.get("pid") or "").strip()
+    title = str(payload.get("title") or "").strip()
+    source = str(payload.get("source") or "").strip()
+    language = str(payload.get("language") or "cpp").strip().lower()
+    requirement = str(payload.get("requirement") or "").strip() or f"用 {language} 代码实现并讲解"
+    luogu_uid = str(payload.get("luogu_uid") or "").strip()
+    if not problem_id and not title:
+        return jsonify({
+            "ok": False,
+            "error": "MISSING_FIELDS",
+            "message": "problem_id / title 至少传一个",
+        }), 400
+    # 用 session 兜底 luogu_uid
+    if not luogu_uid:
+        try:
+            luogu_uid = str(session.get("student_uid") or session.get("student_short_id") or "").strip()
+        except Exception:
+            pass
+    job_id = _ait.create_job(
+        requirement=requirement,
+        problem_id=problem_id,
+        title=title,
+        source=source,
+        language=language,
+        luogu_uid=luogu_uid,
+        extra={"created_from": "api"},
+    )
+    poll_url = url_for("api_ai_tutor_get_job", job_id=job_id)
+    app.logger.info(f"[v3.11.31 /api/ai-tutor/jobs] new job={job_id} pid={problem_id} title={title[:30]}")
+    return jsonify({
+        "jobId": job_id,
+        "status": "queued",
+        "step": "queued",
+        "message": "任务已创建, AI 讲师即将接管...",
+        "pollUrl": poll_url,
+        "pollIntervalMs": _ait.AI_TUTOR_POLL_INTERVAL_MS,
+    }), 202
+
+
+@app.route("/api/ai-tutor/jobs/<job_id>", methods=["GET"])
+def api_ai_tutor_get_job(job_id: str):
+    """v3.11.31 · AI 讲题 job 状态查询 (StudyMate GET /api/generate-classroom/<jobId> 同形态)
+
+    Response 200:
+      {
+        "jobId":          "abc1234567",
+        "status":         "running" | "succeeded" | "failed",
+        "step":           "analyzing_brute",
+        "progress":       55,
+        "message":        "🔍 正在分析暴力解与边界...",
+        "pollUrl":        "/api/ai-tutor/jobs/abc1234567",
+        "pollIntervalMs": 5000,
+        "result":         { ... } | null,
+        "error":          null | "...",
+        "done":           false,
+      }
+    """
+    import ai_tutor_jobs as _ait
+    job = _ait.get_job(job_id)
+    if job is None:
+        return jsonify({
+            "ok": False,
+            "error": "NOT_FOUND",
+            "message": f"job {job_id} 不存在或已过期",
+        }), 404
+    payload = job.to_dict()
+    payload["pollUrl"] = url_for("api_ai_tutor_get_job", job_id=job_id)
+    payload["pollIntervalMs"] = _ait.AI_TUTOR_POLL_INTERVAL_MS
+    return jsonify(payload), 200
+
+
+@app.route("/me/<short_id>/ai-tutor/<job_id>", methods=["GET"])
+def student_ai_tutor_result(short_id: str, job_id: str):
+    """v3.11.31 · 学员 AI 讲题结果展示页 (内嵌在本项目, 不再跳 aijiangti.cn 站外)"""
+    return _render_ai_tutor_result(short_id, job_id)
+
+
+@app.route("/ai-tutor-result/<job_id>", methods=["GET"])
+def anon_ai_tutor_result(job_id: str):
+    """v3.11.31 · 学员匿名版 (无 short_id) · 用于 lite 个人中心 / 海报扫码入口"""
+    return _render_ai_tutor_result(None, job_id)
+
+
+def _render_ai_tutor_result(short_id, job_id: str):  # v3.11.31 · 短码可空 (匿名结果页)
+    """v3.11.31 · 渲染 AI 讲题结果页 (short_id 可空)."""
+    import ai_tutor_jobs as _ait
+    job = _ait.get_job(job_id)
+    if job is None:
+        return render_template_string(
+            "<h1>讲题已过期</h1>"
+            "<p>该讲解任务已超过 4 小时, 缓存被清理. 请重新发起.</p>"
+            f"<p><a href='{( '/me/' + short_id ) if short_id else '/'}'>← 返回</a></p>"
+        ), 410
+    student: dict = {}
+    if short_id:
+        student = _admin_students.get_student_by_short_id(short_id) or _admin_students.get_student_by_uid(short_id) or {}
+    return render_template_string(
+        AI_TUTOR_RESULT_HTML,
+        short_id=short_id or "",
+        luogu_uid=job.luogu_uid or short_id or "",
+        job_id=job_id,
+        job=job,
+        student=student,
+    )
+
+
+# ============================================================================
+# v3.11.31 · AI 讲题结果页模板 (内嵌在项目内, 不再跳站外)
+# ============================================================================
+AI_TUTOR_RESULT_HTML = r"""
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>AI 讲题 · {{ job.title or job.problem_id or "—" }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background: linear-gradient(135deg,#eff6ff 0%,#ecfeff 100%); min-height:100vh; font-family:ui-sans-serif,system-ui,sans-serif; }
+        .scene-card { background:#fff; border-radius:16px; box-shadow:0 4px 16px rgba(0,0,0,.06); padding:1.5rem; margin-bottom:1rem; }
+        .scene-card h3 { color:#1e40af; font-size:1.1rem; font-weight:700; margin-bottom:.75rem; }
+        .scene-card pre { background:#0f172a; color:#e2e8f0; padding:1rem; border-radius:8px; overflow-x:auto; font-size:13px; }
+        .scene-card code { background:#f1f5f9; padding:1px 6px; border-radius:4px; font-size:13px; color:#be123c; }
+        .scene-card pre code { background:transparent; color:inherit; padding:0; }
+        .progress-bar { height:8px; background:#e0e7ff; border-radius:99px; overflow:hidden; }
+        .progress-bar > div { height:100%; background:linear-gradient(90deg,#3b82f6,#06b6d4); transition:width .3s; }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <div class="max-w-3xl mx-auto">
+        <!-- 头部 -->
+        <div class="flex items-center gap-2 mb-3 flex-wrap">
+            <span class="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-bold">🤖 AI 讲题</span>
+            <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-bold">v3.11.31 内嵌版</span>
+            {% if job.status == "succeeded" %}<span class="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-bold">✅ 已完成</span>
+            {% elif job.status == "failed" %}<span class="text-xs px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 font-bold">❌ 失败</span>
+            {% else %}<span class="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-bold">⏳ 生成中</span>{% endif %}
+        </div>
+        <h1 class="text-2xl md:text-3xl font-extrabold text-gray-800 mb-2">
+            📖 {{ job.title or job.problem_id or "(无标题)" }}
+        </h1>
+        <p class="text-sm text-gray-500 mb-4">
+            {% if job.problem_id %}<span class="font-mono bg-gray-100 px-2 py-0.5 rounded">{{ job.problem_id }}</span> ·{% endif %}
+            {{ job.source or "" }}
+            {% if job.luogu_uid %}· 学员 UID {{ job.luogu_uid[:4] }}…{{ job.luogu_uid[-2:] }}{% endif %}
+        </p>
+
+        <!-- 进度条 (生成中时显示) -->
+        <div id="progress-wrap" class="bg-white rounded-2xl shadow p-4 mb-4 {% if job.status in ('succeeded','failed') %}hidden{% endif %}">
+            <div class="flex items-center justify-between mb-2">
+                <span class="text-sm font-bold text-gray-700">⏳ {{ job.message or "AI 讲师正在生成..." }}</span>
+                <span class="text-xs text-gray-500 font-mono" id="progress-pct">{{ job.progress }}%</span>
+            </div>
+            <div class="progress-bar"><div id="progress-fill" style="width: {{ job.progress }}%"></div></div>
+            <div class="text-xs text-gray-400 mt-2" id="progress-step">step: {{ job.step }}</div>
+        </div>
+
+        <!-- 错误信息 -->
+        {% if job.status == "failed" %}
+        <div class="bg-rose-50 border-2 border-rose-200 rounded-2xl p-5 mb-4">
+            <h2 class="text-base font-bold text-rose-700 mb-1">❌ 讲题失败</h2>
+            <p class="text-sm text-rose-600">{{ job.error or job.message or "未知错误" }}</p>
+        </div>
+        {% endif %}
+
+        <!-- 讲解结果 (按 scene 展示) -->
+        <div id="result-wrap" class="{% if job.status != 'succeeded' %}hidden{% endif %}">
+            {% if job.result and job.result.scenes %}
+            {% for sc in job.result.scenes %}
+            <div class="scene-card">
+                <h3>{{ sc.title }}</h3>
+                <div class="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{{ sc.body | safe }}</div>
+            </div>
+            {% endfor %}
+            {% endif %}
+            {% if job.result and job.result.summary %}
+            <div class="bg-emerald-50 border-l-4 border-emerald-400 p-4 rounded mb-4">
+                <p class="text-sm text-emerald-800">📝 <strong>小结</strong> · {{ job.result.summary }}</p>
+            </div>
+            {% endif %}
+            <div class="text-center mt-6">
+                <a href="/me/{{ short_id }}" class="inline-block px-5 py-2.5 bg-gray-100 text-gray-700 text-sm font-bold rounded-lg hover:bg-gray-200">← 返回个人中心</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // 异步轮询
+    (function() {
+        const status = "{{ job.status }}";
+        if (status === "succeeded" || status === "failed") return;
+        const jobId = "{{ job_id }}";
+        const pollUrl = "/api/ai-tutor/jobs/" + jobId;
+        const fill = document.getElementById("progress-fill");
+        const pct = document.getElementById("progress-pct");
+        const step = document.getElementById("progress-step");
+        const wrap = document.getElementById("progress-wrap");
+        const rwrap = document.getElementById("result-wrap");
+        function tick() {
+            fetch(pollUrl).then(r => r.json()).then(d => {
+                if (d.progress != null) { fill.style.width = d.progress + "%"; pct.textContent = d.progress + "%"; }
+                if (d.message) { wrap.querySelector("span.text-sm").textContent = "⏳ " + d.message; }
+                if (d.step) step.textContent = "step: " + d.step;
+                if (d.done) {
+                    setTimeout(() => location.reload(), 500);  // 重新加载渲染结果
+                } else {
+                    setTimeout(tick, 5000);
+                }
+            }).catch(() => setTimeout(tick, 8000));
+        }
+        setTimeout(tick, 5000);
+    })();
+    </script>
+</body>
+</html>
+"""
+
+
+# ============================================================================
+# v3.11.31 · AI 讲题按钮 JS (前端调用异步 API, 替代外跳 aijiangti.cn)
+# ============================================================================
+AI_TUTOR_BUTTON_JS = r"""
+<script>
+/**
+ * v3.11.31 · 异步 AI 讲题按钮
+ * 把之前外跳 aijiangti.cn 的 <a href> 改为 <button onclick="luoguAiTutor(this)">
+ * 后端: POST /api/ai-tutor/jobs → 202 { jobId, pollUrl, ... }
+ *       GET  <pollUrl> 每 5s 轮询 → 完成时刷新到 /me/<short_id>/ai-tutor/<jobId>
+ */
+function luoguAiTutor(btn) {
+    const pid     = btn.dataset.pid     || btn.dataset.problemId || "";
+    const title   = btn.dataset.title   || "";
+    const source  = btn.dataset.source  || "";
+    const lang    = btn.dataset.lang    || "cpp";
+    const require = btn.dataset.require || "用C++代码实现并讲解";
+    const shortId = btn.dataset.shortId || (window.LUOGU_SHORT_ID || "");
+    const luoguUid= btn.dataset.luoguUid|| (window.LUOGU_UID || "");
+    if (!pid && !title) { alert("题目信息缺失, 请刷新重试"); return; }
+    // 1) 禁用按钮 + 显示 loading
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = "⏳ 启动中...";
+    // 2) POST 创建 job
+    fetch("/api/ai-tutor/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify({
+            problem_id: pid, title: title, source: source,
+            language: lang, requirement: require,
+            luogu_uid: luoguUid,
+        }),
+    }).then(r => r.json().then(d => ({status: r.status, body: d})))
+      .then(({status, body}) => {
+        if (status !== 202 || !body.jobId) {
+            btn.disabled = false; btn.innerHTML = orig;
+            alert("启动失败: " + (body.message || body.error || "HTTP " + status));
+            return;
+        }
+        // 3) 跳转到结果页, 由结果页轮询
+        const resultUrl = shortId ? "/me/" + shortId + "/ai-tutor/" + body.jobId
+                                   : "/ai-tutor-result/" + body.jobId;
+        window.location.href = resultUrl;
+    }).catch(err => {
+        btn.disabled = false; btn.innerHTML = orig;
+        alert("网络错误: " + (err && err.message || err));
+    });
+}
+window.luoguAiTutor = luoguAiTutor;
+</script>
+"""
+
+# 注入到所有需要的页面 (在 student_me 渲染时挂载)
+import atexit as _atexit_ait
+def _inject_ai_tutor_js():
+    """v3.11.31 · 进程退出时无需特殊处理 (JS 嵌入到 HTML 即可)."""
+    pass
+_atexit_ait.register(_inject_ai_tutor_js)
+
+# v3.11.31 · AI 讲题按钮 JS 注册到 Jinja2 全局
+# 错题卡片所在的 3 个模板 (STUDENT_ME_HTML / STUDENT_ME_LITE_HTML / REPORT_PREVIEW_HTML)
+# 在 `</body>` 之前用 {{ AI_TUTOR_BUTTON_JS|safe }} 引用,这里全局注册避免改 render 调用
+app.jinja_env.globals["AI_TUTOR_BUTTON_JS"] = AI_TUTOR_BUTTON_JS
+
+
+
 STUDYMATE_TUTOR_HTML = r"""
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -14736,7 +15083,33 @@ def student_me(short_id: str):
     # v3.11.21s · 关键 bug 修复: 函数第一个参数语义是 luogu_uid (用于比对 luogu_uid.txt / 目录名)
     #   之前传 short_id, 导致 dir 里的 luogu_uid.txt 永远匹配不上, "我的报告"和"我的排名"全空.
     #   修复: 取 student['luogu_uid'] 显式传; 缺失时再回退 short_id (旧数据兜底).
+    # v3.11.30 · 第二层 bug 修复: 邮箱注册学员 (students.luogu_uid IS NULL) 的
+    #   个人中心 / 排行榜 / 历史报告 全部空白. 原因: 上面兜底只回退到 short_id,
+    #   但实际报告 dir 的 luogu_uid.txt 写的是学员真实洛谷 UID (form 里填的).
+    #   修复: 从 tasks 表查该 student_id 关联任务最近一条的 luogu_uid, 优先用.
+    #   例: u68idmnw (邮箱注册, students.luogu_uid=None) → tasks 里查到 luogu_uid=114545
+    #     → _find_latest_report_dir("114545") 命中侧车文件 → 报告正常显示.
     _student_luogu_uid = (student.get("luogu_uid") or "").strip() if student else ""
+    if not _student_luogu_uid and student and student.get("id"):
+        try:
+            from task_store import _get_conn as _tconn_me
+            _me_conn = _tconn_me()
+            try:
+                _row = _me_conn.execute(
+                    "SELECT luogu_uid FROM tasks WHERE student_id = ? AND luogu_uid != '' "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (int(student["id"]),),
+                ).fetchone()
+                if _row and _row["luogu_uid"]:
+                    _student_luogu_uid = str(_row["luogu_uid"]).strip()
+                    app.logger.info(
+                        f"[v3.11.30 /me] u68idmnw-like 邮箱学员 fallback luogu_uid={_student_luogu_uid} "
+                        f"from tasks.student_id={student['id']}"
+                    )
+            finally:
+                _me_conn.close()
+        except Exception as _e:
+            app.logger.warning(f"[v3.11.30 /me] tasks fallback 失败: {_e}")
     _lookup_uid = _student_luogu_uid or str(short_id).strip()
     _lookup_name = (student.get("real_name") or "") if student else ""
     try:
@@ -15409,13 +15782,19 @@ STUDENT_ME_LITE_HTML = r"""
                             <div class="text-xs text-gray-600 mt-1.5 line-clamp-2">💡 {{ m.summary }}</div>
                             {% endif %}
                         </div>
-                        <!-- v3.9.9 · 直跳 aijiangti.cn · C++ 课件生成（题号/标题/来源已直传） -->
-                        <a href="https://aijiangti.cn/?pid={{ m.problem_id }}&from=luogu&lang=cpp&require={{ '用C++代码实现并讲解'|urlencode }}&source={{ (m.source or '')|urlencode }}&title={{ (m.title or '')|urlencode }}&mode=problem"
-                           target="_blank" rel="noopener"
-                           class="flex-shrink-0 inline-flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-xs font-bold rounded-lg hover:from-blue-600 hover:to-cyan-600 whitespace-nowrap"
-                           title="跳到 aijiangti.cn 生成 C++ 课件（题目已传入）">
+                        <!-- v3.11.31 · 异步 AI 讲题按钮（POST /api/ai-tutor/jobs，跳内嵌结果页） -->
+                        <button type="button" onclick="luoguAiTutor(this)"
+                                data-pid="{{ m.problem_id or '' }}"
+                                data-title="{{ m.title or '' }}"
+                                data-source="{{ m.source or '' }}"
+                                data-lang="cpp"
+                                data-require="用C++代码实现并讲解"
+                                data-short-id="{{ token or '' }}"
+                                data-luogu-uid="{{ student.luogu_uid or token or '' }}"
+                                class="flex-shrink-0 inline-flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-xs font-bold rounded-lg hover:from-blue-600 hover:to-cyan-600 whitespace-nowrap disabled:opacity-50"
+                                title="生成 C++ 讲题（AI 实时讲解 · 内嵌在项目内）">
                             🤖 AI 讲题
-                        </a>
+                        </button>
                     </div>
                 </div>
                 {% endfor %}
@@ -15499,6 +15878,7 @@ STUDENT_ME_LITE_HTML = r"""
             <a href="/" class="text-emerald-600 hover:underline">返回首页</a>
         </div>
     </div>
+{{ AI_TUTOR_BUTTON_JS|safe }}
 </body>
 </html>
 """
@@ -16169,6 +16549,50 @@ def _extract_achievements_from_report(report_md: str) -> dict:
 
 
 
+def _estimate_gesp_level_from_report_md(md_text: str) -> int:
+    """v3.11.30 · 从 GESP 报告的"8 级知识地图"表里抓"最高能力等级"。
+
+    设计：取最高 level (1-8) 且状态为 🟢已掌握 / 🟡部分掌握 的级别。
+    没匹配到 → 0 (数据不足或没生成报告)。
+
+    海报展示"GESP X 级"的依据：学员**实际能力**对应的最高级别（不是"通过"最高级别）。
+    旧版用 student.gesp_highest_passed（真考通过级别）→ 真考 0 级但洛谷 5 级 75% 覆盖
+    的学员，海报错误显示"GESP 1 级起步阶段"，严重低估。
+
+    Args:
+        md_text: report_gesp.md 全文
+
+    Returns:
+        int: 1-8 (最高能力等级) / 0 (数据不足)
+    """
+    import re as _re_gesp
+    if not md_text or "GESP 8 级知识地图" not in md_text:
+        return 0
+    # 匹配 <tr>...</tr> 块, 抓 (level, status_emoji)
+    # status 形如: 🟢已掌握 / 🟡部分掌握 / 🟠薄弱 / 🔴未接触
+    # (luogu_evaluator.py build_gesp_trusted_data_summary_md 第 952-958 行的格式)
+    pattern = _re_gesp.compile(
+        r'<tr[^>]*>\s*'
+        r'<td[^>]*><strong>\s*(\d+)\s*</strong></td>'  # 级别号
+        r'.*?'  # 跳过 name / themes 列
+        r'<td[^>]*>\s*(?:<span[^>]*>)?(🟢|🟡|🟠|🔴)',  # 学员状态 emoji
+        _re_gesp.DOTALL,
+    )
+    best_level = 0
+    for m in pattern.finditer(md_text):
+        try:
+            lv = int(m.group(1))
+        except (ValueError, TypeError):
+            continue
+        emoji = m.group(2) or ""
+        # 策略: 🟢已掌握 / 🟡部分掌握 算"有掌握", 算入最高能力
+        if "🟢" in emoji or "🟡" in emoji:
+            if lv > best_level:
+                best_level = lv
+    return best_level
+
+
+
 def _build_share_card_data(luogu_uid_or_short_id: str, exam_type: str = "noi_csp") -> dict | None:
     """组装"9 月我家孩子位置"分享卡所需数据
 
@@ -16177,10 +16601,21 @@ def _build_share_card_data(luogu_uid_or_short_id: str, exam_type: str = "noi_csp
       - "gesp": 读 report_gesp.md（GESP 报告里 AI 定级是 GESP 体系，不能套 CSP）
       - "parent_subscribe": 读 parent_subscribe.md（家长订阅报告）
 
+    v3.11.30 · GESP 海报定级改为"按最高能力定级"：
+      - 旧: 用 student.gesp_highest_passed（学员真考级别，0 表"未考"）
+        → 学员真考 GESP 0 级但洛谷 5 级都 75% 覆盖，海报却显示"GESP 1 级"，
+          严重低估学员能力
+      - 新: 解析 GESP 报告里的"8 级知识地图"表，找到最高 level (1-8)
+        且状态为 🟢已掌握 / 🟡部分掌握 的级别，作为海报定级
+      - 例: 学员 5 级 6/8 (75%) 部分掌握、6 级 2/7 薄弱
+        → 海报显示 "GESP 5 级"（按最高能力，而不是按"未通过 6 级"显示 1 级）
+
     字段：
       · name: 学员姓名（缺省 "学员"）
       · uid: 洛谷 UID
       · gesp_level / gesp_score: 当前 GESP 最高级 / 最近分
+      · gesp_ai_level: v3.11.30 · 从知识地图表算出的"AI 估算 GESP 等级"
+                       （按最高能力定级，0 表数据不足）
       · segment: 8 段位字符串（如 "1✦ 2★ 3□ 4□ 5✦ 6★ 7□ 8□"）
       · events: 关键赛事倒计时 [{name, date, days}]
       · can_j / can_s: 是否已可免 CSP-J / CSP-S 初赛
@@ -16396,6 +16831,7 @@ def _build_share_card_data(luogu_uid_or_short_id: str, exam_type: str = "noi_csp
     }
     report_assets: dict = {}  # 性格雷达 / 标签图（用于海报主视觉替代 AI 核心解读）
     report_dir_path = None
+    gesp_ai_level = 0  # v3.11.30 · 从 GESP 报告知识地图表算出的"AI 估算 GESP 等级" (按最高能力)
     try:
         # v3.9.68 · 先按 exam_type 找该类型专属报告目录；找不到再回退到通用最新目录
         # v3.11.21y · 必须用真实 luogu_uid 查报告目录，不能用 short_id（报告目录的侧车文件是 luogu_uid.txt）
@@ -16410,6 +16846,12 @@ def _build_share_card_data(luogu_uid_or_short_id: str, exam_type: str = "noi_csp
                 if md_path.exists():
                     report_md = md_path.read_text(encoding="utf-8", errors="replace")
                     ai_eval = _extract_ai_evaluation_from_report(report_md)
+                    # v3.11.30 · GESP 海报定级: 从"8 级知识地图"表里抓最高能力级别
+                    #   (学员实际掌握的最高 level, 优先于真考通过级别)
+                    if _exam_type == "gesp":
+                        _ai_lv = _estimate_gesp_level_from_report_md(report_md)
+                        if _ai_lv > 0:
+                            gesp_ai_level = _ai_lv
                     break
             # v3.6.1 · 海报要展示的图表（来自报告 assets/）
             for key, fname in [
@@ -16500,10 +16942,22 @@ def _build_share_card_data(luogu_uid_or_short_id: str, exam_type: str = "noi_csp
     if ai_eval.get("report_date"):
         asof = ai_eval["report_date"].split(" ")[0]
 
+    # v3.11.30 · GESP 海报定级: 按"实际能力"取 max(真考通过级, AI 估算级)
+    #   旧: gesp_level=0 (学员没真考) → 海报显示 "GESP 1 级起步阶段"，低估学员
+    #   新: gesp_ai_level 从报告知识地图表算出最高能力级 → 海报显示该级别
+    #   例: 真考 0 级 + AI 估算 5 级 (5 级 6/8 部分掌握) → 海报显示 GESP 5 级
+    # 仅 GESP 海报需要此覆盖; noi_csp 海报 gesp_level 仅作背景信息 (0 也正常)
+    if _exam_type == "gesp" and gesp_ai_level > 0:
+        _display_gesp_level = max(int(gesp_level or 0), gesp_ai_level)
+    else:
+        _display_gesp_level = int(gesp_level or 0)
+
     return {
         "name": name,
         "uid": _key,
-        "gesp_level": gesp_level,
+        "gesp_level": _display_gesp_level,  # v3.11.30 · 海报展示用级别 (真考 vs AI 估算取 max)
+        "gesp_level_actual": gesp_level,    # v3.11.30 · 真考通过级别 (未变)
+        "gesp_ai_level": gesp_ai_level,      # v3.11.30 · AI 估算级别 (从知识地图表算出)
         "gesp_score": gesp_score,
         "segment": segment,
         "events": events,
@@ -16519,7 +16973,7 @@ def _build_share_card_data(luogu_uid_or_short_id: str, exam_type: str = "noi_csp
         "verdict": ai_eval.get("verdict"),
         # v3.11.21y · 海报新增"综合评分"展示 (0-1000, None 表无)
         "ai_score": int(ai_eval.get("ai_score") or 0) if ai_eval.get("ai_score") is not None else None,
-        # v3.6.1 报告图表（来自 report assets/，用于海报主视觉替代 AI 核心解读文字）
+        # v3.6.1 报告图表（来自报告 assets/，用于海报主视觉替代 AI 核心解读文字）
         "report_assets": report_assets,
     }
 
@@ -18097,6 +18551,29 @@ def parent_subscribe(short_id: str):
 
     # v3.11.19k · GET 路径需要 luogu_uid 传给 _build_parent_subscribe_data / template
     luogu_uid = str(student.get("luogu_uid") or short_id).strip()
+    # v3.11.30 · 邮箱注册学员 (students.luogu_uid IS NULL) 的 parent-subscribe
+    #   也走 "report dir 找不到 → 误判 还没生成基础报告" 旧 bug.
+    #   修复: 从 tasks 表查该 student_id 关联任务最近一条的 luogu_uid, 优先用.
+    #   (与 student_me 路由的修复对齐, 见 14739-14765 行)
+    if (not luogu_uid or luogu_uid == short_id) and student and student.get("id"):
+        try:
+            from task_store import _get_conn as _tconn_ps
+            _ps_conn = _tconn_ps()
+            try:
+                _row = _ps_conn.execute(
+                    "SELECT luogu_uid FROM tasks WHERE student_id = ? AND luogu_uid != '' "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (int(student["id"]),),
+                ).fetchone()
+                if _row and _row["luogu_uid"]:
+                    luogu_uid = str(_row["luogu_uid"]).strip()
+                    app.logger.info(
+                        f"[v3.11.30 /parent-subscribe] 邮箱学员 {short_id} fallback luogu_uid={luogu_uid}"
+                    )
+            finally:
+                _ps_conn.close()
+        except Exception as _e:
+            app.logger.warning(f"[v3.11.30 /parent-subscribe] tasks fallback 失败: {_e}")
 
     # 找该学员最近一份 report 文件夹
     # v3.11.21 · 优先按 _by_type(parent_subscribe) 找"有 parent_subscribe.html 的 dir",
@@ -20608,13 +21085,19 @@ STUDENT_ME_HTML = """
                             <div class="text-xs text-red-600 mt-1">⚠️ {{ m.bottleneck[:120] }}{% if m.bottleneck|length > 120 %}…{% endif %}</div>
                             {% endif %}
                         </div>
-                        <!-- v3.9.9 · 直跳 aijiangti.cn · C++ 课件生成（题号/标题/来源已直传） -->
-                        <a href="https://aijiangti.cn/?pid={{ m.problem_id }}&from=luogu&lang=cpp&require={{ '用C++代码实现并讲解'|urlencode }}&source={{ (m.source or '')|urlencode }}&title={{ (m.title or '')|urlencode }}&mode=problem"
-                           target="_blank" rel="noopener"
-                           class="flex-shrink-0 inline-flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-xs font-bold rounded-lg hover:from-blue-600 hover:to-cyan-600 whitespace-nowrap"
-                           title="跳到 aijiangti.cn 生成 C++ 课件（题目已传入）">
+                        <!-- v3.11.31 · 异步 AI 讲题按钮（POST /api/ai-tutor/jobs，跳内嵌结果页） -->
+                        <button type="button" onclick="luoguAiTutor(this)"
+                                data-pid="{{ m.problem_id or '' }}"
+                                data-title="{{ m.title or '' }}"
+                                data-source="{{ m.source or '' }}"
+                                data-lang="cpp"
+                                data-require="用C++代码实现并讲解"
+                                data-short-id="{{ token or '' }}"
+                                data-luogu-uid="{{ student.luogu_uid or token or '' }}"
+                                class="flex-shrink-0 inline-flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-xs font-bold rounded-lg hover:from-blue-600 hover:to-cyan-600 whitespace-nowrap disabled:opacity-50"
+                                title="生成 C++ 讲题（AI 实时讲解 · 内嵌在项目内）">
                             🤖 AI 讲题
-                        </a>
+                        </button>
                     </div>
                 </div>
                 {% endfor %}
@@ -20644,7 +21127,7 @@ STUDENT_ME_HTML = """
                 }
             </script>
             {% endif %}
-            <p class="text-[10px] text-gray-400 mt-2">💡 点击「AI 讲题」直跳 aijiangti.cn · 自动用 C++ 代码实现并讲解（题号 / 标题 / 来源已直传）</p>
+            <p class="text-[10px] text-gray-400 mt-2">💡 点击「AI 讲题」自动用 C++ 代码实现并讲解（题号 / 标题 / 来源已直传 · 项目内嵌展示）</p>
             {% else %}
             <div class="text-center py-6 text-sm text-gray-400">
                 🌱 暂无错题记录
@@ -20684,6 +21167,7 @@ STUDENT_ME_HTML = """
             真实部署时将改为微信扫码 / 短信 OTP（v3.5.3）
         </div>
     </div>
+{{ AI_TUTOR_BUTTON_JS|safe }}
 </body>
 </html>
 """
@@ -20794,14 +21278,19 @@ REPORT_PREVIEW_HTML = r"""<!doctype html>
           {% if m.source %}<span class="text-[10px] px-1 py-0.5 bg-purple-100 text-purple-700 rounded">{{ m.source }}</span>{% endif %}
         </div>
         {% if m.summary %}<div class="text-xs text-gray-600 mt-1">💡 {{ m.summary[:60] }}{% if m.summary|length > 60 %}…{% endif %}</div>{% endif %}
-        {# v3.9.9 · /r/<uid> 预览区补 AI 讲题入口（直跳 aijiangti.cn，C++ 课件生成） #}
+        {# v3.11.31 · /r/<uid> 公开预览区：异步 AI 讲题按钮（无 short_id 走匿名结果页） #}
         {% if m.problem_id %}
-        <a href="https://aijiangti.cn/?pid={{ m.problem_id }}&from=luogu&lang=cpp&require={{ '用C++代码实现并讲解'|urlencode }}&source={{ (m.source or '')|urlencode }}&title={{ (m.title or '')|urlencode }}&mode=problem"
-           target="_blank" rel="noopener"
-           class="inline-flex items-center gap-1 mt-1.5 px-2.5 py-1 bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-[11px] font-bold rounded-md hover:from-blue-600 hover:to-cyan-600"
-           title="跳到 aijiangti.cn 生成 C++ 课件（题目已传入）">
+        <button type="button" onclick="luoguAiTutor(this)"
+                data-pid="{{ m.problem_id }}"
+                data-title="{{ m.title or '' }}"
+                data-source="{{ m.source or '' }}"
+                data-lang="cpp"
+                data-require="用C++代码实现并讲解"
+                data-luogu-uid="{{ luogu_uid or '' }}"
+                class="inline-flex items-center gap-1 mt-1.5 px-2.5 py-1 bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-[11px] font-bold rounded-md hover:from-blue-600 hover:to-cyan-600 disabled:opacity-50"
+                title="生成 C++ 讲题（AI 实时讲解 · 内嵌在项目内）">
           🤖 AI 讲题
-        </a>
+        </button>
         {% endif %}
       </div>
       {% endfor %}
@@ -20861,6 +21350,7 @@ REPORT_PREVIEW_HTML = r"""<!doctype html>
 </div>
 {% endif %}
 
+{{ AI_TUTOR_BUTTON_JS|safe }}
 </body>
 </html>
 """

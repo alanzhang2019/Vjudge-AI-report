@@ -6,9 +6,13 @@ $Container = "luogu-ai-report-luogu-coach"
 
 Write-Host "LocalDir: $LocalDir"
 
-$Files = @("web_app.py", "task_store.py")
+$Files = @("web_app.py", "task_store.py", "ai_tutor_jobs.py")
 
 foreach ($f in $Files) {
+    if (-not (Test-Path (Join-Path $LocalDir $f))) {
+        Write-Host "[skip] $f not found locally"
+        continue
+    }
     $Local = Join-Path $LocalDir $f
     $Remote = "/tmp/_DEPLOY_$f"
     Write-Host "--- deploy $f ---"

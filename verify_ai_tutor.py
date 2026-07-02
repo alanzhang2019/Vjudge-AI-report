@@ -97,7 +97,9 @@ assert_t("done 字段存在", "done" in d2)
 # v3.11.31 · StudyMate 契约: 分镜进度字段
 assert_t("scenesGenerated 字段存在 (StudyMate 契约)", "scenesGenerated" in d2)
 assert_t("totalScenes 字段存在 (StudyMate 契约)", "totalScenes" in d2)
-assert_t("totalScenes = 6 (本项目固定 6 节分镜)", d2.get("totalScenes") == 6, f"got {d2.get('totalScenes')}")
+# v3.11.31b · totalScenes 不再硬编码 6: stub 后端是 6, aijiangti 后端透传上游 (可能是 7 / 6 / 其他, 由 LLM 决定)
+assert_t("totalScenes 是 int >= 0", isinstance(d2.get("totalScenes"), int) and d2.get("totalScenes") >= 0,
+         f"got {d2.get('totalScenes')!r} (stub=6, aijiangti 透传上游)")
 assert_t("scenesGenerated >= 0", isinstance(d2.get("scenesGenerated"), int) and d2.get("scenesGenerated") >= 0)
 
 

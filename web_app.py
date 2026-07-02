@@ -252,7 +252,7 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
 APP_VERSION = "v3.11.25"
-APP_VERSION_BUILD = "20260702_v3p11p31_align_studymate_scenes_progress"
+APP_VERSION_BUILD = "20260702_v3p11p31b_real_aijiangti_backend"
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -14635,13 +14635,27 @@ AI_TUTOR_RESULT_HTML = r"""
 
         <!-- 讲解结果 (按 scene 展示) -->
         <div id="result-wrap" class="{% if job.status != 'succeeded' %}hidden{% endif %}">
-            {% if job.result and job.result.scenes %}
-            {% for sc in job.result.scenes %}
+            {# v3.11.31b · 兼容上游多种 result 结构: scenes / outline / classroom / content #}
+            {% set _scenes = (job.result and (job.result.scenes or job.result.outline or job.result.classroom or job.result.content)) or [] %}
+            {% if _scenes and _scenes is iterable and _scenes is not string %}
+            {% for sc in _scenes %}
             <div class="scene-card">
-                <h3>{{ sc.title }}</h3>
-                <div class="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{{ sc.body | safe }}</div>
+                <h3>{{ sc.title or sc.name or "分镜 #" ~ loop.index }}</h3>
+                {# v3.11.31b · 兼容 scene body 字段名: body / content / text / html #}
+                {% set _body = sc.body or sc.content or sc.text or sc.html or sc.markdown or "" %}
+                <div class="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{{ _body | safe }}</div>
             </div>
             {% endfor %}
+            {% elif job.result and (job.result.html or job.result.markdown) %}
+            <div class="scene-card">
+                <h3>📖 讲解全文</h3>
+                <div class="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{{ (job.result.html or job.result.markdown) | safe }}</div>
+            </div>
+            {% elif job.result and job.result.raw %}
+            <div class="scene-card">
+                <h3>📋 上游返回 (结构化解析失败)</h3>
+                <pre class="text-xs bg-slate-900 text-slate-100 p-3 rounded overflow-x-auto">{{ job.result.raw | tojson(indent=2) }}</pre>
+            </div>
             {% endif %}
             {% if job.result and job.result.summary %}
             <div class="bg-emerald-50 border-l-4 border-emerald-400 p-4 rounded mb-4">

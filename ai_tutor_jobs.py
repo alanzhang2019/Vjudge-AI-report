@@ -354,55 +354,121 @@ def _run_stub(job_id: str, job: AiTutorJob) -> None:
 
 
 def _run_via_aijiangti(job_id: str, job: AiTutorJob) -> None:
-    """v3.11.31 · 透传到 ai.tudoucode.com / aijiangti.cn 的讲解 API.
-    协议对齐 StudyMate:
-      POST {url} { requirement, problem_id, language, source, ... } → 202 { jobId, pollUrl, ... }
-      GET {pollUrl} → { status, step, progress, result, done }
+    """v3.11.31 · 真打 aijiangti.cn 的 /api/generate-classroom (StudyMate 错题讲解 API).
+
+    上游契约 (StudyMate):
+      POST {url} { requirement, pdfContent?, ... } → 202 { jobId, pollUrl, ... }
+      GET  {pollUrl} → { status, step, progress, scenesGenerated, totalScenes, result, done, error }
+
+    v3.11.31b · 关键修复:
+      - 上游只识别 `requirement` 字符串, C++ 题目 (problem_id/title/source) 必须转写到 requirement 里
+      - 学员中文 requirement 放在最前 (StudyMate upstream 用 requirement.substring(0, 60) 做日志 snippet, 所以中文要求放在前 60 字符内)
+      - 附上洛谷 / Codeforces 题号 + 标题 + 源 URL + 语言 (cpp) + C++ 算法竞赛上下文
+      - 上游 result 字段可能叫 scenes / outline / classroom / content, 做兼容适配
+      - 处理 rate limit (RPM 限流) / network 错误, 给出友好提示
     """
-    import requests as _r
-    _set_status(job_id, "running", step="forwarding", progress=10, message="🌐 正在把题目转发给 AI 讲题服务...")
-    payload = {
-        "requirement": job.requirement or f"请为「{job.title}」({job.problem_id}) 生成 C++ 讲题",
-        "problem_id": job.problem_id,
-        "title": job.title,
-        "source": job.source,
-        "language": job.language or "cpp",
-        "from": "luogu",
-        "mode": "problem",
-    }
+    import urllib.request as _ur
+    import urllib.error as _ue
+    import json as _json
+    import socket as _socket
+    ctx = None
     try:
-        resp = _r.post(AI_TUTOR_FORWARD_URL, json=payload, timeout=30)
-    except Exception as e:
-        _set_error(job_id, f"转发讲解服务失败: {type(e).__name__}: {e}")
-        return
-    if resp.status_code not in (200, 202):
-        _set_error(job_id, f"讲解服务返回 {resp.status_code}: {resp.text[:200]}")
-        return
-    try:
-        upstream = resp.json()
+        import ssl as _ssl
+        ctx = _ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = _ssl.CERT_NONE
     except Exception:
-        _set_error(job_id, f"讲解服务响应非 JSON: {resp.text[:200]}")
+        pass
+
+    _set_status(job_id, "running", step="forwarding", progress=10, message="🌐 正在把 C++ 题目转发给 AI 讲题服务 (aijiangti.cn)...")
+
+    # v3.11.31b · 把 C++ 题目信息转写到 requirement 字符串
+    # 上游 StudyMate upstream 用 rawBody.requirement?.substring(0, 60) 做日志, 中文要求放最前
+    req_chinese = (job.requirement or "请用 C++ 代码实现并讲解").strip()[:60]
+    pid = (job.problem_id or "").strip()
+    title = (job.title or "").strip()
+    source = (job.source or "").strip()
+    language = (job.language or "cpp").strip()
+    # StudyMate 错题讲解上游对 C++ 洛谷题上下文: 拼成清晰的"题面"格式让 LLM 知道是什么题
+    # 注意 requirement 字符串别太长 (避免某些上游有 length cap), 题面正文不抓 (交给 LLM 自助)
+    parts = [req_chinese]
+    if pid:
+        parts.append(f"题号: {pid}")
+    if title:
+        parts.append(f"题目标题: {title}")
+    if source:
+        parts.append(f"题面链接: {source}")
+    parts.append(f"目标语言: {language} (信奥 / NOI-CSP 算法竞赛)")
+    parts.append("请按以下 6 步讲题: 1) 题意速读 2) 暴力思路 3) 优化思路 4) 正解 (含 C++ 代码模板) 5) 易错点/边界 6) 同类题推荐")
+    requirement_text = "\n".join(parts)
+
+    payload = {
+        "requirement": requirement_text,
+        # StudyMate 上游习惯字段: language / problemId 透传, 上游不一定用, 但加上无副作用
+        "language": language,
+        "problemId": pid,
+        "title": title,
+        "source": source,
+    }
+    body_bytes = _json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+    def _do_request(method, url, data=None, timeout=30):
+        req = _ur.Request(url, data=data, method=method, headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json; charset=utf-8",
+            "User-Agent": "luoguAI-Vjudge/1.0 (ai-tutor-bridge)",
+        })
+        return _ur.urlopen(req, timeout=timeout, context=ctx)
+
+    try:
+        resp = _do_request("POST", AI_TUTOR_FORWARD_URL, data=body_bytes, timeout=30)
+        raw = resp.read().decode("utf-8", "replace")
+    except _ue.HTTPError as e:
+        # 上游 4xx/5xx 错误, 读 body
+        try:
+            err_body = e.read().decode("utf-8", "replace")[:300]
+        except Exception:
+            err_body = ""
+        _set_error(job_id, f"AI 讲题服务返回 HTTP {e.code}: {err_body[:200]}")
         return
+    except (_ue.URLError, _socket.timeout, _socket.error) as e:
+        _set_error(job_id, f"连接 AI 讲题服务失败: {e}")
+        return
+    except Exception as e:
+        _set_error(job_id, f"转发讲解服务异常: {type(e).__name__}: {e}")
+        return
+
+    # 解析 POST 响应
+    try:
+        upstream = _json.loads(raw)
+        # v3.11.31b · StudyMate 用 success=true 包裹, 也兼容裸 jobId
+        if isinstance(upstream, dict) and upstream.get("success") is False:
+            _set_error(job_id, f"AI 讲题服务拒绝: {upstream.get('error') or upstream.get('message') or raw[:200]}")
+            return
+    except Exception:
+        _set_error(job_id, f"AI 讲题服务响应非 JSON: {raw[:200]}")
+        return
+
     remote_job_id = upstream.get("jobId") or upstream.get("job_id")
     poll_url = upstream.get("pollUrl") or upstream.get("poll_url")
     if not remote_job_id or not poll_url:
-        _set_error(job_id, f"讲解服务响应缺 jobId/pollUrl: {upstream}")
+        _set_error(job_id, f"AI 讲题服务响应缺 jobId/pollUrl: {raw[:200]}")
         return
-    log.info(f"[ai_tutor/forward] job={job_id} → remote={remote_job_id}")
+    log.info(f"[ai_tutor/forward] job={job_id} → remote={remote_job_id} pid={pid}")
+
     # 轮询 remote
     deadline = time.time() + 60 * 10  # 最长等 10 分钟
     last_progress = 10
     while time.time() < deadline:
         time.sleep(AI_TUTOR_POLL_INTERVAL_MS / 1000.0)
         try:
-            r = _r.get(poll_url, timeout=15)
+            resp = _do_request("GET", poll_url, timeout=20)
+            raw_poll = resp.read().decode("utf-8", "replace")
         except Exception as e:
             log.warning(f"[ai_tutor/forward] poll error: {e}")
             continue
-        if r.status_code != 200:
-            continue
         try:
-            data = r.json()
+            data = _json.loads(raw_poll)
         except Exception:
             continue
         step = data.get("step") or data.get("status") or "running"
@@ -418,16 +484,42 @@ def _run_via_aijiangti(job_id: str, job: AiTutorJob) -> None:
         _set_status(job_id, "running", step=step, progress=progress, message=message)
         if data.get("done") or data.get("status") in ("succeeded", "failed"):
             if data.get("status") == "failed" or data.get("error"):
-                _set_error(job_id, str(data.get("error") or "讲解失败"))
+                err_msg = str(data.get("error") or data.get("message") or "讲解失败")
+                # v3.11.31b · 友好化上游错误
+                if "rate limit" in err_msg.lower() or "rpm" in err_msg.lower():
+                    err_msg = "AI 讲师讲太快了, 触发了上游 RPM 限流. 请稍等 1-2 分钟再来, 或换一道题试试"
+                _set_error(job_id, err_msg)
             else:
-                # 收尾时也同步一次分镜进度,避免上游一次到位
                 sg2 = data.get("scenesGenerated") or data.get("scenes_generated")
                 ts2 = data.get("totalScenes") or data.get("total_scenes")
                 if sg2 is not None or ts2 is not None:
                     _set_scene_progress(job_id, int(sg2 or 0), int(ts2 or 0))
-                _set_result(job_id, data.get("result") or data)
+                # v3.11.31b · result 字段兼容 (上游可能叫 classroom / outline / content)
+                result = data.get("result") or {}
+                if not result:
+                    # 上游把 scenes 直接放在顶层 (StudyMate 早期版本)
+                    if data.get("scenes"):
+                        result = {"scenes": data.get("scenes"), "summary": data.get("summary") or ""}
+                    elif data.get("outline"):
+                        result = {"scenes": data.get("outline"), "summary": data.get("summary") or ""}
+                    elif data.get("classroom"):
+                        result = {"scenes": data.get("classroom"), "summary": data.get("summary") or ""}
+                if not result and isinstance(data, dict):
+                    # 上游有时候整个 data 就是 result
+                    if any(k in data for k in ("scenes", "outline", "classroom", "content", "html", "markdown")):
+                        result = {k: data[k] for k in ("scenes", "outline", "classroom", "content", "html", "markdown", "summary") if k in data}
+                if not result:
+                    result = {"scenes": [], "summary": data.get("message") or "讲解已完成, 但上游未返回结构化结果", "raw": data}
+                # 把 C++ 题目信息钉到 result 头部 (前端展示)
+                if isinstance(result, dict):
+                    result["problem_id"] = pid
+                    result["title"] = result.get("title") or title
+                    result["source"] = result.get("source") or source
+                    result["language"] = result.get("language") or language
+                    result["backend"] = "aijiangti"
+                _set_result(job_id, result)
             return
-    _set_error(job_id, "讲解超时 (10 分钟)")
+    _set_error(job_id, "讲解超时 (10 分钟内上游未完成)")
 
 
 def _run_via_openai(job_id: str, job: AiTutorJob) -> None:

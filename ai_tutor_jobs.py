@@ -3,13 +3,18 @@ v3.11.31 · AI 讲题异步任务存储 + Worker
 
 设计参照 StudyMate 仓库的 async job pattern:
   https://github.com/alanzhang2019/StudyMate/blob/main/app/api/generate-classroom/route.ts
+  https://github.com/alanzhang2019/StudyMate/blob/main/app/api/generate-classroom/[jobId]/route.ts
 
   POST /api/generate-classroom  → 202 { jobId, status, step, message, pollUrl, pollIntervalMs }
-  GET  /api/generate-classroom/<jobId> → 200 { jobId, status, step, progress, message, result, done }
+  GET  /api/generate-classroom/<jobId> → 200 {
+      jobId, status, step, progress, message, pollUrl, pollIntervalMs,
+      scenesGenerated, totalScenes, result, error, done
+  }
 
-本模块的接口:
-  - create_job(requirement, problem_id, source_code, language, title, ...) -> job_id
-  - get_job(job_id) -> { jobId, status, step, progress, message, result, done, ... }
+本模块的接口 (路径兼容 luoguAI 项目):
+  - create_job(requirement, problem_id, source, language, title, luogu_uid, ...) -> job_id
+  - get_job(job_id) -> { jobId, status, step, progress, message,
+                          scenesGenerated, totalScenes, result, done, ... }
   - _worker_run(job_id, ...)  后台线程跑讲解
 
 后端可配 (环境变量):
@@ -69,6 +74,11 @@ class AiTutorJob:
     # 输出
     result: Optional[dict] = None
     error: Optional[str] = None
+    # v3.11.31 · StudyMate 契约: 分镜进度 (生成课件时的 scene-by-scene 进度)
+    # scenesGenerated: 已经生成的分镜数
+    # totalScenes:     总分镜数 (本项目固定 6 节: 题意 / 暴力 / 优化 / 正解 / 易错点 / 同类题)
+    scenes_generated: int = 0
+    total_scenes: int = 0
     # 时间
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
@@ -82,6 +92,9 @@ class AiTutorJob:
         d = asdict(self)
         d["jobId"] = self.job_id  # v3.11.31 · 对齐 StudyMate 契约: 驼峰命名 jobId
         d["done"] = self.status in ("succeeded", "failed")
+        # v3.11.31 · 对齐 StudyMate 契约: 驼峰命名 scenesGenerated / totalScenes
+        d["scenesGenerated"] = int(self.scenes_generated or 0)
+        d["totalScenes"] = int(self.total_scenes or 0)
         d["created_at"] = int(self.created_at)
         d["updated_at"] = int(self.updated_at)
         return d
@@ -164,6 +177,20 @@ def _set_error(job_id: str, error: str) -> None:
         job.touch()
 
 
+def _set_scene_progress(job_id: str, scenes_generated: int, total_scenes: int) -> None:
+    """v3.11.31 · 更新分镜进度 (StudyMate 契约字段 scenesGenerated / totalScenes).
+    后台 worker 在每生成一个分镜后调用,前端可看到「scene 3/6」式进度.
+    """
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if job is None:
+            return
+        job.scenes_generated = max(int(scenes_generated or 0), job.scenes_generated or 0)
+        if total_scenes and total_scenes > 0:
+            job.total_scenes = total_scenes
+        job.touch()
+
+
 def _cleanup_loop() -> None:
     """后台线程, 每 10 分钟清一次过期 job."""
     while True:
@@ -224,18 +251,43 @@ def _worker_run(job_id: str) -> None:
 def _run_stub(job_id: str, job: AiTutorJob) -> None:
     """v3.11.31 · 占位 worker: 模拟 3 步进度 (3s+3s+3s) 后返回占位讲解.
     等待真实后端 (openai / aijiangti) 上线时, 改 AI_TUTOR_BACKEND 即可.
+    v3.11.31 · 增加分镜进度 (scenesGenerated / totalScenes),对齐 StudyMate 契约.
     """
     log.info(f"[ai_tutor/stub] job={job_id} pid={job.problem_id} title={job.title[:40]}")
-    for pct, step, msg, sleep in [
-        (20, "fetching_problem", "📥 正在读取题目上下文 (洛谷 / Codeforces / 校内 OJ)...", 2.0),
-        (55, "analyzing_brute", "🔍 正在分析暴力解与边界, 提取典型错因...", 3.0),
-        (85, "drafting_solution", "✍️ 正在写「从暴力到正解」讲解 + C++ 模板...", 3.0),
-    ]:
-        _set_status(job_id, "running", step=step, progress=pct, message=msg)
-        time.sleep(sleep)
-    # 构造占位 result
+
+    # v3.11.31 · 分镜蓝图 (6 节: 题意 / 暴力 / 优化 / 正解 / 易错点 / 同类题)
+    scene_titles = [
+        "📌 题意速读",
+        "🪜 阶梯 1 · 暴力思路 (O(n²))",
+        "🪜 阶梯 2 · 优化思路 (O(n log n))",
+        "✅ 阶梯 3 · 正解 (O(n) 或 O(n log n))",
+        "🧪 易错点 / 边界",
+        "🧠 同类题推荐",
+    ]
+    total = len(scene_titles)
+    _set_scene_progress(job_id, 0, total)
+    _set_status(job_id, "running", step="fetching_problem", progress=10, message="📥 正在读取题目上下文 (洛谷 / Codeforces / 校内 OJ)...")
+
+    # 第 1 步: 拉取题目上下文
+    time.sleep(2.0)
+    _set_status(job_id, "running", step="analyzing_brute", progress=25, message="🔍 正在分析暴力解与边界, 提取典型错因...")
+
+    # 第 2 步: 模拟分镜生成 (每节 ~0.5s, 共 3s)
+    for i, title in enumerate(scene_titles, start=1):
+        # v3.11.31 · 逐镜推 progress + scenesGenerated,前端可看到 scene 1/6 → 6/6
+        pct = 25 + int(60 * i / total)  # 25 → 85
+        _set_scene_progress(job_id, i, total)
+        _set_status(
+            job_id, "running", step=f"scene_{i}_of_{total}", progress=pct,
+            message=f"✍️ 正在写「{title}」({i}/{total})...",
+        )
+        time.sleep(0.5)
+
+    # 第 3 步: 整理排版
     _set_status(job_id, "running", step="polishing", progress=92, message="🎨 整理排版, 准备课件...")
-    time.sleep(1.5)
+    time.sleep(1.0)
+
+    # 构造占位 result (6 节)
     result = {
         "summary": f"已为「{job.title or job.problem_id or '该题'}」生成 C++ 讲题 · v3.11.31 占位版",
         "language": job.language or "cpp",
@@ -297,6 +349,7 @@ def _run_stub(job_id: str, job: AiTutorJob) -> None:
             },
         ],
     }
+    _set_scene_progress(job_id, total, total)  # v3.11.31 · 收尾: 6/6
     _set_result(job_id, result)
 
 
@@ -355,6 +408,11 @@ def _run_via_aijiangti(job_id: str, job: AiTutorJob) -> None:
         step = data.get("step") or data.get("status") or "running"
         progress = int(data.get("progress") or last_progress)
         message = data.get("message") or ""
+        # v3.11.31 · 透传 StudyMate 契约: 分镜进度 scenesGenerated / totalScenes
+        sg = data.get("scenesGenerated") or data.get("scenes_generated")
+        ts = data.get("totalScenes") or data.get("total_scenes")
+        if sg is not None or ts is not None:
+            _set_scene_progress(job_id, int(sg or 0), int(ts or 0))
         if progress > last_progress:
             last_progress = progress
         _set_status(job_id, "running", step=step, progress=progress, message=message)
@@ -362,6 +420,11 @@ def _run_via_aijiangti(job_id: str, job: AiTutorJob) -> None:
             if data.get("status") == "failed" or data.get("error"):
                 _set_error(job_id, str(data.get("error") or "讲解失败"))
             else:
+                # 收尾时也同步一次分镜进度,避免上游一次到位
+                sg2 = data.get("scenesGenerated") or data.get("scenes_generated")
+                ts2 = data.get("totalScenes") or data.get("total_scenes")
+                if sg2 is not None or ts2 is not None:
+                    _set_scene_progress(job_id, int(sg2 or 0), int(ts2 or 0))
                 _set_result(job_id, data.get("result") or data)
             return
     _set_error(job_id, "讲解超时 (10 分钟)")

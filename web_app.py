@@ -252,7 +252,7 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
 APP_VERSION = "v3.11.25"
-APP_VERSION_BUILD = "20260702_v3p11p30c_fix_parent_subscribe_luogu_uid"
+APP_VERSION_BUILD = "20260702_v3p11p31_align_studymate_scenes_progress"
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -14617,7 +14617,12 @@ AI_TUTOR_RESULT_HTML = r"""
                 <span class="text-xs text-gray-500 font-mono" id="progress-pct">{{ job.progress }}%</span>
             </div>
             <div class="progress-bar"><div id="progress-fill" style="width: {{ job.progress }}%"></div></div>
-            <div class="text-xs text-gray-400 mt-2" id="progress-step">step: {{ job.step }}</div>
+            <div class="flex items-center justify-between mt-2">
+                <span class="text-xs text-gray-400" id="progress-step">step: {{ job.step }}</span>
+                <span class="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 font-mono" id="progress-scene">
+                    🎬 scene {{ job.scenes_generated or 0 }}/{{ job.total_scenes or 6 }}
+                </span>
+            </div>
         </div>
 
         <!-- 错误信息 -->
@@ -14659,6 +14664,7 @@ AI_TUTOR_RESULT_HTML = r"""
         const fill = document.getElementById("progress-fill");
         const pct = document.getElementById("progress-pct");
         const step = document.getElementById("progress-step");
+        const scene = document.getElementById("progress-scene");
         const wrap = document.getElementById("progress-wrap");
         const rwrap = document.getElementById("result-wrap");
         function tick() {
@@ -14666,6 +14672,12 @@ AI_TUTOR_RESULT_HTML = r"""
                 if (d.progress != null) { fill.style.width = d.progress + "%"; pct.textContent = d.progress + "%"; }
                 if (d.message) { wrap.querySelector("span.text-sm").textContent = "⏳ " + d.message; }
                 if (d.step) step.textContent = "step: " + d.step;
+                // v3.11.31 · 分镜进度 (StudyMate 契约 scenesGenerated / totalScenes)
+                if (scene && (d.scenesGenerated != null || d.totalScenes != null)) {
+                    const sg = d.scenesGenerated || 0;
+                    const ts = d.totalScenes || 6;
+                    scene.textContent = "🎬 scene " + sg + "/" + ts;
+                }
                 if (d.done) {
                     setTimeout(() => location.reload(), 500);  // 重新加载渲染结果
                 } else {

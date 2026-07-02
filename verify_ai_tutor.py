@@ -94,6 +94,11 @@ assert_t("status ∈ {queued, running}", d2.get("status") in ("queued", "running
 assert_t("step 字段存在", "step" in d2)
 assert_t("progress 字段存在", "progress" in d2)
 assert_t("done 字段存在", "done" in d2)
+# v3.11.31 · StudyMate 契约: 分镜进度字段
+assert_t("scenesGenerated 字段存在 (StudyMate 契约)", "scenesGenerated" in d2)
+assert_t("totalScenes 字段存在 (StudyMate 契约)", "totalScenes" in d2)
+assert_t("totalScenes = 6 (本项目固定 6 节分镜)", d2.get("totalScenes") == 6, f"got {d2.get('totalScenes')}")
+assert_t("scenesGenerated >= 0", isinstance(d2.get("scenesGenerated"), int) and d2.get("scenesGenerated") >= 0)
 
 
 # ============================================================
@@ -245,11 +250,22 @@ for _ in range(15):
     except Exception:
         continue
     if d.get("done"):
-        print(f"  ✅ job 完成 status={d.get('status')}  progress={d.get('progress')}")
+        print(f"  ✅ job 完成 status={d.get('status')}  progress={d.get('progress')}  scenesGenerated={d.get('scenesGenerated')}/{d.get('totalScenes')}")
         # 重新拉一次结果页, 应能看到 scenes
         _, body_done = http("GET", f"/ai-tutor-result/{job_id}")
         assert_t("完成态页面含 scenes 标题", "阶梯 1" in body_done or "scenes" in body_done)
+        # v3.11.31 · 完成态时 scenesGenerated == totalScenes
+        assert_t("完成时 scenesGenerated = totalScenes", d.get("scenesGenerated") == d.get("totalScenes"),
+                 f"got {d.get('scenesGenerated')}/{d.get('totalScenes')}")
+        # v3.11.31 · 页面包含分镜进度 DOM
+        assert_t("结果页含分镜进度 DOM (progress-scene)", "progress-scene" in body_done)
         break
+    else:
+        # v3.11.31 · 过程中持续看到分镜进度推进
+        sg = d.get("scenesGenerated", -1)
+        ts = d.get("totalScenes", -1)
+        if sg is not None and ts is not None and sg >= 0 and ts > 0:
+            print(f"  ⏳ 进度 {d.get('progress')}%  scene {sg}/{ts}  step={d.get('step')}")
 else:
     print("  ⚠️ stub 后端 15s 内未完成, 但 API 验证通过")
 

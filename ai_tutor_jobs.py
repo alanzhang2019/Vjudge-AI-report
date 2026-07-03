@@ -389,8 +389,45 @@ def _run_via_aijiangti(job_id: str, job: AiTutorJob) -> None:
     title = (job.title or "").strip()
     source = (job.source or "").strip()
     language = (job.language or "cpp").strip()
+    # v3.11.31c · 关键修复: 从 problemset_index 拿真题面塞进 requirement
+    # 之前只塞题号/标题, 让 aijiangti.cn 上游 LLM "凭题号自助讲解" 不准
+    # 拿到的题面 (background/description/formatI/formatO/hint/samples) 完整塞 requirement
+    problem_text = ""
+    try:
+        import problemset_index as _psi
+        info = _psi.get(pid) if pid else None
+        if info:
+            _bg = (info.get("background") or "").strip()
+            _desc = (info.get("description") or "").strip()
+            _fmt_i = (info.get("inputFormat") or "").strip()
+            _fmt_o = (info.get("outputFormat") or "").strip()
+            _hint = (info.get("hint") or "").strip()
+            _samples = info.get("samples") or []
+            _sample_str = ""
+            if isinstance(_samples, list) and _samples:
+                _sl = []
+                for j, sa in enumerate(_samples[:3], 1):
+                    if isinstance(sa, dict):
+                        si = (sa.get("input") or "").strip()
+                        so = (sa.get("output") or "").strip()
+                        if si or so:
+                            _sl.append(f"  样例{j} 输入={si[:200]} 输出={so[:200]}")
+                _sample_str = "\n".join(_sl)
+            problem_text = (
+                f"\n\n【洛谷公开题库抓取的真题面】\n"
+                f"背景: {_bg[:500]}\n"
+                f"描述: {_desc[:2000]}\n"
+                f"输入格式: {_fmt_i[:500]}\n"
+                f"输出格式: {_fmt_o[:500]}\n"
+                f"样例: {_sample_str[:600]}\n"
+                f"提示: {_hint[:1000]}\n"
+            )
+            log.info(f"[ai_tutor/forward] job={job_id} pid={pid} ✓ 命中 problemset_index, 题面 {len(_desc)}B 塞入 requirement")
+        else:
+            log.info(f"[ai_tutor/forward] job={job_id} pid={pid} ✗ problemset_index 未命中, fallback")
+    except Exception as e:
+        log.warning(f"[ai_tutor/forward] job={job_id} 读 problemset_index 失败: {type(e).__name__}: {e}, fallback")
     # StudyMate 错题讲解上游对 C++ 洛谷题上下文: 拼成清晰的"题面"格式让 LLM 知道是什么题
-    # 注意 requirement 字符串别太长 (避免某些上游有 length cap), 题面正文不抓 (交给 LLM 自助)
     parts = [req_chinese]
     if pid:
         parts.append(f"题号: {pid}")
@@ -400,7 +437,7 @@ def _run_via_aijiangti(job_id: str, job: AiTutorJob) -> None:
         parts.append(f"题面链接: {source}")
     parts.append(f"目标语言: {language} (信奥 / NOI-CSP 算法竞赛)")
     parts.append("请按以下 6 步讲题: 1) 题意速读 2) 暴力思路 3) 优化思路 4) 正解 (含 C++ 代码模板) 5) 易错点/边界 6) 同类题推荐")
-    requirement_text = "\n".join(parts)
+    requirement_text = "\n".join(parts) + problem_text  # v3.11.31c · 题面正文拼在尾部
 
     payload = {
         "requirement": requirement_text,
@@ -523,57 +560,228 @@ def _run_via_aijiangti(job_id: str, job: AiTutorJob) -> None:
 
 
 def _run_via_openai(job_id: str, job: AiTutorJob) -> None:
-    """v3.11.31 · 走本项目 OPENAI_API_KEY 生成 C++ 讲题.
-    复用 web_app.py 的 _call_openai / _openai_client, 这里用最简形式.
+    """v3.11.31b · 走本项目 OPENAI_API_KEY (DeepSeek) 生成 C++ 讲题.
+    v3.11.31b · 关键设计:
+      - 容器里没装 requests, 改用 urllib
+      - prompt 把题号/标题/源 URL/语言/要求全塞进去, 让 DeepSeek 凭洛谷题号自助出讲解
+      - 输出格式强约束: scenes 必须 6 节 (题意/暴力/优化/正解/易错点/同类题)
+      - 支持流式 / 同步两种, 默认同步 (120s 超时够 DeepSeek-v4 出 6 节)
+    v3.11.31c · 关键升级:
+      - 用 problemset_index 拿真题面 (background/description/formatI/formatO/hint/samples/limits)
+        替代之前"让 LLM 凭题号自助讲解"的不稳定做法
+      - 26MB 全量缓存进内存 (~50MB), 16926 道题全覆盖, 无 cookie
+      - prompt 升级: 题面作为权威源, 标签 + 难度 + 样例一并塞入
+      - max_tokens 提到 6000 容纳长题面
     """
-    import requests as _r
-    api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_ADMIN_KEY") or ""
-    api_base = (os.environ.get("OPENAI_API_BASE") or "https://api.openai.com/v1").rstrip("/")
-    model = os.environ.get("OPENAI_MODEL") or "gpt-4o-mini"
-    if not api_key.strip():
+    import urllib.request as _ur
+    import urllib.error as _ue
+    import ssl as _ssl
+    ctx = _ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = _ssl.CERT_NONE
+
+    api_key = (os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_ADMIN_KEY") or "").strip()
+    api_base = (os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+    # v3.11.31b · 优先用 OPENAI_MODEL_NAME (项目 .env 里配的就是这个: deepseek/deepseek-v4-pro)
+    model = (os.environ.get("OPENAI_MODEL_NAME") or os.environ.get("OPENAI_MODEL") or "deepseek-v4-pro").strip()
+    if not api_key:
         _set_error(job_id, "OPENAI_API_KEY 未配置, 无法走 openai 后端")
         return
-    _set_status(job_id, "running", step="calling_llm", progress=20, message="🧠 正在调用大模型生成 C++ 讲题...")
-    prompt = (
-        f"你是洛谷 C++ 讲题老师, 学员要求: {job.requirement or '讲解这道题'}\n\n"
-        f"题目: {job.title or job.problem_id}\n"
-        f"题号: {job.problem_id or '—'}\n"
-        f"来源: {job.source or '—'}\n"
-        f"语言: {job.language or 'cpp'}\n\n"
-        f"请用 JSON 格式返回: {{'summary': str, 'scenes': [{{'title': str, 'body': str}} x 5]}}\n"
-        f"scenes 必须包含: 题意速读 / 暴力思路 / 优化思路 / 正解 / 易错点 / 同类题推荐 这 6 节.\n"
-        f"body 中 C++ 代码用 ```cpp ... ``` 包裹."
+
+    _set_status(job_id, "running", step="calling_llm", progress=20, message="🧠 正在调用 DeepSeek 生成 C++ 讲题 (6 节大纲)...")
+    # v3.11.31b · prompt 强化: 把题号/标题/源 URL/语言/要求全塞进去, 让 LLM 凭洛谷题号自助讲解
+    pid = (job.problem_id or "").strip()
+    title = (job.title or "").strip()
+    source = (job.source or "").strip()
+    language = (job.language or "cpp").strip()
+    requirement = (job.requirement or "用C++代码实现并讲解").strip()
+
+    # v3.11.31c · 关键修复: 从 problemset_index (洛谷公开题库本地缓存) 拿真题面
+    # 替代之前"让 LLM 凭题号自助讲解" (幻觉率高, 题面细节不准)
+    # 缓存未就绪时 (后台下载未完成) soft-degrade 到旧的"凭题号讲解"模式
+    problem_text = ""
+    problem_meta = {}  # tags / difficulty / samples 等元信息
+    try:
+        import problemset_index as _psi
+        info = _psi.get(pid) if pid else None
+        if info:
+            problem_meta = info
+            # 拼接题面: 完整字段, LLM 一次看全, 不靠记忆
+            _bg = (info.get("background") or "").strip()
+            _desc = (info.get("description") or "").strip()
+            _fmt_i = (info.get("inputFormat") or "").strip()
+            _fmt_o = (info.get("outputFormat") or "").strip()
+            _hint = (info.get("hint") or "").strip()
+            _samples = info.get("samples") or []
+            _limits = info.get("limits") or {}
+            _difficulty = info.get("difficulty")
+            _difficulty_name = info.get("difficulty_name") or ""
+            _tags = info.get("tags") or []
+            _type = info.get("type") or ""
+
+            _sample_str = ""
+            if isinstance(_samples, list) and _samples:
+                _sample_lines = []
+                for j, sa in enumerate(_samples[:3], 1):  # 最多取 3 组样例
+                    if isinstance(sa, dict):
+                        si = (sa.get("input") or "").strip()
+                        so = (sa.get("output") or "").strip()
+                        if si or so:
+                            _sample_lines.append(f"  样例 {j}:\n    输入: {si[:300]}\n    输出: {so[:300]}")
+                    elif isinstance(sa, (list, tuple)) and len(sa) >= 2:
+                        _sample_lines.append(f"  样例 {j}:\n    输入: {str(sa[0])[:300]}\n    输出: {str(sa[1])[:300]}")
+                _sample_str = "\n".join(_sample_lines)
+
+            _limits_str = ""
+            if isinstance(_limits, dict):
+                _t = _limits.get("time") or []
+                _m = _limits.get("memory") or []
+                if _t or _m:
+                    _limits_str = f"时间限制: {_t} | 内存限制: {_m}"
+
+            _meta_str = f"题目来源: {_type or 'P'} | 难度: {_difficulty if _difficulty is not None else '?'} ({_difficulty_name}) | 标签: {_tags}"
+            if _limits_str:
+                _meta_str += f" | {_limits_str}"
+
+            problem_text = f"""{_meta_str}
+
+【题目背景】
+{_bg or '（无）'}
+
+【题目描述】
+{_desc or '（无）'}
+
+【输入格式】
+{_fmt_i or '（无）'}
+
+【输出格式】
+{_fmt_o or '（无）'}
+
+【样例输入输出】
+{_sample_str or '（无）'}
+
+【提示/题解】
+{_hint or '（无）'}
+"""
+            log.info(f"[ai_tutor/openai] job={job_id} pid={pid} ✓ 命中 problemset_index (description={len(_desc)}B, formatI={len(_fmt_i)}B, formatO={len(_fmt_o)}B, samples={len(_samples) if isinstance(_samples, list) else 0})")
+        else:
+            log.info(f"[ai_tutor/openai] job={job_id} pid={pid} ✗ problemset_index 未命中 (缓存可能未就绪 / 非洛谷题), fallback 到凭题号讲解")
+    except Exception as e:
+        log.warning(f"[ai_tutor/openai] job={job_id} 读 problemset_index 失败: {type(e).__name__}: {e}, fallback")
+
+    user_prompt = f"""学员要求: {requirement}
+
+题号: {pid or '—'}
+题目标题: {title or '—'}
+题面链接: {source or '—'}
+目标语言: {language} (信奥 / NOI-CSP 算法竞赛)
+
+{'='*60}
+【以下是洛谷公开题库抓取的真题面, 请严格按题面讲解, 不要凭题号猜测】
+{'='*60}
+{problem_text if problem_text else '⚠️ 本题未在 problemset_index 缓存中 (非洛谷题 / 缓存未就绪), 请凭题号 + 标题 + 学员 requirement 自助讲解, 必要时可在正解里说明"基于常见算法".'}
+{'='*60}
+
+请按以下 6 节输出 C++ 信奥讲题 (中文):
+
+1) 📌 题意速读 - 一句话说清输入/输出/数据范围
+2) 🪜 阶梯 1 · 暴力思路 (O(n²) / 2ⁿ) - 思路 + 复杂度 + C++ 模板
+3) 🪜 阶梯 2 · 优化思路 (O(n log n)) - 关键观察 + C++ 模板
+4) ✅ 阶梯 3 · 正解 (O(n) 或 O(n log n)) - 正解特征 + C++ 模板代码
+5) 🧪 易错点 / 边界 - 至少 3 条 (long long / 1-indexed / mod 负数 等)
+6) 🧠 同类题推荐 - 3 道难度递增的同类题
+
+严格要求: **只输出 JSON**, 不要任何前后缀说明文字. JSON 格式:
+{{
+  "summary": "一句话小结 (≤50字)",
+  "scenes": [
+    {{"title": "📌 题意速读", "body": "..."}},
+    {{"title": "🪜 阶梯 1 · 暴力思路", "body": "..."}},
+    {{"title": "🪜 阶梯 2 · 优化思路", "body": "..."}},
+    {{"title": "✅ 阶梯 3 · 正解", "body": "..."}},
+    {{"title": "🧪 易错点 / 边界", "body": "..."}},
+    {{"title": "🧠 同类题推荐", "body": "..."}}
+  ]
+}}
+
+每个 body 里 C++ 代码用 ```cpp ... ``` 包裹, 保持 Markdown 格式. body 字段允许较长 (200-800 字)."""
+
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "你是洛谷 C++ 讲题老师. 严格按学员要求的 JSON 格式输出 6 节 C++ 信奥讲题, 不要任何前后缀文字."},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": 0.4,
+        "max_tokens": 6000,  # v3.11.31c · 4096 → 6000 容纳长题面 + 6 节 body
+    }
+    body_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = _ur.Request(
+        f"{api_base}/chat/completions",
+        data=body_bytes,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
     )
     try:
-        resp = _r.post(
-            f"{api_base}/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": "你是洛谷 C++ 讲题老师, 输出 JSON."},
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": 0.4,
-            },
-            timeout=120,
-        )
+        with _ur.urlopen(req, timeout=120, context=ctx) as resp:
+            raw = resp.read().decode("utf-8", "replace")
+    except _ue.HTTPError as e:
+        err_body = ""
+        try:
+            err_body = e.read().decode("utf-8", "replace")[:500]
+        except Exception:
+            pass
+        _set_error(job_id, f"DeepSeek 返回 HTTP {e.code}: {err_body[:300]}")
+        return
     except Exception as e:
-        _set_error(job_id, f"调用大模型失败: {e}")
+        _set_error(job_id, f"调用 DeepSeek 失败: {type(e).__name__}: {e}")
         return
-    if resp.status_code != 200:
-        _set_error(job_id, f"大模型返回 {resp.status_code}: {resp.text[:200]}")
-        return
+
     try:
-        data = resp.json()
+        data = json.loads(raw)
         content = data["choices"][0]["message"]["content"]
-        # 提取 JSON 块
-        if "```json" in content:
-            content = content.split("```json", 1)[1].split("```", 1)[0]
-        elif "```" in content:
-            content = content.split("```", 1)[1].split("```", 1)[0]
-        parsed = json.loads(content.strip())
     except Exception as e:
-        _set_error(job_id, f"大模型返回解析失败: {e}")
+        _set_error(job_id, f"DeepSeek 响应解析失败: {type(e).__name__}: {e}; raw={raw[:300]}")
         return
+
+    # 抽取 JSON (兼容 ```json 包裹)
+    parsed = None
+    if "```json" in content:
+        try:
+            parsed = json.loads(content.split("```json", 1)[1].split("```", 1)[0].strip())
+        except Exception:
+            pass
+    if parsed is None and "```" in content:
+        try:
+            parsed = json.loads(content.split("```", 1)[1].split("```", 1)[0].strip())
+        except Exception:
+            pass
+    if parsed is None:
+        # 尝试直接解析 (大模型直接输出纯 JSON)
+        try:
+            parsed = json.loads(content.strip())
+        except Exception:
+            pass
+    if parsed is None:
+        # 最后兜底: 把整段内容塞到 summary, 让用户至少能看到大模型给的讲解
+        parsed = {
+            "summary": "DeepSeek 已讲解, 但返回非结构化内容",
+            "scenes": [{"title": "📖 DeepSeek 讲解全文", "body": content[:6000]}],
+        }
+
+    # 补全元数据
+    if isinstance(parsed, dict):
+        parsed.setdefault("problem_id", pid)
+        parsed.setdefault("title", title)
+        parsed.setdefault("source", source)
+        parsed.setdefault("language", language)
+        parsed["backend"] = "openai"
+        parsed["model"] = model
+    # scenes 进度收尾 (DeepSeek 一次性给齐, 6/6)
+    if isinstance(parsed.get("scenes"), list):
+        _set_scene_progress(job_id, len(parsed["scenes"]), len(parsed["scenes"]))
     _set_result(job_id, parsed)

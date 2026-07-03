@@ -66,6 +66,8 @@ DOWNLOAD_CHUNK = 64 * 1024  # 64KB
 DOWNLOAD_MAX_RETRIES = 2
 
 # 索引里保留的字段 (其它用不到, 节省内存/磁盘)
+# v3.11.31c · 扩展题面字段: AI 讲题 worker 需要 description/formatI/formatO/hint/background
+# 16926 道题 × 完整题面 (description 1-2KB + formatI/O 各 200B + samples 1KB + ...) ≈ 40-50MB 内存, 完全 hold 得住
 INDEX_FIELDS = (
     "type",         # "P" | "CF" | "SP" | "AT" | ...
     "difficulty",   # 0-7 (官方 8 档) | null
@@ -73,6 +75,12 @@ INDEX_FIELDS = (
     "title",        # 题目名
     "samples",      # 样例 I/O
     "limits",       # {"time":[...], "memory":[...]}
+    # v3.11.31c · 题面字段 (AI 讲题 prompt 必填, 替代之前让 LLM 凭题号"自助讲解"的不稳定做法)
+    "background",   # 题目背景/前言
+    "description",  # 题目正文描述
+    "inputFormat",  # 输入格式
+    "outputFormat", # 输出格式
+    "hint",         # 提示/题解
 )
 
 # 索引里额外补一个 i18n 标题 (有些报告需要英文版)

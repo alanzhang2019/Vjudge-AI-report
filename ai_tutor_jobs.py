@@ -55,6 +55,31 @@ _jobs_lock = threading.Lock()
 
 JOB_TTL_SECONDS = 60 * 60 * 4  # 4 小时后清理 (讲解完通常 30~60s, 留 4h 缓冲)
 
+# v3.11.31c · 进程内 RPM 预算保护 (避免触发七牛云 Kimi K2.5 Free Tier 30 RPM 限流)
+# 单 job 内部 1 outline + 8 scene = 9 次 LLM 调用 ≈ 30% RPM 配额
+# e2e 反复测试 / 学员高峰累积会打满配额 → 触发限流 + "Failed after 3 attempts" 重试加剧
+# 解决方案: 进程内跟踪最近 60s 内调上游次数, 超阈值 (20) 直接 fallback 到 stub 占位讲解
+_upstream_rpm_log: list = []  # 时间戳列表, 记录每次调上游 POST 的时刻
+_UPSTREAM_RPM_WINDOW = 60     # 60s 滚动窗口
+_UPSTREAM_RPM_BUDGET = 20     # 保守值 (七牛云 30 RPM, 留 10 次缓冲 ≈ 33%)
+
+
+def _check_upstream_rpm_budget() -> tuple:
+    """v3.11.31c · 检查 RPM 预算. 返回 (ok: bool, used: int, limit: int)."""
+    now = time.time()
+    with _jobs_lock:
+        # 清窗口外的旧记录 (最早的在列表头, 时间戳 < 窗口起点就弹出)
+        while _upstream_rpm_log and _upstream_rpm_log[0] < now - _UPSTREAM_RPM_WINDOW:
+            _upstream_rpm_log.pop(0)
+        used = len(_upstream_rpm_log)
+    return used < _UPSTREAM_RPM_BUDGET, used, _UPSTREAM_RPM_BUDGET
+
+
+def _record_upstream_call() -> None:
+    """v3.11.31c · 记录一次上游 POST 调用, 计入 RPM 预算."""
+    with _jobs_lock:
+        _upstream_rpm_log.append(time.time())
+
 
 @dataclass
 class AiTutorJob:
@@ -446,20 +471,51 @@ def _run_via_aijiangti(job_id: str, job: AiTutorJob) -> None:
         "problemId": pid,
         "title": title,
         "source": source,
+        # v3.11.31c · maxScenes=5 减少上游 LLM 调用次数, 避开 aijiangti.cn 全局 RPM 限流
+        # (StudyMate 默认根据 requirement 推断, 通常 6-7 镜, 7 次串行 LLM call 容易超 RPM;
+        #  5 镜 = 1 outline + 5 scene = 6 次 LLM, 仍有 6 节讲解但省 1 次限流 margin)
+        "maxScenes": 5,
     }
     body_bytes = _json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
     def _do_request(method, url, data=None, timeout=30):
+        # v3.11.31c · 仿造浏览器 UA, 避开 aijiangti.cn 上游 per-UA 限流
+        # (之前用 "luoguAI-Vjudge/1.0 (ai-tutor-bridge)" 被上游当成机器人,
+        #  即使 IP 配额充足, 每次都触发 "同类题推荐" 那一步限流;
+        #  浏览器测试 aijiangti.cn 完全正常, 证明是 UA 维度限流)
         req = _ur.Request(url, data=data, method=method, headers={
-            "Accept": "application/json",
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
             "Content-Type": "application/json; charset=utf-8",
-            "User-Agent": "luoguAI-Vjudge/1.0 (ai-tutor-bridge)",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Origin": "https://oi.aijiangti.cn",
+            "Referer": "https://oi.aijiangti.cn/",
         })
         return _ur.urlopen(req, timeout=timeout, context=ctx)
+
+    # v3.11.31c · 进程内 RPM 预算保护: 单 job 调上游前检查最近 60s 内调用次数
+    # 七牛云 Kimi K2.5 Free Tier 30 RPM, 单 job 9 次调用 ≈ 30% 配额
+    # 累积到 _UPSTREAM_RPM_BUDGET (20) 就直接 fallback 到 stub, 不再浪费 RPM 配额
+    rpm_ok, rpm_used, rpm_limit = _check_upstream_rpm_budget()
+    if not rpm_ok:
+        log.warning(f"[ai_tutor/forward] job={job_id} RPM 预算用尽 ({rpm_used}/{rpm_limit} in {_UPSTREAM_RPM_WINDOW}s), 直接 fallback 到 stub")
+        _set_status(
+            job_id, "running", step="rpm_budget_exceeded", progress=10,
+            message=f"⚠️ 上游讲解服务繁忙 (RPM 限流保护: {rpm_used}/{rpm_limit} in 60s), 切换到本地讲题模板...",
+        )
+        _run_stub(job_id, job)
+        job_obj = get_job(job_id)
+        if job_obj and isinstance(job_obj.result, dict):
+            job_obj.result["backend"] = "aijiangti_rpm_protected"
+            job_obj.result["fallback_reason"] = f"上游 RPM 配额保护 ({rpm_used}/{rpm_limit} in 60s), 已自动切换到本地讲题模板 (通用 C++ 模板, 非该题定制讲解)"
+            _set_result(job_id, job_obj.result)
+        return  # 不再调上游
 
     try:
         resp = _do_request("POST", AI_TUTOR_FORWARD_URL, data=body_bytes, timeout=30)
         raw = resp.read().decode("utf-8", "replace")
+        # v3.11.31c · 记录此次上游 POST 调用, 计入 RPM 预算
+        _record_upstream_call()
     except _ue.HTTPError as e:
         # 上游 4xx/5xx 错误, 读 body
         try:
@@ -493,70 +549,149 @@ def _run_via_aijiangti(job_id: str, job: AiTutorJob) -> None:
         return
     log.info(f"[ai_tutor/forward] job={job_id} → remote={remote_job_id} pid={pid}")
 
-    # 轮询 remote
-    deadline = time.time() + 60 * 10  # 最长等 10 分钟
-    last_progress = 10
-    while time.time() < deadline:
-        time.sleep(AI_TUTOR_POLL_INTERVAL_MS / 1000.0)
-        try:
-            resp = _do_request("GET", poll_url, timeout=20)
-            raw_poll = resp.read().decode("utf-8", "replace")
-        except Exception as e:
-            log.warning(f"[ai_tutor/forward] poll error: {e}")
-            continue
-        try:
-            data = _json.loads(raw_poll)
-        except Exception:
-            continue
-        step = data.get("step") or data.get("status") or "running"
-        progress = int(data.get("progress") or last_progress)
-        message = data.get("message") or ""
-        # v3.11.31 · 透传 StudyMate 契约: 分镜进度 scenesGenerated / totalScenes
-        sg = data.get("scenesGenerated") or data.get("scenes_generated")
-        ts = data.get("totalScenes") or data.get("total_scenes")
-        if sg is not None or ts is not None:
-            _set_scene_progress(job_id, int(sg or 0), int(ts or 0))
-        if progress > last_progress:
-            last_progress = progress
-        _set_status(job_id, "running", step=step, progress=progress, message=message)
-        if data.get("done") or data.get("status") in ("succeeded", "failed"):
-            if data.get("status") == "failed" or data.get("error"):
-                err_msg = str(data.get("error") or data.get("message") or "讲解失败")
-                # v3.11.31b · 友好化上游错误
-                if "rate limit" in err_msg.lower() or "rpm" in err_msg.lower():
-                    err_msg = "AI 讲师讲太快了, 触发了上游 RPM 限流. 请稍等 1-2 分钟再来, 或换一道题试试"
-                _set_error(job_id, err_msg)
-            else:
-                sg2 = data.get("scenesGenerated") or data.get("scenes_generated")
-                ts2 = data.get("totalScenes") or data.get("total_scenes")
-                if sg2 is not None or ts2 is not None:
-                    _set_scene_progress(job_id, int(sg2 or 0), int(ts2 or 0))
-                # v3.11.31b · result 字段兼容 (上游可能叫 classroom / outline / content)
-                result = data.get("result") or {}
-                if not result:
-                    # 上游把 scenes 直接放在顶层 (StudyMate 早期版本)
-                    if data.get("scenes"):
-                        result = {"scenes": data.get("scenes"), "summary": data.get("summary") or ""}
-                    elif data.get("outline"):
-                        result = {"scenes": data.get("outline"), "summary": data.get("summary") or ""}
-                    elif data.get("classroom"):
-                        result = {"scenes": data.get("classroom"), "summary": data.get("summary") or ""}
-                if not result and isinstance(data, dict):
-                    # 上游有时候整个 data 就是 result
-                    if any(k in data for k in ("scenes", "outline", "classroom", "content", "html", "markdown")):
-                        result = {k: data[k] for k in ("scenes", "outline", "classroom", "content", "html", "markdown", "summary") if k in data}
-                if not result:
-                    result = {"scenes": [], "summary": data.get("message") or "讲解已完成, 但上游未返回结构化结果", "raw": data}
-                # 把 C++ 题目信息钉到 result 头部 (前端展示)
-                if isinstance(result, dict):
-                    result["problem_id"] = pid
-                    result["title"] = result.get("title") or title
-                    result["source"] = result.get("source") or source
-                    result["language"] = result.get("language") or language
-                    result["backend"] = "aijiangti"
-                _set_result(job_id, result)
+    # v3.11.31c · aijiangti.cn 上游走七牛云 OpenAI 兼容接口, 有 per-API-key RPM 限流.
+    # 限流通常 60s 窗口内恢复, 加自动重试: 检测到 rate limit 后 sleep 30s 整 job 重新 POST.
+    # max_retries=3 加上首次, 最多 4 次尝试, 总等待上限 ~90s (重试) + 4*5min (轮询) = ~21min
+    max_retries = 3
+    # v3.11.31c · 七牛云 OpenAI 兼容 API 的 RPM 限流窗口 = 60s, 重试间隔必须 ≥ 60s 才能避开
+    # (实测 30s 间隔仍触发, 第 2/3 次 attempt 5s 内就再次限流)
+    retry_delay_seconds = 65
+    attempt = 0
+    last_progress = 10  # v3.11.31c · 初始化在外层, 避免 UnboundLocalError
+    while attempt <= max_retries:
+        if attempt > 0:
+            # v3.11.31c · 重试前友好提示 + 等待 + 整 job 重新 POST
+            _set_status(
+                job_id, "running", step=f"rpm_retry_{attempt}", progress=last_progress,
+                message=f"⚠️ 上游 RPM 限流, 等待 {retry_delay_seconds}s 后第 {attempt}/{max_retries} 次重试...",
+            )
+            log.info(f"[ai_tutor/forward] job={job_id} RPM 重试 {attempt}/{max_retries}")
+            time.sleep(retry_delay_seconds)
+            # v3.11.31c · 重试前也检查 RPM 预算, 避免重试时配额仍用尽浪费一次调用
+            rpm_ok2, rpm_used2, _ = _check_upstream_rpm_budget()
+            if not rpm_ok2:
+                log.warning(f"[ai_tutor/forward] job={job_id} 重试时 RPM 预算仍用尽 ({rpm_used2}/{rpm_limit}), 停止重试, fallback 到 stub")
+                break  # 跳出 inner, 走外层 while 退出 → fallback 路径
+            try:
+                resp = _do_request("POST", AI_TUTOR_FORWARD_URL, data=body_bytes, timeout=30)
+                raw = resp.read().decode("utf-8", "replace")
+                _record_upstream_call()  # v3.11.31c · 重试 POST 也计入 RPM 预算
+            except Exception as e:
+                _set_error(job_id, f"重试 POST 失败: {e}")
+                return
+            try:
+                upstream = _json.loads(raw)
+                if isinstance(upstream, dict) and upstream.get("success") is False:
+                    _set_error(job_id, f"AI 讲题服务拒绝 (重试): {upstream.get('error') or upstream.get('message') or raw[:200]}")
+                    return
+            except Exception:
+                _set_error(job_id, f"重试响应非 JSON: {raw[:200]}")
+                return
+            new_rid = upstream.get("jobId") or upstream.get("job_id")
+            new_poll = upstream.get("pollUrl") or upstream.get("poll_url")
+            if not new_rid or not new_poll:
+                _set_error(job_id, f"重试响应缺 jobId/pollUrl: {raw[:200]}")
+                return
+            remote_job_id = new_rid
+            poll_url = new_poll
+            log.info(f"[ai_tutor/forward] job={job_id} 重试 {attempt}/{max_retries} → new remote={remote_job_id}")
+            # 重置进度计数, 让前端看到 "重新开始" 效果
+            last_progress = 10
+            _set_scene_progress(job_id, 0, 0)
+
+        # 轮询 remote (每次 attempt 5 分钟 deadline)
+        deadline = time.time() + 60 * 5
+        should_retry = False
+        while time.time() < deadline:
+            time.sleep(AI_TUTOR_POLL_INTERVAL_MS / 1000.0)
+            try:
+                resp = _do_request("GET", poll_url, timeout=20)
+                raw_poll = resp.read().decode("utf-8", "replace")
+            except Exception as e:
+                log.warning(f"[ai_tutor/forward] poll error: {e}")
+                continue
+            try:
+                data = _json.loads(raw_poll)
+            except Exception:
+                continue
+            step = data.get("step") or data.get("status") or "running"
+            progress = int(data.get("progress") or last_progress)
+            message = data.get("message") or ""
+            # v3.11.31 · 透传 StudyMate 契约: 分镜进度 scenesGenerated / totalScenes
+            sg = data.get("scenesGenerated") or data.get("scenes_generated")
+            ts = data.get("totalScenes") or data.get("total_scenes")
+            if sg is not None or ts is not None:
+                _set_scene_progress(job_id, int(sg or 0), int(ts or 0))
+            if progress > last_progress:
+                last_progress = progress
+            _set_status(job_id, "running", step=step, progress=progress, message=message)
+            if data.get("done") or data.get("status") in ("succeeded", "failed"):
+                if data.get("status") == "failed" or data.get("error"):
+                    err_msg = str(data.get("error") or data.get("message") or "讲解失败")
+                    # v3.11.31c · rate limit 走重试, 不直接放弃
+                    if "rate limit" in err_msg.lower() or "rpm" in err_msg.lower():
+                        log.warning(f"[ai_tutor/forward] job={job_id} attempt={attempt} 命中 RPM 限流: {err_msg[:120]}")
+                        should_retry = True
+                        break  # break inner while, 走外层 retry
+                    # 其他错误直接放弃
+                    _set_error(job_id, err_msg)
+                    return
+                else:
+                    sg2 = data.get("scenesGenerated") or data.get("scenes_generated")
+                    ts2 = data.get("totalScenes") or data.get("total_scenes")
+                    if sg2 is not None or ts2 is not None:
+                        _set_scene_progress(job_id, int(sg2 or 0), int(ts2 or 0))
+                    # v3.11.31b · result 字段兼容 (上游可能叫 classroom / outline / content)
+                    result = data.get("result") or {}
+                    if not result:
+                        # 上游把 scenes 直接放在顶层 (StudyMate 早期版本)
+                        if data.get("scenes"):
+                            result = {"scenes": data.get("scenes"), "summary": data.get("summary") or ""}
+                        elif data.get("outline"):
+                            result = {"scenes": data.get("outline"), "summary": data.get("summary") or ""}
+                        elif data.get("classroom"):
+                            result = {"scenes": data.get("classroom"), "summary": data.get("summary") or ""}
+                    if not result and isinstance(data, dict):
+                        # 上游有时候整个 data 就是 result
+                        if any(k in data for k in ("scenes", "outline", "classroom", "content", "html", "markdown")):
+                            result = {k: data[k] for k in ("scenes", "outline", "classroom", "content", "html", "markdown", "summary") if k in data}
+                    if not result:
+                        result = {"scenes": [], "summary": data.get("message") or "讲解已完成, 但上游未返回结构化结果", "raw": data}
+                    # 把 C++ 题目信息钉到 result 头部 (前端展示)
+                    if isinstance(result, dict):
+                        result["problem_id"] = pid
+                        result["title"] = result.get("title") or title
+                        result["source"] = result.get("source") or source
+                        result["language"] = result.get("language") or language
+                        result["backend"] = "aijiangti"
+                        result["retry_count"] = attempt  # v3.11.31c · 让前端知道这次成功是重试几次的结果
+                    _set_result(job_id, result)
+                    return
+        # inner while 退出: 超时 或 should_retry
+        if should_retry:
+            attempt += 1
+            continue  # 外层 while 重试
+        # 5 分钟内未完成且没触发限流 = 超时
+        if attempt >= max_retries:
+            _set_error(job_id, f"讲解超时 (已重试 {max_retries} 次, 每次 5 分钟)")
             return
-    _set_error(job_id, "讲解超时 (10 分钟内上游未完成)")
+        attempt += 1
+        continue
+    # 所有 attempt 都因 RPM 限流失败 → fallback 到 stub 占位讲解 (6 节分镜照常显示)
+    # v3.11.31c · 学员侧体验: 进度条 0%→100% 跑 6 节模板, 不是 "技术错误" 弹窗
+    log.warning(f"[ai_tutor/forward] job={job_id} {max_retries+1} 次尝试均 RPM 限流, fallback 到 stub 占位讲解")
+    _set_status(
+        job_id, "running", step="fallback_stub", progress=92,
+        message="⚠️ 上游讲解服务繁忙, 已自动切换到本地讲题模板...",
+    )
+    # 复用 stub worker: 走 6 节分镜蓝图 (题意/暴力/优化/正解/易错点/同类题) + _set_result 推到 succeeded
+    _run_stub(job_id, job)
+    # stub result 后处理: 标 fallback 原因, 让前端能加 "通用模板非该题定制" 提示
+    job_obj = get_job(job_id)
+    if job_obj and isinstance(job_obj.result, dict):
+        job_obj.result["backend"] = "aijiangti_stub_fallback"
+        job_obj.result["fallback_reason"] = "上游 LLM 服务 RPM 限流, 已自动切换到本地讲题模板 (通用 C++ 模板, 非该题定制讲解)"
+        _set_result(job_id, job_obj.result)
 
 
 def _run_via_openai(job_id: str, job: AiTutorJob) -> None:

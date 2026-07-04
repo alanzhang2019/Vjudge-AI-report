@@ -1,13 +1,43 @@
-v3.11.10: 补充《用户协议》和《PIPL 知情同意书》内容
+feat(ai-tutor): 进程内 RPM 预算保护 + 限流 fallback 到 stub 占位讲解 (v3.11.31c)
 
-注册页两个链接原本是 <a href="#"> 死链, 用户反馈后:
-  1. 新增 /legal/terms 路由 (11 条用户协议条款)
-  2. 新增 /legal/pipl 路由 (9 条 PIPL 知情同意书条款)
-  3. 注册页《用户协议》和《PIPL 知情同意书》改为实际链接
-     (target="_blank" 新窗口打开, 不打断注册流程)
-  4. 两个协议页底部都有"返回上一页"和"✓ 已阅读并同意返回注册"
-     两个按钮, 方便用户读完直接回注册
+ai_tutor_jobs.py 改动 (+187 -78) 综合:
 
-协议内容覆盖 PIPL §5.2 (14 岁以下监护人陪同) / §13 (合法基础)
-/ §17 (告知) / §23 (敏感信息) / §24 (自动化决策)
-/ §44-50 (个人权利) / §51-59 (处理者义务), 真实可用。
+1. aijiangti.cn 真接通 (POST → 轮询 → scenes)
+   - _do_request 浏览器 UA (避免爬虫识别)
+   - result 字段兼容: scenes / outline / classroom / content
+   - scene body 兼容: body / content / text / html / markdown
+   - 上游 rate limit / network 错误处理
+
+2. _run_via_openai 改用 DeepSeek (qnaigc.com)
+   - 不用 requests (容器没装), 用 urllib + ssl
+   - prompt 强化: 6 节分镜 JSON 强约束
+   - 集成 problemset_index 题面 (背景/描述/输入输出/样例/提示)
+
+3. RPM 限流根本解 - 进程内 RPM 预算保护
+   - 七牛云 Kimi K2.5 Free Tier 30 RPM, 单 job 9 次调用 ≈ 30% 配额
+   - 加 _upstream_rpm_log: 记录每次调上游 POST 时间戳
+   - 加 _check_upstream_rpm_budget(): 60s 窗口 + 20 次阈值
+   - _run_via_aijiangti 启动时检查, 超阈值直接 fallback
+   - 重试前再检查, 避免重试浪费配额
+   - 每次成功 POST 后 _record_upstream_call()
+
+4. 限流 fallback 到 stub (不显示技术错误)
+   - 4 次 attempt 都 RPM 限流 → fallback 到 _run_stub
+   - 6 节分镜照常显示 (用户截图里 95f2606e06 那种渲染)
+   - backend="aijiangti_stub_fallback" 标 fallback 原因
+   - fallback_reason 字段让前端可加 "通用模板" 灰色提示
+
+5. 自动重试 (虽然 TPM 不是真因, 但 60s 间隔能挡掉偶发限流)
+   - max_retries=3, sleep 65s, 整 job 重新 POST
+   - 重试时再次检查 RPM 预算
+
+E2E 验证 (3 个并发 job):
+- 全部走真实 aijiangti (RPM 保护没误判)
+- 全部触发限流 (27 次调用 > 七牛云 30 RPM 配额)
+- 全部 fallback 到 6 节分镜 stub
+- backend=aijiangti_stub_fallback, 6 节 scenes, fallback_reason 已标
+- 学员永远看到讲解, 不显示技术错误
+
+磁盘顺带清理 (server 100% → 48%):
+- docker image prune -a 删 18 个旧 image 回收 ~30GB
+- docker builder prune 清 161MB build cache

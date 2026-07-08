@@ -2198,34 +2198,26 @@ def count_valid_invite(
         return False, "self_invite"
     conn = _get_conn()
     try:
-        # v3.12_report_lock_v15 · 防作弊分级: same_ip 用 24h 短窗, same_luogu_uid 用 7d 长窗
-        #   旧: 7d same_ip 误杀家庭/公司多人 (同 WiFi) 算 1 次 → 学员抱怨"只涨 2 不动"
-        #   新: 24h same_ip 给"换台设备/换人/换洛谷号"留空间, 7d same_luogu_uid 防刷号
-        _now_v15 = datetime.now()
-        for btype, bkey, win_days in [
-            ("same_ip", invitee_ip, 1),             # 24h
-            ("same_luogu_uid", invitee_luogu_uid, 7),  # 7d
-        ]:
-            if not bkey:
-                continue
-            cutoff_v15 = (_now_v15 - timedelta(days=win_days)).strftime("%Y-%m-%d %H:%M:%S")
+        # v3.12_report_lock_v17 · 去掉 same_ip 24h 限制
+        #   旧: same_ip 24h + same_luogu_uid 7d → 家庭/教室同 WiFi 多人邀请只算 1 次 (学员抱怨"只涨 2 不动")
+        #   现场: ddvuanam 8 个被邀请 task 全是 IP=27.38.3.171, 8 个不同 luogu_uid, 但 same_ip 拦 7 次.
+        #   新: 只 same_luogu_uid 7d 限制. 同 IP + 同 luogu_uid 已被 same_luogu_uid 防住, same_ip 冗余.
+        #   风险: 1 人用 N 个不同洛谷号可刷 5 档, 但 5 档是封顶, 多刷无额外收益.
+        _now_v17 = datetime.now()
+        if invitee_luogu_uid:
+            cutoff_v17 = (_now_v17 - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
             row = conn.execute("""
                 SELECT id FROM invite_blocks
                 WHERE inviter_student_id = ?
-                  AND block_type = ?
+                  AND block_type = 'same_luogu_uid'
                   AND block_key = ?
                   AND created_at >= ?
                 LIMIT 1
-            """, (int(inviter_student_id), btype, bkey, cutoff_v15)).fetchone()
+            """, (int(inviter_student_id), invitee_luogu_uid, cutoff_v17)).fetchone()
             if row:
-                return False, f"already_invited_by_{btype}"
+                return False, "already_invited_by_same_luogu_uid"
 
-        # 记录防作弊 block
-        if invitee_ip:
-            conn.execute("""
-                INSERT INTO invite_blocks (inviter_student_id, invitee_student_id, block_type, block_key)
-                VALUES (?, ?, 'same_ip', ?)
-            """, (int(inviter_student_id), int(invitee_student_id), invitee_ip))
+        # 记录防作弊 block: v17 去掉 same_ip, 只记 same_luogu_uid
         if invitee_luogu_uid:
             conn.execute("""
                 INSERT INTO invite_blocks (inviter_student_id, invitee_student_id, block_type, block_key)

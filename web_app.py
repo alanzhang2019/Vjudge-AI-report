@@ -253,7 +253,7 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
 APP_VERSION = "v3.11.25"
-APP_VERSION_BUILD = "20260705_v3p12_report_lock_v12"
+APP_VERSION_BUILD = "20260705_v3p12_report_lock_v13"
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -6016,8 +6016,10 @@ def upload_zip_form():
     _gate = _require_student_login()
     if _gate:
         return _gate
+    # v3.12_report_lock_v13 · 把 ?invite=xxx 透传到模板 (防御性, 上传 zip 也可能带 invite)
+    _invite_param_zip = str(request.args.get("invite") or "").strip()
     # v3.11.29 · 强制 no-cache, 避免旧版 JS
-    resp = make_response(render_template_string(UPLOAD_ZIP_HTML))
+    resp = make_response(render_template_string(UPLOAD_ZIP_HTML, invite=_invite_param_zip))
     resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
     resp.headers["Pragma"] = "no-cache"
     resp.headers["Expires"] = "0"
@@ -6154,9 +6156,14 @@ def upload_source_form():
     _exam_type = str(request.args.get("exam_type", "")).strip().lower()
     if _exam_type not in ("noi_csp", "gesp"):
         _exam_type = "noi_csp"
+    # v3.12_report_lock_v13 · 把 ?invite=xxx 透传到模板, 让表单提交时能带回去
+    # (旧 bug: form action 写死 "/upload-source", 用户通过分享链接打开后, 提交时 invite 参数丢失, 永远无法触发 +1 解锁)
+    _invite_param = str(request.args.get("invite") or "").strip()
     # v3.11.29 · 强制 no-cache, 避免用户用旧版 JS (没有 fetch+alert handler) 导致
     #   JSON 残留浏览器 → 用户"以为没生成"
-    resp = make_response(render_template_string(UPLOAD_SOURCE_HTML, exam_type=_exam_type))
+    resp = make_response(render_template_string(
+        UPLOAD_SOURCE_HTML, exam_type=_exam_type, invite=_invite_param,
+    ))
     resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
     resp.headers["Pragma"] = "no-cache"
     resp.headers["Expires"] = "0"
@@ -6290,10 +6297,28 @@ def upload_source_submit():
                 )
                 if is_valid:
                     # 给邀请人最新的一份 done report +1
-                    _inviter_uid = _inviter_student.get("luogu_uid") or _inviter_short
-                    _latest_task = get_latest_done_task_for_uid(
-                        str(_inviter_uid), since_hours=24 * 30, task_type_list=["report_noi_csp", "report_gesp", "report_source_upload"]
-                    )
+                    # v3.12_report_lock_v13 · 邮件注册学员 students.luogu_uid=NULL, _inviter_uid 会是 short_id 字符串,
+                    #   tasks.luogu_uid 字段对不上 → 查不到 task → 邀请被静默丢失
+                    #   修复: luogu_uid 为空时, 走 student_id 兜底查 tasks.student_id
+                    _inviter_uid_raw = (_inviter_student.get("luogu_uid") or "").strip()
+                    _latest_task = None
+                    if _inviter_uid_raw:
+                        _latest_task = get_latest_done_task_for_uid(
+                            _inviter_uid_raw, since_hours=24 * 30,
+                            task_type_list=["report_noi_csp", "report_gesp", "report_source_upload"],
+                        )
+                    if not _latest_task:
+                        # 兜底: 按 student_id 查 (适用于 luogu_uid=NULL 的邮件注册学员)
+                        try:
+                            from task_store import get_latest_done_task_for_student_id
+                            _latest_task = get_latest_done_task_for_student_id(
+                                _inviter_id, since_hours=24 * 30,
+                                task_type_list=["report_noi_csp", "report_gesp", "report_source_upload"],
+                            )
+                            if _latest_task:
+                                app.logger.info(f"[v3.12 /upload-source] 邀请人 luogu_uid 为空, 改走 student_id 兜底 sid={_inviter_id} task={_latest_task['task_id'][:8]}")
+                        except Exception as _e2:
+                            app.logger.warning(f"[v3.12 /upload-source] student_id 兜底查 task 失败: {_e2}")
                     if _latest_task:
                         from task_store import increment_invite_count
                         new_count = increment_invite_count(_latest_task["task_id"])
@@ -6385,7 +6410,9 @@ UPLOAD_ZIP_HTML = """
                 <p class="app-subtitle">本机已下载的洛谷数据 → AI 测评报告<br>无需提供 cookies / 无需联网抓取</p>
             </div>
 
-            <form method="POST" enctype="multipart/form-data" id="zipForm" class="space-y-4">
+            <form method="POST" enctype="multipart/form-data" action="/upload-zip{% if invite %}?invite={{ invite }}{% endif %}" id="zipForm" class="space-y-4">
+                <!-- v3.12_report_lock_v13 · 双保险 hidden input -->
+                <input type="hidden" name="invite" value="{{ invite or '' }}">
                 <!-- 拖拽区 -->
                 <div id="dropZone" class="zip-drop" onclick="document.getElementById('zipFile').click()">
                     <div class="big-icon mb-2">📦</div>
@@ -6737,7 +6764,9 @@ UPLOAD_SOURCE_HTML = """
                 </ul>
             </div>
 
-            <form method="POST" action="/upload-source" id="sourceForm" class="space-y-4">
+            <form method="POST" action="/upload-source{% if invite %}?invite={{ invite }}{% endif %}" id="sourceForm" class="space-y-4">
+                <!-- v3.12_report_lock_v13 · 双保险: hidden input 也带 invite (防 form action 被 JS 改写) -->
+                <input type="hidden" name="invite" value="{{ invite or '' }}">
                 <!-- 源码粘贴框 -->
                 <div>
                     <div class="flex items-center justify-between mb-1.5">

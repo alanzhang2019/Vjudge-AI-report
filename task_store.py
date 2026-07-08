@@ -2408,6 +2408,58 @@ def get_latest_done_task_for_uid(luogu_uid: str, since_hours: int = 24, task_typ
         conn.close()
 
 
+def get_latest_done_task_for_student_id(
+    student_id: int,
+    since_hours: int = 24 * 30,
+    task_type_list: list[str] | None = None,
+) -> dict | None:
+    """v3.12_report_lock_v13 · 按 student_id 查最近一份 task (用于邮件注册学员 luogu_uid=NULL 兜底)
+
+    场景: 邀请人 A 是邮箱注册, students.luogu_uid=NULL, 上面的 get_latest_done_task_for_uid(luogu_uid=...)
+    查不到. 此时按 tasks.student_id = A.id 查, 同样能拿到 A 的最新一份报告用于 increment_invite_count.
+
+    Args:
+        student_id: 学员表 students.id
+        since_hours: 限定 N 小时内（默认 30 天, 邀请是弱时间窗）
+        task_type_list: 报告类型白名单 (None = 全部)
+
+    Returns:
+        dict | None
+    """
+    if not student_id or int(student_id) <= 0:
+        return None
+    conn = _get_conn()
+    try:
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()]
+        if "student_id" not in cols:
+            return None
+        threshold = (datetime.now() - timedelta(hours=int(since_hours))).strftime("%Y-%m-%d %H:%M:%S")
+        _type_filter = ""
+        _params: list = [int(student_id), threshold]
+        if task_type_list and "task_type" in cols:
+            placeholders = ",".join("?" for _ in task_type_list)
+            _type_filter = f" AND t.task_type IN ({placeholders})"
+            _params.extend(str(t) for t in task_type_list)
+        row = conn.execute(
+            f"""
+            SELECT t.task_id, t.status, t.created_at, t.html, t.student_name, t.luogu_uid
+            FROM tasks t
+            WHERE t.student_id = ?
+              AND t.status IN ('done', 'partial', 'running', 'queued')
+              AND (t.created_at IS NULL OR t.created_at >= ?)
+              {_type_filter}
+            ORDER BY t.created_at DESC
+            LIMIT 1
+            """,
+            tuple(_params),
+        ).fetchone()
+        if not row:
+            return None
+        return dict(row)
+    finally:
+        conn.close()
+
+
 def insert_task(task_id: str, status: str = "queued", message: str = "排队中...", luogu_uid: str = "", task_type: str = ""):
     """v3.9.64 · 新增 task_type 参数（report_noi_csp / report_gesp），用于按报告类型限流。"""
     conn = _get_conn()

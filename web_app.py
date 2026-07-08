@@ -253,7 +253,7 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
 APP_VERSION = "v3.11.25"
-APP_VERSION_BUILD = "20260705_v3p12_report_lock_v10"
+APP_VERSION_BUILD = "20260705_v3p12_report_lock_v12"
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -7189,18 +7189,18 @@ STATUS_HTML = """
                 var _input = document.getElementById('inviteLinkInput');
                 if (!_input) return;
                 var _val = _input.value || '';
-                if (!_val) { alert('邀请链接未生成, 请稍后再试'; return; }
+                if (!_val) { alert('邀请链接未生成, 请稍后再试'); return; }
                 try {
                     _input.select();
                     _input.setSelectionRange(0, 99999);
                     var ok = document.execCommand('copy');
-                    if (ok) { alert('✅ 邀请链接已复制!\\n\\n发到家长群/朋友圈, 同学通过链接生成报告, 你就解锁 1 档!'; }
-                    else { alert('复制失败, 请手动复制:\\n' + _val; }
+                    if (ok) { alert('✅ 邀请链接已复制!\\n\\n发到家长群/朋友圈, 同学通过链接生成报告, 你就解锁 1 档!'); }
+                    else { alert('复制失败, 请手动复制:\\n' + _val); }
                 } catch (e) {
                     // 现代浏览器 fallback
                     if (navigator.clipboard && navigator.clipboard.writeText) {
-                        navigator.clipboard.writeText(_val).then(function(){ alert('✅ 已复制!'; }).catch(function(){ alert('请手动复制:\\n' + _val; });
-                    } else { alert('请手动复制:\\n' + _val; }
+                        navigator.clipboard.writeText(_val).then(function(){ alert('✅ 已复制!'); }).catch(function(){ alert('请手动复制:\\n' + _val); });
+                    } else { alert('请手动复制:\\n' + _val); }
                 }
             }
             function showLockPoster(){
@@ -7213,7 +7213,7 @@ STATUS_HTML = """
                 loading.style.display = '';
                 img.style.display = 'none';
                 m.classList.remove('hidden');
-                var _task_id = ''{{ task_id }}';
+                var _task_id = '{{ task_id }}';
                 var url = '/api/report-lock-poster?task_id=' + encodeURIComponent(_task_id) + '&t=' + Date.now();
                 img.src = url;
                 dl.href = url;
@@ -7221,14 +7221,14 @@ STATUS_HTML = """
             function shareToWechat(){
                 var _input = document.getElementById('inviteLinkInput');
                 var _val = (_input && _input.value) || '';
-                if (!_val) { alert('邀请链接未生成'; return; }
+                if (!_val) { alert('邀请链接未生成'); return; }
                 // 微信内置浏览器可直接复制 + 提示
                 if (navigator.userAgent.indexOf('MicroMessenger') >= 0) {
                     copyInviteLink();
-                    alert('💡 微信内长按链接, 可直接发送给朋友或朋友圈';
+                    alert('💡 微信内长按链接, 可直接发送给朋友或朋友圈');
                 } else {
                     copyInviteLink();
-                    alert('💡 链接已复制, 打开微信粘贴发送给朋友\\n或生成海报发到家长群 / 朋友圈';
+                    alert('💡 链接已复制, 打开微信粘贴发送给朋友\\n或生成海报发到家长群 / 朋友圈');
                 }
             }
             </script>

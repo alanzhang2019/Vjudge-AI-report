@@ -125,6 +125,62 @@ class AiTutorJob:
         return d
 
 
+def find_existing_succeeded_job(
+    problem_id: str = "",
+    title: str = "",
+    source: str = "",
+    luogu_uid: str = "",
+) -> Optional[str]:
+    """v3.11.31i · 复用已有 succeeded job, 避免重复调用 LLM 浪费 token.
+
+    匹配规则 (按优先级):
+      1. problem_id 一致 + luogu_uid 一致 (最强, 同学员同题)
+      2. problem_id 一致 (跨学员, 同题)
+      3. title 一致 + luogu_uid 一致 (无 problem_id 时)
+
+    返回:
+      job_id (str) - 找到可复用的
+      None      - 没找到, 需创建新 job
+    """
+    pid = (problem_id or "").strip()
+    title = (title or "").strip()
+    uid = (luogu_uid or "").strip()
+    src = (source or "").strip()
+
+    if not (pid or title):
+        return None  # 没标识, 不能复用 (避免错配)
+
+    now = time.time()
+    with _jobs_lock:
+        candidates = []
+        for jid, job in _jobs.items():
+            # 只考虑 succeeded 且未过期 (留 4h 缓冲)
+            if job.status != "succeeded":
+                continue
+            if now - job.updated_at > JOB_TTL_SECONDS:
+                continue
+            candidates.append((jid, job))
+        if not candidates:
+            return None
+
+        # 第一优先级: problem_id + luogu_uid 都匹配
+        if pid and uid:
+            for jid, job in candidates:
+                if job.problem_id.strip() == pid and job.luogu_uid.strip() == uid:
+                    return jid
+        # 第二优先级: problem_id 匹配 (跨学员)
+        if pid:
+            for jid, job in candidates:
+                if job.problem_id.strip() == pid:
+                    return jid
+        # 第三优先级: title + luogu_uid 匹配
+        if title and uid:
+            for jid, job in candidates:
+                if job.title.strip() == title and job.luogu_uid.strip() == uid:
+                    return jid
+    return None
+
+
 def create_job(
     requirement: str,
     problem_id: str = "",
@@ -552,7 +608,9 @@ def _run_via_aijiangti(job_id: str, job: AiTutorJob) -> None:
     # v3.11.31c · aijiangti.cn 上游走七牛云 OpenAI 兼容接口, 有 per-API-key RPM 限流.
     # 限流通常 60s 窗口内恢复, 加自动重试: 检测到 rate limit 后 sleep 30s 整 job 重新 POST.
     # max_retries=3 加上首次, 最多 4 次尝试, 总等待上限 ~90s (重试) + 4*5min (轮询) = ~21min
-    max_retries = 3
+    # v3.11.31e · max_retries 从 3 降到 1: 学员侧最差 65s 等待 + 5min poll ≈ 6min 就 fallback,
+    # 旧版 max_retries=3 + 65s 等待 = 13min+ 学员早就关页面了
+    max_retries = 1
     # v3.11.31c · 七牛云 OpenAI 兼容 API 的 RPM 限流窗口 = 60s, 重试间隔必须 ≥ 60s 才能避开
     # (实测 30s 间隔仍触发, 第 2/3 次 attempt 5s 内就再次限流)
     retry_delay_seconds = 65
@@ -599,8 +657,11 @@ def _run_via_aijiangti(job_id: str, job: AiTutorJob) -> None:
             last_progress = 10
             _set_scene_progress(job_id, 0, 0)
 
-        # 轮询 remote (每次 attempt 5 分钟 deadline)
-        deadline = time.time() + 60 * 5
+        # 轮询 remote (v3.11.31g · 单次 attempt 3 分钟 deadline)
+        # v3.11.31e · deadline 从 5min 降到 2min: 学员侧最差 65s 等待 + 2min poll ≈ 3min fallback
+        # v3.11.31g · deadline 从 2min 调到 3min: 实测 aijiangti.cn outlines 阶段常需 90s+,
+        # 2min 不够 outlines 完成, 经常误判 fallback; 3min 可覆盖 outlines + 早期 scenes
+        deadline = time.time() + 60 * 3
         should_retry = False
         while time.time() < deadline:
             time.sleep(AI_TUTOR_POLL_INTERVAL_MS / 1000.0)
@@ -633,9 +694,11 @@ def _run_via_aijiangti(job_id: str, job: AiTutorJob) -> None:
                         log.warning(f"[ai_tutor/forward] job={job_id} attempt={attempt} 命中 RPM 限流: {err_msg[:120]}")
                         should_retry = True
                         break  # break inner while, 走外层 retry
-                    # 其他错误直接放弃
-                    _set_error(job_id, err_msg)
-                    return
+                    # v3.11.31h · 上游 failed 但不是 RPM 限流 → 走 fallback (学员永远看讲解, 不看红错误页)
+                    # 例: "No scenes were generated" / "Classroom generation failed" 都是上游 LLM 质量不稳定
+                    # (常因 outlines 阶段 LLM 乱写题面 / scenes 阶段卡死, 跟 RPM 限流不一样)
+                    log.warning(f"[ai_tutor/forward] job={job_id} attempt={attempt} 上游 failed: {err_msg[:120]}, fallback 到 stub")
+                    break  # 跳出 inner while → outer while 也退出 → 走 fallback 路径
                 else:
                     sg2 = data.get("scenesGenerated") or data.get("scenes_generated")
                     ts2 = data.get("totalScenes") or data.get("total_scenes")
@@ -671,15 +734,17 @@ def _run_via_aijiangti(job_id: str, job: AiTutorJob) -> None:
         if should_retry:
             attempt += 1
             continue  # 外层 while 重试
-        # 5 分钟内未完成且没触发限流 = 超时
-        if attempt >= max_retries:
-            _set_error(job_id, f"讲解超时 (已重试 {max_retries} 次, 每次 5 分钟)")
-            return
-        attempt += 1
-        continue
-    # 所有 attempt 都因 RPM 限流失败 → fallback 到 stub 占位讲解 (6 节分镜照常显示)
+        # v3.11.31f · 之前 attempt >= max_retries 时 _set_error("讲解超时"),
+        # 学员看到红色错误页; 改为统一走 fallback 到 6 节 stub 占位讲解.
+        # 学员侧体验: 永远看到讲解内容 (要么 aijiangti 真实, 要么 stub 占位), 不会卡错误.
+        log.warning(f"[ai_tutor/forward] job={job_id} attempt={attempt}/{max_retries} 上游未完成 (3min deadline), fallback 到 stub")
+        break  # 直接跳出 outer while → 走 fallback 路径
+    # 所有 attempt 都因 RPM 限流/超时失败 → fallback 到 stub 占位讲解 (6 节分镜照常显示)
     # v3.11.31c · 学员侧体验: 进度条 0%→100% 跑 6 节模板, 不是 "技术错误" 弹窗
-    log.warning(f"[ai_tutor/forward] job={job_id} {max_retries+1} 次尝试均 RPM 限流, fallback 到 stub 占位讲解")
+    # v3.11.31f · 扩到覆盖"上游未在 2min deadline 内完成"的情况
+    # v3.11.31g · deadline 从 2min 调到 3min
+    # v3.11.31h · 扩到覆盖"上游 failed"的情况 (e.g. "No scenes were generated")
+    log.warning(f"[ai_tutor/forward] job={job_id} 上游讲解失败 (RPM 限流 / 3min 超时 / 上游 failed), fallback 到 stub 占位讲解")
     _set_status(
         job_id, "running", step="fallback_stub", progress=92,
         message="⚠️ 上游讲解服务繁忙, 已自动切换到本地讲题模板...",

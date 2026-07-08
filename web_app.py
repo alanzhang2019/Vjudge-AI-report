@@ -148,6 +148,7 @@ from task_store import (
     list_tasks,
     get_stats,
     _get_conn,
+    get_unlock_level,  # v3.12 · 报告锁: 邀请档位计算
     # v3.9.73 · AtCoder 跨平台数据
     atcoder_link_handle,
     atcoder_enqueue_refresh,
@@ -252,7 +253,7 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
 APP_VERSION = "v3.11.25"
-APP_VERSION_BUILD = "20260703_v3p11p31c_load_problem_text_from_problemset_index"
+APP_VERSION_BUILD = "20260705_v3p12_report_lock_v10"
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -5340,26 +5341,25 @@ def _check_24h_rate_limit(luogu_uid: str, exam_type: str, mode: str = "strict",
     except Exception:
         remain_txt = "明天再来生成新报告"
 
-    # v3.11.28 · 限流提示改写: 去掉"UID/限流/冷却"等术语, 用"今天已生成"等口语;
-    #   同时返回 switch_url 让前端 alert 弹窗能直接给「切到另一种报告」按钮,
-    #   避免用户「我 GESP 还没生成, 怎么就限流了」的困惑 (他其实是 NOI-CSP 被限, GESP 没被限).
-    # v3.11.30 · 第二轮简化: 用更短的「今天已生成 + 倒计时 + 立即试试」三段式,
-    #   把"1 份" / "约 X 小时 Y 分钟后才能再生成" 简化成口语「X 小时后再来」
+    # v3.12_report_lock_v5 · 限流文案改写 (用户反馈"看不懂"):
+    #   - 去掉 "NOI-CSP/GESP/限流/名额/24h" 等术语
+    #   - 用"已经生成好啦~"等口语, 加上 emoji 让语气更轻松
+    #   - 时间用"约 X 小时后再来"短格式
+    #   - 切换提示用"换一种报告?点这里试 X 版"代替"现在试试 GESP 备考报告(不占今天名额)"
     if mode == "any":
-        human_label = "今天已生成过报告"
+        human_label = "今天的报告已经生成好啦~"
         switch_hint = ""
         other_exam = None
     else:
+        human_label = "今天的报告已经生成好啦~"
         if exam_type == "gesp":
-            human_label = "今天已生成过 GESP 备考报告"
-            switch_hint = "👉 现在试试 NOI-CSP 测评报告（不占今天名额）"
+            switch_hint = "想换一种报告？点这里试试 NOI-CSP 测评版"
             other_exam = "noi_csp"
         else:
-            human_label = "今天已生成过 NOI-CSP 测评报告"
-            switch_hint = "👉 现在试试 GESP 备考报告（不占今天名额）"
+            switch_hint = "想换一种报告？点这里试试 GESP 备考版"
             other_exam = "gesp"
 
-    # v3.11.30 · 时间用「X 小时后再来」短格式, 不再写「约 X 小时 Y 分钟后才能再生成」(啰嗦)
+    # v3.12_report_lock_v5 · 时间用「约 X 小时后再来」短格式
     remain_h = max(1, (remain_min + 30) // 60) if 'remain_min' in dir() else 24
     if remain_h <= 1:
         time_label = "1 小时内再来"
@@ -5367,7 +5367,11 @@ def _check_24h_rate_limit(luogu_uid: str, exam_type: str, mode: str = "strict",
         time_label = f"约 {remain_h} 小时后再来"
     else:
         time_label = "明天再来"
-    msg = f"⏰ {human_label}\n\n🕐 {time_label}\n\n{switch_hint}".strip()
+    # 三段式: 完成提示 + 等待时间 + 切换提示 (口语化, 让用户一眼能看懂)
+    parts = [f"✅ {human_label}", f"⏰ {time_label}"]
+    if switch_hint:
+        parts.append(f"💡 {switch_hint}")
+    msg = "\n\n".join(parts)
     # 三种返回格式, 按入口渲染能力区分:
     # - JSON (upload-source / upload-zip): 含 switch_url, 前端 alert 给快捷切换按钮
     # - 重定向到 /me/<uid> (generate)
@@ -6252,6 +6256,13 @@ def upload_source_submit():
         _s_id = _get_logged_in_student_id()
         if _s_id:
             update_task(task_id, student_id=_s_id)
+        # v3.12 · 报告锁: 记录邀请人 (from query 或 form)
+        _inviter_short = (request.args.get("invite") or request.form.get("invite") or "").strip()
+        if _inviter_short:
+            try:
+                update_task(task_id, invited_by=_inviter_short)
+            except Exception as e:
+                app.logger.warning(f"[v3.12 /upload-source] set invited_by failed: {e}")
         update_task(
             task_id,
             student_name=form_data["student_name"] or "源码学员",
@@ -6259,6 +6270,46 @@ def upload_source_submit():
             grade=form_data["grade"] or "未知年级",
             retry_form_json=json.dumps(form_data, ensure_ascii=False),
         )
+
+    # v3.12 · 报告锁: 邀请生效, 给邀请人的最新 task +1 (防作弊: 自己/同IP/同UID 不算)
+    _invite_reward = False
+    _invite_reason = ""
+    if _inviter_short and _s_id:
+        try:
+            from task_store import count_valid_invite, get_latest_done_task_for_uid
+            _inviter_student = _admin_students.get_student_by_short_id(_inviter_short) or _admin_students.get_student_by_uid(_inviter_short)
+            if _inviter_student and int(_inviter_student.get("id") or 0) != int(_s_id):
+                _inviter_id = int(_inviter_student["id"])
+                _invitee_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+                _invitee_uid = _luogu_uid
+                is_valid, reason = count_valid_invite(
+                    inviter_student_id=_inviter_id,
+                    invitee_student_id=int(_s_id),
+                    invitee_ip=_invitee_ip,
+                    invitee_luogu_uid=_invitee_uid,
+                )
+                if is_valid:
+                    # 给邀请人最新的一份 done report +1
+                    _inviter_uid = _inviter_student.get("luogu_uid") or _inviter_short
+                    _latest_task = get_latest_done_task_for_uid(
+                        str(_inviter_uid), since_hours=24 * 30, task_type_list=["report_noi_csp", "report_gesp", "report_source_upload"]
+                    )
+                    if _latest_task:
+                        from task_store import increment_invite_count
+                        new_count = increment_invite_count(_latest_task["task_id"])
+                        _invite_reward = True
+                        _invite_reason = f"inviter_task={_latest_task['task_id'][:8]} new_count={new_count}"
+                        app.logger.info(f"[v3.12 /upload-source] 邀请有效! inviter={_inviter_short} task={_latest_task['task_id']} invite_count={new_count}")
+                    else:
+                        _invite_reason = "inviter_no_recent_report"
+                else:
+                    _invite_reason = f"blocked:{reason}"
+                    app.logger.info(f"[v3.12 /upload-source] 邀请被防作弊拦截: {_inviter_short} -> 原因={reason}")
+            else:
+                _invite_reason = "inviter_self_or_not_found"
+        except Exception as e:
+            app.logger.warning(f"[v3.12 /upload-source] 邀请处理异常: {e}")
+            _invite_reason = f"error:{e}"
 
     # 启动后台线程
     thread = threading.Thread(
@@ -6274,6 +6325,7 @@ def upload_source_submit():
     # v3.11.29 · 双返回: 走 fetch 路径 (Accept: application/json) → JSON,
     #   走浏览器原生表单 (无 JS / JS 失败 / 缓存旧版本) → 302 重定向,
     #   避免 JSON 残留在浏览器, 让用户"以为没生成".
+    # v3.12 · 报告锁: 响应里加 invite_reward 让前端弹窗"邀请成功"
     _status_url = url_for("status_page", task_id=task_id)
     _accept = (request.headers.get("Accept") or "").lower()
     if "application/json" in _accept:
@@ -6281,6 +6333,8 @@ def upload_source_submit():
             "ok": True,
             "task_id": task_id,
             "status_url": _status_url,
+            "invite_reward": _invite_reward,
+            "invite_reason": _invite_reason,
         }), 200
     # 原生表单提交: 浏览器自动 follow 302
     from flask import redirect as _redirect
@@ -7046,13 +7100,142 @@ STATUS_HTML = """
         {% elif status == 'done' %}
         <div class="space-y-3">
             {# v3.8 · 用户态报告页：HTML + 海报分享 + 家长订阅版（PDF/Markdown 隐藏到 /admin 后台） #}
+            {# v3.12 阶段 5 · 查看 HTML 报告走代理 /status/<task_id>/report.html, 注入章节锁 #}
             <div class="grid grid-cols-2 gap-3">
-                <a href="{{ html }}" target="_blank" class="app-btn app-btn-primary">🔍 查看 HTML 报告</a>
+                <a href="/status/{{ task_id }}/report.html" target="_blank" class="app-btn app-btn-primary">🔍 查看 HTML 报告</a>
                 <button type="button" onclick="openSharePoster()" class="app-btn app-btn-amber">📤 生成海报分享</button>
             </div>
 
+            {# v3.12 阶段 3 · 报告锁面板: 邀请解锁 + 5档阶梯进度 + 分享按钮 #}
+            {% if invite_count is defined %}
+            <div class="bg-gradient-to-br from-emerald-50 via-white to-amber-50 border-2 border-emerald-200 rounded-2xl p-4 mt-4" id="reportLockPanel">
+                <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-2">
+                        <span class="text-2xl">🔒</span>
+                        <div>
+                            <div class="text-sm font-bold text-gray-800">报告解锁进度</div>
+                            <div class="text-[11px] text-gray-500">每邀请 1 位同学生成报告, 解锁 1 档</div>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-2xl font-extrabold text-emerald-600">{{ invite_count or 0 }}<span class="text-sm text-gray-500 font-normal"> / 5</span></div>
+                        <div class="text-[10px] text-gray-400">已邀请同学</div>
+                    </div>
+                </div>
+                <div class="relative h-3 bg-gray-200 rounded-full overflow-visible my-3">
+                    <div class="h-full rounded-full bg-gradient-to-r from-emerald-400 to-amber-400 transition-all duration-700" style="width: {{ ((invite_count or 0) * 20)|int if (invite_count or 0) <= 5 else 100 }}%;"></div>
+                    <div class="absolute top-0 h-full w-0.5 bg-emerald-700" style="left: 20%;"></div>
+                    <div class="absolute top-0 h-full w-0.5 bg-emerald-700" style="left: 40%;"></div>
+                    <div class="absolute top-0 h-full w-0.5 bg-emerald-700" style="left: 60%;"></div>
+                    <div class="absolute top-0 h-full w-0.5 bg-emerald-700" style="left: 100%;"></div>
+                </div>
+                <div class="grid grid-cols-4 gap-1 text-center text-[10px] mb-3">
+                    <div class="{% if (unlock_level or 0) >= 1 %}text-emerald-700 font-bold{% else %}text-gray-400{% endif %}">1.雷达</div>
+                    <div class="{% if (unlock_level or 0) >= 2 %}text-emerald-700 font-bold{% else %}text-gray-400{% endif %}">2.盲区</div>
+                    <div class="{% if (unlock_level or 0) >= 3 %}text-emerald-700 font-bold{% else %}text-gray-400{% endif %}">3.题单</div>
+                    <div class="{% if (unlock_level or 0) >= 5 %}text-emerald-700 font-bold{% else %}text-gray-400{% endif %}">5.AI讲题</div>
+                </div>
+                {% if (unlock_level or 0) < 5 %}
+                <p class="text-xs text-gray-700 mb-3 text-center">
+                    再邀请 <strong class="text-amber-600">{{ 5 - (invite_count or 0) }}</strong> 位同学生成报告, 解锁
+                    <strong>{% if (unlock_level or 0) < 1 %}综合雷达+性格{% elif (unlock_level or 0) < 2 %}知识点盲区+4棵知识树{% elif (unlock_level or 0) < 3 %}风险诊断+定制题单{% else %}错题清单+AI讲题{% endif %}</strong>
+                </p>
+                {% else %}
+                <p class="text-xs text-emerald-700 font-bold mb-3 text-center">🎉 报告已全部解锁, 享受完整内容</p>
+                {% endif %}
+                <div class="bg-white border border-emerald-200 rounded-lg p-2.5 mb-2">
+                    <p class="text-[11px] text-gray-500 mb-1.5 font-semibold">📤 一键分享给同学 / 家长群</p>
+                    <div class="flex gap-1.5 mb-2">
+                        <input type="text" id="inviteLinkInput" value="{{ invite_share_url or '' }}" readonly
+                               class="flex-1 px-2 py-1.5 text-[11px] font-mono border border-gray-300 rounded bg-gray-50 focus:outline-none focus:border-emerald-500"
+                               onclick="this.select()">
+                        <button type="button" onclick="copyInviteLink()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold rounded whitespace-nowrap">
+                            📋 复制
+                        </button>
+                    </div>
+                    <div class="grid grid-cols-2 gap-1.5">
+                        <button type="button" onclick="showLockPoster()" class="px-2 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-bold rounded">
+                            🖼 生成海报
+                        </button>
+                        <button type="button" onclick="shareToWechat()" class="px-2 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-[11px] font-bold rounded">
+                            💬 微信分享
+                        </button>
+                    </div>
+                </div>
+                <p class="text-[10px] text-gray-400 text-center">💡 同学通过你的链接生成报告后, 你的报告就解锁 1 档</p>
+            </div>
+            {# 报告锁海报模态框 #}
+            <div id="lockPosterModal" class="hidden fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
+                 onclick="if(event.target===this) document.getElementById('lockPosterModal').classList.add('hidden')">
+                <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-5 relative">
+                    <button type="button" onclick="document.getElementById('lockPosterModal').classList.add('hidden')"
+                            class="absolute top-3 right-3 w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 flex items-center justify-center text-lg">×</button>
+                    <h3 class="text-lg font-bold text-gray-800 mb-1 text-center">📤 报告锁邀请海报</h3>
+                    <p class="text-xs text-gray-500 text-center mb-3">长按保存图片, 发到家长群 / 朋友圈</p>
+                    <div class="flex justify-center bg-gray-50 border border-gray-200 rounded-lg p-2 mb-3 min-h-[300px] items-center relative">
+                        <div id="lockPosterLoading" class="text-gray-400 text-sm">⏳ 正在生成海报...</div>
+                        <img id="lockPosterImg" src="" alt="报告锁海报" class="max-w-full h-auto rounded shadow" style="display:none"
+                             onload="document.getElementById('lockPosterLoading').style.display='none'; this.style.display=''"
+                             onerror="document.getElementById('lockPosterLoading').innerText='❌ 海报生成失败, 请重试'">
+                    </div>
+                    <a id="lockPosterDownload" href="" download="report_lock_poster.png" class="block w-full text-center px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg">
+                        💾 保存图片
+                    </a>
+                </div>
+            </div>
+            <script>
+            // v3.12 阶段 3 · 报告锁 JS · 复制链接 / 显示海报 / 微信分享
+            function copyInviteLink(){
+                var _input = document.getElementById('inviteLinkInput');
+                if (!_input) return;
+                var _val = _input.value || '';
+                if (!_val) { alert('邀请链接未生成, 请稍后再试'; return; }
+                try {
+                    _input.select();
+                    _input.setSelectionRange(0, 99999);
+                    var ok = document.execCommand('copy');
+                    if (ok) { alert('✅ 邀请链接已复制!\\n\\n发到家长群/朋友圈, 同学通过链接生成报告, 你就解锁 1 档!'; }
+                    else { alert('复制失败, 请手动复制:\\n' + _val; }
+                } catch (e) {
+                    // 现代浏览器 fallback
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(_val).then(function(){ alert('✅ 已复制!'; }).catch(function(){ alert('请手动复制:\\n' + _val; });
+                    } else { alert('请手动复制:\\n' + _val; }
+                }
+            }
+            function showLockPoster(){
+                var m = document.getElementById('lockPosterModal');
+                var img = document.getElementById('lockPosterImg');
+                var loading = document.getElementById('lockPosterLoading');
+                var dl = document.getElementById('lockPosterDownload');
+                if (!m) return;
+                loading.innerText = '⏳ 正在生成海报...';
+                loading.style.display = '';
+                img.style.display = 'none';
+                m.classList.remove('hidden');
+                var _task_id = ''{{ task_id }}';
+                var url = '/api/report-lock-poster?task_id=' + encodeURIComponent(_task_id) + '&t=' + Date.now();
+                img.src = url;
+                dl.href = url;
+            }
+            function shareToWechat(){
+                var _input = document.getElementById('inviteLinkInput');
+                var _val = (_input && _input.value) || '';
+                if (!_val) { alert('邀请链接未生成'; return; }
+                // 微信内置浏览器可直接复制 + 提示
+                if (navigator.userAgent.indexOf('MicroMessenger') >= 0) {
+                    copyInviteLink();
+                    alert('💡 微信内长按链接, 可直接发送给朋友或朋友圈';
+                } else {
+                    copyInviteLink();
+                    alert('💡 链接已复制, 打开微信粘贴发送给朋友\\n或生成海报发到家长群 / 朋友圈';
+                }
+            }
+            </script>
+            {% endif %}
+
             {# v3.11.18 · 兜底: sub_id 来自 view 层 (luogu_uid/html 路径/session 三重兜底) #}
-            <a href="{% if sub_id %}/me/{{ sub_id }}/parent-subscribe{% else %}/me{% endif %}"
+            <a href="{% if sub_id %}/me/'{{ sub_id }}/parent-subscribe{% else %}/me{% endif %}"
                class="block bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 text-white text-center rounded-lg py-3 px-4 font-bold shadow-md hover:shadow-lg transition">
                 📨 升级家长订阅版 · 添加客服微信获得邀请码
             </a>
@@ -7156,7 +7339,7 @@ STATUS_HTML = """
                 // 1) 预加载海报 PNG（matplotlib 现场渲染，可能 5-15s）
                 // v3.9.67 · GESP 报告传 exam_type=gesp, NOI/CSP 报告传 exam_type=noi_csp
                 // v3.11.19 · 用 task_id 新路由 /api/task-poster/<task_id>.png, 服务端反推学员 (老 task luogu_uid 空也能渲染)
-                var _exam_type = '{{ "gesp" if task_type == "report_gesp" else "noi_csp" }}';
+                var _exam_type = ''{{ "gesp" if task_type == "report_gesp" else "noi_csp" }}';
                 var _task_id = '{{ task_id }}';
                 var url = '/api/task-poster/' + encodeURIComponent(_task_id) + '.png?exam_type=' + encodeURIComponent(_exam_type) + '&t=' + Date.now();
                 var pre=new Image();
@@ -7222,7 +7405,7 @@ STATUS_HTML = """
         })();
         </script>
         {% elif status == 'error' %}
-        <a href="{{ retry_url }}" class="app-btn app-btn-primary mt-4">🔁 返回表单（已自动回填）</a>
+        <a href="'{{ retry_url }}" class="app-btn app-btn-primary mt-4">🔁 返回表单（已自动回填）</a>
         {% if me_url %}
         {# 错误状态也用 POST 表单，确保点击直接重试 #}
         <form method="POST" action="/me/{{ me_url.split('/')[-1] }}/start-parent-subscribe" class="block mt-2">
@@ -7273,7 +7456,12 @@ LIST_REPORTS_HTML = """
 def status_page(task_id):
     if not is_generation_task_active(task_id):
         reconcile_stale_generation_tasks()
-    task = get_task(task_id) or {"status": "unknown", "message": "任务不存在"}
+    task = get_task(task_id)
+    # v3.12_report_lock_v5 · task 不存在 (被 admin 删除) 直接 404 而非走模板 500
+    if not task:
+        app.logger.info(f"[status_page] task_id={task_id} 不存在, 返回 404")
+        return "任务不存在或已被删除", 404
+    task = task or {"status": "unknown", "message": "任务不存在"}
     pdf_url = str(task.get("pdf", "") or "")
     # v3.5.2 · 统一入口生成的报告支持跳回 /me/<uid>（3 版本报告）
     luogu_uid = str(request.args.get("luogu_uid", "") or task.get("luogu_uid", "") or "").strip()
@@ -7312,6 +7500,26 @@ def status_page(task_id):
     me_url_full = me_url  # 别名, 模板里用 me_url.split('/')[-1] 取 id
     # v3.11.18 · 兜底学员 ID (luogu_uid / me_url 都空时, 模板里跳转 /me 主页而非 /me// 404)
     sub_id = luogu_uid or share_id or ""
+
+    # v3.12_report_lock_v9 · 优先查询学员 short_id, 用于邀请链接 (避免泄露洛谷 UID)
+    _short_id = ""
+    try:
+        # 1) 优先 task.student_id → students.short_id (db 里直接查, 不依赖 session)
+        _task_sid = task.get("student_id")
+        if _task_sid:
+            from task_store import _get_conn as _gc_v9
+            _cv9 = _gc_v9()
+            try:
+                _r = _cv9.execute("SELECT short_id FROM students WHERE id=?", (_task_sid,)).fetchone()
+                if _r and _r["short_id"]:
+                    _short_id = str(_r["short_id"]).strip()
+            finally:
+                _cv9.close()
+        # 2) 回退: session.student_short_id
+        if not _short_id:
+            _short_id = str(session.get("student_short_id") or "").strip()
+    except Exception:
+        _short_id = ""
 
     # v3.9.6 · 智能门控：检查该 UID 是否已生成过 parent_subscribe.html
     # 如果已生成 → 状态页直接显示"查看家长订阅版"，不再每次让家长重输邀请码
@@ -7358,44 +7566,288 @@ def status_page(task_id):
             app.logger.debug(f"[status_page] _is_parent_subscribed check failed: {_e}")
             has_parent_sub_db = False
 
+    # v3.12_report_lock_v9 · 邀请链接优先用 short_id (学员表查), 不再用 luogu_uid
+    #   hard constraint: 海报 QR 扫码结果不得显示用户洛谷 UID
+    #   luogu_uid/sub_id 都是 task.luogu_uid = "2188303" 这种泄露, 改用学员表的 short_id
+    #   没有 short_id (老任务无 student_id) 且 luogu_uid 也空 → 回退 task_id 短码
+    if _short_id:
+        _invite_token = _short_id
+    elif not luogu_uid:
+        _invite_token = "task_" + task_id[:8]
+    else:
+        _invite_token = ""
+
+    # ---- 报告锁: 渲染模板 ----
     return render_template_string(
         STATUS_HTML,
-        status=task.get("status", "unknown"),
         message=task.get("message", ""),
-        stage=str(task.get("stage", "") or ""),
+        status=task.get("status", "unknown"),
+        task_id=task_id,
         task_type=str(task.get("task_type", "") or ""),
+        stage=str(task.get("stage", "") or ""),
+        html=task.get("html", ""),
+        pdf_url=pdf_url,
+        md=task.get("md", ""),
+        ps_html=task.get("ps_html", ""),
+        ps_md=task.get("ps_md", ""),
+        ai_progress=int(task.get("ai_progress", 0) or 0),
+        ai_elapsed_seconds=int(task.get("ai_elapsed_seconds", 0) or 0),
+        solved_count=int(task.get("solved_count", 0) or 0),
+        failed_count=int(task.get("failed_count", 0) or 0),
+        eval_time=task.get("eval_time", "") or "",
+        retry_form_json=task.get("retry_form_json", "") or "",
         source_code_success=int(task.get("source_code_success", 0) or 0),
         source_code_total=int(task.get("source_code_total", 0) or 0),
         tag_fetch_success=int(task.get("tag_fetch_success", 0) or 0),
         tag_fetch_total=int(task.get("tag_fetch_total", 0) or 0),
-        ai_progress=int(task.get("ai_progress", 0) or 0),
-        ai_elapsed_seconds=int(task.get("ai_elapsed_seconds", 0) or 0),
-        # v3.9.11 · 401 错误标记：让 status_page 顶部显示专项提示
         is_401_api_key=_detect_401_invalid_api_key(task),
-        html=task.get("html", ""),
-        pdf=_download_report_url(pdf_url),
-        md=task.get("md", ""),
-        ps_html=task.get("ps_html", ""),
-        ps_md=task.get("ps_md", ""),
-        retry_url=url_for("retry_task", task_id=task_id),
-        me_url=me_url,
-        luogu_uid=luogu_uid,
-        # v3.11.12 · 海报 URL 用的 id (与 me_url 同源, luogu_uid 空时安全)
-        share_id=share_id,
-        # v3.11.18 · 兜底学员 ID, 模板里所有跳转链接都基于它, 避免 /me// 404
-        sub_id=sub_id,
-        # v3.9.6 · 新增：智能门控用
         has_parent_sub_html=has_parent_sub_html,
         ps_html_url=ps_html_url,
-        # v3.9.41 · 新增：DB 层订阅判断（HTML 未生成也能识别已兑换）
         has_parent_sub_db=has_parent_sub_db,
-        # v3.11.19e fix · 模板里 {{ task_id }} (posterDownloadBtn / 海报下载 JS) 必须传,
-        #   否则渲染空字符串 → /api/task-poster/.png?exam_type=... → 404
-        task_id=task_id,
+        # v3.11.19 fix · /me/<uid> 用 luogu_uid (兼容老学员), 不一定等于 short_id
+        luogu_uid=luogu_uid,
+        sub_id=sub_id,
+        share_id=share_id,
+        me_url=me_url,
+        me_url_full=me_url_full,
+        retry_url=url_for("retry_task", task_id=task_id),
+        # v3.12 · 报告锁面板
+        invite_count=int(task.get("invite_count", 0) or 0),
+        unlock_level=get_unlock_level(int(task.get("invite_count", 0) or 0)),
+        invite_share_url=f"https://oi.aijiangti.cn/upload-source?invite={_invite_token}&task={task_id}" if _invite_token else "",
     )
 
 
-@app.route("/retry/<task_id>")
+# ---- v3.12 阶段 5 · 章节锁代理: /status/<task_id>/report.html ----
+@app.route("/status/<task_id>/report.html", methods=["GET"])
+@app.route("/status/<task_id>/report.html", methods=["GET"], endpoint="status_report_html")
+def status_report_html(task_id: str):
+    """v3.12 阶段 5 · 报告锁代理路由 (v3.12_report_lock_v4 升级)
+    学员点『查看 HTML 报告』实际访问这里, 而非直链 /reports/.../report.html.
+
+    v3 旧版 (v3_report_lock_v3):
+      - 只注入 CSS 隐藏 + JS 锁遮罩; 浏览器拿到的还是完整 HTML,
+        右键查看源代码 / F12 / Ctrl+S 都能看全. (假锁)
+
+    v4 新版 (v3_report_lock_v4):
+      - 服务端按 unlock_level 把超档章节从 HTML 字符串里**直接删除**,
+        浏览器物理上拿不到被锁章节的内容.
+      - 章节定位用稳定关键词 (不依赖章节号, 避免 LLM 章节号飘移).
+      - 客户端仍注入强样式占位块 + 进度条, 保证视觉体验.
+    """
+    import re as _re_lock
+    task = get_task(task_id) or {}
+    if task.get("status") != "done":
+        return "报告未完成或不存在", 404
+    # 1) 拿原 report.html 路径
+    html_url = str(task.get("html") or "").strip()
+    if not html_url:
+        return "报告路径缺失", 404
+    if html_url.startswith("/"):
+        html_url = html_url[1:]
+    # v3.12_report_lock_v5 · 去掉 query string (?v=...), 否则路径找不到文件
+    if "?" in html_url:
+        html_url = html_url.split("?", 1)[0]
+    try:
+        from pathlib import Path as _P3
+        file_path = _P3(__file__).parent / html_url
+        if not file_path.exists():
+            return f"文件不存在: {html_url}", 404
+        # v3.12 阶段 5 · 限制最大读取 2MB, 防止异常文件把容器打爆
+        raw_bytes = file_path.read_bytes()[: 2 * 1024 * 1024]
+        raw_html = raw_bytes.decode("utf-8", errors="replace")
+    except Exception as _e:
+        app.logger.exception(f"[status_report_html] 读文件失败 task_id={task_id}: {_e}")
+        return f"读取失败: {_e}", 500
+    # 2) 计算 lock 状态
+    invite_count = int(task.get("invite_count", 0) or 0)
+    unlock_level = get_unlock_level(invite_count)
+    # v3.12_report_lock_v9 · 邀请链接优先 short_id, 不再泄露洛谷 UID
+    _sub_id = ""
+    try:
+        _task_sid_v9 = task.get("student_id")
+        if _task_sid_v9:
+            from task_store import _get_conn as _gc_v9b
+            _cv9b = _gc_v9b()
+            try:
+                _r2 = _cv9b.execute("SELECT short_id FROM students WHERE id=?", (_task_sid_v9,)).fetchone()
+                if _r2 and _r2["short_id"]:
+                    _sub_id = str(_r2["short_id"]).strip()
+            finally:
+                _cv9b.close()
+    except Exception:
+        pass
+    sub_id = _sub_id or (f"task_{task_id[:8]}" if not str(task.get("luogu_uid") or "").strip() else "")
+    invite_url = (
+        f"https://oi.aijiangti.cn/upload-source?invite={sub_id}&task={task_id}"
+        if sub_id
+        else f"https://oi.aijiangti.cn/upload-source?invite=task_{task_id[:8]}"
+    )
+    import json as _json
+    lock_config = _json.dumps({
+        "invite_count": invite_count,
+        "unlock_level": unlock_level,
+        "invite_url": invite_url,
+        "task_id": task_id,
+        "unlocked": unlock_level >= 5,
+    }, ensure_ascii=False)
+
+    # 3) v3.12_report_lock_v4 · 服务端 HTML 裁剪
+    #    章节定位: 用稳定关键词匹配 <h1/h2/h3>...关键词...</h1/h2/h3> 标签,
+    #    不依赖章节号 (避免 LLM 章节号飘移: 有的报告 1~7, 有的 1~10).
+    #    req_level: 999 = 永远不锁 (公共章节)
+    SECTION_PATTERNS_V4 = [
+        # (关键词, req_level, 锁时是否裁剪)
+        ("核心数据概览", 0, False),          # 永远解锁 (公共概览)
+        ("六维能力雷达表与诊断", 1, True),     # 邀请 1 人解锁
+        ("考纲精准定级", 2, True),
+        ("风险诊断与训练闭环", 3, True),
+        ("代码质量与工程习惯", 999, False),   # 不锁 (免费章节)
+        ("定制训练题单", 3, True),
+        ("未通过题目专属题解", 5, True),     # 邀请 5 人解锁
+    ]
+    trimmed_html, locked_keywords = _server_side_trim_report(
+        raw_html, SECTION_PATTERNS_V4, unlock_level, invite_url
+    )
+    raw_html = trimmed_html
+    app.logger.info(
+        f"[status_report_html] task_id={task_id} invite_count={invite_count} "
+        f"unlock_level={unlock_level} locked={locked_keywords}"
+    )
+
+    # 4) 注入 CSS (服务端占位块 + 进度条)
+    inject_css = """
+<style id="report-lock-css">
+.server-locked {margin: 2rem auto; padding: 3rem 2rem; max-width: 720px;
+  background: linear-gradient(135deg, #ECFDF5 0%, #ffffff 100%);
+  border: 2px dashed #10B981; border-radius: 1rem; text-align: center;
+  font-family: system-ui, -apple-system, sans-serif;}
+.server-locked-icon {font-size: 64px; line-height: 1; margin-bottom: 1rem;
+  filter: drop-shadow(0 4px 8px rgba(16,185,129,.3));}
+.server-locked-title {font-size: 22px; font-weight: bold; color: #047857; margin-bottom: 0.5rem;}
+.server-locked-sub   {font-size: 14px; color: #6B7280; margin-bottom: 1.2rem; line-height: 1.6;}
+.server-locked-btn   {display: inline-block; padding: 0.7rem 1.6rem; background: #10B981; color: white;
+  border-radius: 9999px; font-weight: bold; text-decoration: none; font-size: 15px;
+  box-shadow: 0 4px 12px rgba(16,185,129,.4); transition: background .2s;}
+.server-locked-btn:hover {background: #059669;}
+.lock-progress-bar {position: sticky; top: 0; z-index: 50; background: #ECFDF5;
+  border-bottom: 2px solid #10B981; padding: 12px 16px; text-align: center;
+  font-family: system-ui, -apple-system, sans-serif; font-size: 14px;}
+.lock-progress-bar a {color: #10B981; font-weight: bold; text-decoration: underline; margin-left: 8px;}
+</style>
+"""
+    # 5) 注入 JS (顶部进度条; 服务端已裁剪, 这里只做提示)
+    inject_js = f"""
+<script id="report-lock-js">
+window.__LOCK_CONFIG__ = {lock_config};
+(function() {{
+  var cfg = window.__LOCK_CONFIG__;
+  if (!cfg) return;
+  // 顶部: 进度条小卡片
+  if (!cfg.unlocked && cfg.invite_count < 5) {{
+    var bar = document.createElement('div');
+    bar.className = 'lock-progress-bar';
+    bar.innerHTML = '🔒 当前报告已邀请 <b style="color:#047857;font-size:16px;">' + cfg.invite_count + '</b>/5 位同学 · 解锁档位 <b style="color:#047857;">' + cfg.unlock_level + '/5</b>'
+      + (cfg.unlock_level < 5 ? ' · <a href="' + cfg.invite_url + '" target="_blank">📤 立即分享 →</a>' : '');
+    document.body.insertBefore(bar, document.body.firstChild);
+  }}
+}})();
+</script>
+"""
+    # 6) 注入 (在 </head> 之前注入 CSS, 在 </body> 之前注入 JS)
+    if "</head>" in raw_html:
+        raw_html = raw_html.replace("</head>", inject_css + "\n</head>", 1)
+    else:
+        raw_html = _re_lock.sub(r"(<html[^>]*>)", r"\1" + inject_css, raw_html, count=1, flags=_re_lock.IGNORECASE)
+    if "</body>" in raw_html:
+        raw_html = raw_html.replace("</body>", inject_js + "\n</body>", 1)
+    else:
+        raw_html = raw_html + "\n" + inject_js
+    return Response(
+        raw_html,
+        mimetype="text/html",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+    )
+
+
+def _server_side_trim_report(raw_html, section_patterns, unlock_level, invite_url):
+    """v3.12_report_lock_v4 server-side trim. Returns (trimmed_html, locked_kw_list).
+
+    Two-step matching with header-content validation:
+      1. find kw in html (case-insensitive)
+      2. walk back to nearest <h[1-3]> start
+      3. verify kw is INSIDE the h tag (between h_open and h_close),
+         not in TOC <li> after the h
+      4. walk forward from h_close to find next <h[1-3]> (section end)
+    Handles <h3><strong>...</strong></h3>, emoji prefixes, TOC <li> skips.
+    """
+    import re as _re_t
+    if not raw_html or not section_patterns:
+        return raw_html, []
+    H_TAG_RE = _re_t.compile(r"<h[1-3][^>]*>", _re_t.IGNORECASE)
+    H_END_RE = _re_t.compile(r"</h[1-3]>", _re_t.IGNORECASE)
+
+    def find_section_range(kw):
+        kw_esc = _re_t.escape(kw)
+        for m in _re_t.finditer(kw_esc, raw_html, _re_t.IGNORECASE):
+            kw_pos = m.start()
+            # 1) 向后逐个 <h> 起点, 取最后一个 = 紧邻 kw 的 h 起点
+            h_match = None
+            h_open_end = 0
+            for tag_m in H_TAG_RE.finditer(raw_html[:kw_pos]):
+                h_match = tag_m
+                h_open_end = tag_m.end()
+            if h_match is None:
+                continue
+            # 2) 验证 kw 确实在该 h 标签内容里 (kw_pos 在 h_close 之前)
+            h_close_match = H_END_RE.search(raw_html, h_open_end)
+            if h_close_match is None:
+                continue
+            h_close_abs = h_close_match.start()
+            if kw_pos >= h_close_abs:
+                # kw 在 h_close 之后, 实际在 <li> 或正文, 跳过
+                continue
+            h_start = h_match.start()
+            # 3) 从 h_close 向后找下一个 <h[1-3]> 起点 (下一章)
+            h_end_match = H_TAG_RE.search(raw_html, h_close_abs)
+            h_end = len(raw_html) if h_end_match is None else h_end_match.start()
+            return (h_start, h_end)
+        return None
+
+    positions = []
+    for kw, req, lockable in section_patterns:
+        rng = find_section_range(kw)
+        if rng is not None:
+            h_start, h_end = rng
+            positions.append({"kw": kw, "req": req, "lockable": lockable, "start": h_start, "end": h_end})
+    if not positions:
+        return raw_html, []
+    positions.sort(key=lambda p: p["start"])
+    n = len(positions)
+    parts = [raw_html[: positions[0]["start"]]]
+    locked_keywords = []
+    for i, p in enumerate(positions):
+        start = p["start"]
+        end = positions[i + 1]["start"] if i + 1 < n else len(raw_html)
+        if not p["lockable"] or p["req"] <= unlock_level:
+            parts.append(raw_html[start:end])
+        else:
+            req = p["req"]
+            LT = chr(60)
+            GT = chr(62)
+            SL = LT + 'div class="server-locked" data-kw="' + p["kw"] + '" data-req="' + str(req) + '"' + GT
+            SL += LT + 'div class="server-locked-icon"' + GT + '\U0001f512' + LT + '/div' + GT
+            SL += LT + 'div class="server-locked-title"' + GT + '本章节已锁定' + LT + '/div' + GT
+            SL += LT + 'div class="server-locked-sub"' + GT + '邀请 ' + LT + 'b' + GT + str(req) + LT + '/b' + GT + ' 位同学生成报告, 解锁本章完整内容' + LT + 'br' + GT
+            SL += '每邀请 1 位同学, 解锁 1 档 · 共 5 档' + LT + '/div' + GT
+            SL += LT + 'a class="server-locked-btn" href="' + invite_url + '" target="_blank"' + GT + '\U0001f4e4 立即分享邀请' + LT + '/a' + GT
+            SL += LT + '/div' + GT
+            parts.append(SL)
+            locked_keywords.append(p["kw"])
+    return "".join(parts), locked_keywords
+
+
+@app.route("/retry/<task_id>", methods=["GET"])
 def retry_task(task_id):
     """v3.9.10 · 报告生成失败的重试入口（保留缓存，直接回到表单页）
 
@@ -8466,7 +8918,34 @@ def admin_delete_report(task_id: str):
         return redirect(url_for("admin_page", notice=f"DB 删除失败: {_e}", notice_type="error"))
     if not db_deleted and not files_deleted:
         return redirect(url_for("admin_page", notice=f"任务 {task_id} 不存在", notice_type="error"))
-    msg = f"已删除任务 {task_id[:8]}...（DB 1 条 + 磁盘 {files_deleted} 个文件）。该学员 24h 限流已解除。"
+    # v3.12_report_lock_v5 · 真正解除 24h 限流: 不仅删本任务, 还清掉该 uid 同 exam_type 24h 内的其他任务
+    #   修复: 用户报告"删了报告但仍被限流" —— 因为他们可能有多份历史报告, 删一份不够
+    extra_cleared = 0
+    try:
+        if task and task.get("luogu_uid"):
+            _uid = str(task.get("luogu_uid") or "").strip()
+            _tt = str(task.get("task_type") or "").strip()
+            if _uid and _tt:
+                from task_store import _get_conn as _gc
+                _c = _gc()
+                try:
+                    _sql = (
+                        "SELECT task_id FROM tasks WHERE luogu_uid=? AND task_type=? "
+                        "AND task_id != ? AND created_at >= datetime('now', '-1 day') "
+                        "AND status IN ('done', 'partial', 'running', 'queued', 'error')"
+                    )
+                    _rows = _c.execute(_sql, (_uid, _tt, task_id)).fetchall()
+                    for _r in _rows:
+                        _c.execute("DELETE FROM tasks WHERE task_id=?", (_r["task_id"],))
+                        extra_cleared += 1
+                    if extra_cleared:
+                        _c.commit()
+                        app.logger.info(f"[admin_delete_report] uid={_uid} tt={_tt} 额外清掉 {extra_cleared} 条 24h 内同类型任务")
+                finally:
+                    _c.close()
+    except Exception as _e:
+        app.logger.warning(f"[admin_delete_report] 清理同 uid 24h 任务失败: {_e}")
+    msg = f"已删除任务 {task_id[:8]}...（DB 1 条 + 磁盘 {files_deleted} 个文件{(' + 同 uid 24h 任务 ' + str(extra_cleared) + ' 条') if extra_cleared else ''}）。该学员 24h 限流已解除。"
     return redirect(url_for("admin_page", notice=msg, notice_type="success"))
 
 
@@ -9188,6 +9667,64 @@ def _collect_report_data(student: dict) -> dict:
     }
 
 
+def _resolve_luogu_uid_by_short_id(short_id: str, student: dict | None = None) -> str:
+    """v3.11.31d · 学员 luogu_uid 三层兜底 (学员表 → tasks 表 → 空串)
+
+    背景: v3.10.0 邮箱注册改造后, students.luogu_uid 改可空 (老学员保留, 新学员不填).
+          但 form 提交时仍会写 tasks.luogu_uid (例: "Dlx_xlD"), 学员表里却是空.
+          报告 dir 里的 luogu_uid.txt 写的是 tasks.luogu_uid, 不是 students.luogu_uid.
+    结果: "我的报告" 卡片 (_find_latest_report_dir_by_type) 有 tasks 兜底能命中,
+          "历史报告" 列表 (_list_student_report_htmls) 之前没这个兜底, 始终空.
+
+    Args:
+        short_id: 学员 8 位 short_id (URL /me/<short_id> 入参)
+        student:   可选, 已查好的学员 dict (省一次 SQL)
+
+    Returns:
+        luogu_uid 字符串; 找不到时返回空串
+    """
+    short_id = str(short_id or "").strip()
+    if not short_id:
+        return ""
+    try:
+        # 1) 学员表里有 → 直接用
+        if student is None:
+            try:
+                student = _admin_students.get_student_by_short_id(short_id) or _admin_students.get_student_by_uid(short_id)
+            except Exception:
+                student = None
+        if student:
+            _v = str(student.get("luogu_uid") or "").strip()
+            if _v:
+                return _v
+            # 2) 学员表 luogu_uid 空 (邮箱注册场景), 但有 id → 从 tasks 表反查
+            _sid = student.get("id")
+            if _sid:
+                try:
+                    from task_store import _get_conn as _tconn_rl
+                    _rl_conn = _tconn_rl()
+                    try:
+                        _row = _rl_conn.execute(
+                            "SELECT luogu_uid FROM tasks WHERE student_id = ? AND luogu_uid != '' "
+                            "ORDER BY created_at DESC LIMIT 1",
+                            (int(_sid),),
+                        ).fetchone()
+                        if _row and _row["luogu_uid"]:
+                            _fb_uid = str(_row["luogu_uid"]).strip()
+                            app.logger.info(
+                                f"[v3.11.31d resolve] 邮箱学员 fallback luogu_uid={_fb_uid} "
+                                f"from tasks.student_id={_sid} (short_id={short_id})"
+                            )
+                            return _fb_uid
+                    finally:
+                        _rl_conn.close()
+                except Exception as _e:
+                    app.logger.warning(f"[v3.11.31d resolve] tasks fallback 失败: {_e}")
+    except Exception as _e:
+        app.logger.warning(f"[v3.11.31d resolve] outer fail: {_e}")
+    return ""
+
+
 def _list_student_report_htmls(uid_or_short: str, student_name: str = "", limit: int = 10) -> list[dict]:
     """v3.8 · 列出学员最近 N 份 HTML 报告（按 mtime 倒序）
 
@@ -9217,10 +9754,10 @@ def _list_student_report_htmls(uid_or_short: str, student_name: str = "", limit:
             _short_id = uid_str
             try:
                 _stu = _admin_students.get_student_by_short_id(uid_str) or _admin_students.get_student_by_uid(uid_str)
-                if _stu:
-                    _luogu_uid = str(_stu.get("luogu_uid") or "").strip()
             except Exception:
-                pass
+                _stu = None
+            # v3.11.31d · 学员表 luogu_uid 拿不到时, 复用视图层 tasks 兜底 (学员表空 / 邮箱注册场景)
+            _luogu_uid = _resolve_luogu_uid_by_short_id(uid_str, _stu)
         for d in reports_root.iterdir():
             if not d.is_dir():
                 continue
@@ -11376,10 +11913,11 @@ GENERATE_FORM_HTML = """
     {# v3.11.28 · info 区分两种: rate_limited=True(限流, 用红/黄) vs False(登录成功, 用绿).
        旧版无论啥 info 都套绿底"登录成功", 限流信息也跟着误显成"成功" → 用户看不懂. #}
     {% if rate_limited %}
+    {# v3.12_report_lock_v6 · 限流标题改用 v6 友好文案, 避免 "今天已生成过报告" 让用户一头雾水 #}
     <div class="bg-amber-50 border-2 border-amber-400 rounded-lg p-4 text-sm text-amber-900 shadow-sm">
         <p class="font-bold text-base flex items-center gap-2">
-            <span class="text-2xl">⏰</span>
-            <span>今天已生成过报告</span>
+            <span class="text-2xl">✅</span>
+            <span>今天的报告已经生成好啦~</span>
         </p>
         <pre class="mt-2 leading-relaxed whitespace-pre-wrap font-sans">{{ info }}</pre>
         {% if info_me_url %}
@@ -14482,6 +15020,29 @@ def api_ai_tutor_create_job():
             luogu_uid = str(session.get("student_uid") or session.get("student_short_id") or "").strip()
         except Exception:
             pass
+    job_id = _ait.find_existing_succeeded_job(
+        problem_id=problem_id,
+        title=title,
+        source=source,
+        luogu_uid=luogu_uid,
+    )
+    if job_id:
+        # v3.11.31i · 复用已有 succeeded job, 节省 LLM token
+        app.logger.info(
+            f"[v3.11.31i /api/ai-tutor/jobs] REUSE existing job={job_id} "
+            f"pid={problem_id} title={title[:30]} uid={luogu_uid}"
+        )
+        poll_url = url_for("api_ai_tutor_get_job", job_id=job_id)
+        return jsonify({
+            "jobId": job_id,
+            "status": "succeeded",
+            "step": "done",
+            "message": "已复用之前的讲解结果 (不重复消耗 token)",
+            "pollUrl": poll_url,
+            "pollIntervalMs": _ait.AI_TUTOR_POLL_INTERVAL_MS,
+            "reused": True,
+        }), 200
+
     job_id = _ait.create_job(
         requirement=requirement,
         problem_id=problem_id,
@@ -15115,27 +15676,9 @@ def student_me(short_id: str):
     #   修复: 从 tasks 表查该 student_id 关联任务最近一条的 luogu_uid, 优先用.
     #   例: u68idmnw (邮箱注册, students.luogu_uid=None) → tasks 里查到 luogu_uid=114545
     #     → _find_latest_report_dir("114545") 命中侧车文件 → 报告正常显示.
-    _student_luogu_uid = (student.get("luogu_uid") or "").strip() if student else ""
-    if not _student_luogu_uid and student and student.get("id"):
-        try:
-            from task_store import _get_conn as _tconn_me
-            _me_conn = _tconn_me()
-            try:
-                _row = _me_conn.execute(
-                    "SELECT luogu_uid FROM tasks WHERE student_id = ? AND luogu_uid != '' "
-                    "ORDER BY created_at DESC LIMIT 1",
-                    (int(student["id"]),),
-                ).fetchone()
-                if _row and _row["luogu_uid"]:
-                    _student_luogu_uid = str(_row["luogu_uid"]).strip()
-                    app.logger.info(
-                        f"[v3.11.30 /me] u68idmnw-like 邮箱学员 fallback luogu_uid={_student_luogu_uid} "
-                        f"from tasks.student_id={student['id']}"
-                    )
-            finally:
-                _me_conn.close()
-        except Exception as _e:
-            app.logger.warning(f"[v3.11.30 /me] tasks fallback 失败: {_e}")
+    # v3.11.31d · 抽成 _resolve_luogu_uid_by_short_id helper,
+    # 让 _list_student_report_htmls 等其他扫描 reports/ 的函数也能复用 tasks 兜底
+    _student_luogu_uid = _resolve_luogu_uid_by_short_id(str(short_id).strip(), student)
     _lookup_uid = _student_luogu_uid or str(short_id).strip()
     _lookup_name = (student.get("real_name") or "") if student else ""
     try:
@@ -17859,6 +18402,226 @@ def task_poster_png(task_id: str):
     return Response(png_bytes, mimetype="image/png", headers={
         "Content-Disposition": f'inline; filename="share-card-{_q_exam_type}-{_student_id}.png"',
         "Cache-Control": "public, max-age=600",
+    })
+
+
+# ---- v3.12 阶段 4 · 报告锁海报 API ----
+def _render_report_lock_poster_png(
+    invite_count: int,
+    unlock_level: int,
+    invite_url: str,
+    student_name: str = "同学",
+    student_short_id: str = "",
+) -> bytes:
+    """v3.12 · 报告锁邀请海报 · 720x1280 (朋友圈比例)
+    内容:
+      - 顶部: app 标题 + 副标
+      - 中部: 当前档位 + 进度条 + "再邀请 N 位同学解锁"
+      - 底部: 学员昵称(masked) + 二维码 + 短 ID
+    """
+    import io
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import FancyBboxPatch
+
+    # 中文字体
+    plt.rcParams["font.sans-serif"] = [
+        "Microsoft YaHei", "SimHei", "SimSun",
+        "WenQuanYi Micro Hei", "WenQuanYi Zen Hei",
+        "Noto Sans CJK SC", "Noto Sans CJK JP",
+        "Source Han Sans SC", "PingFang SC",
+        "DejaVu Sans",
+    ]
+    plt.rcParams["axes.unicode_minus"] = False
+
+    W, H = 720, 1280
+    fig, ax = plt.subplots(figsize=(W / 100, H / 100), dpi=100)
+    ax.set_xlim(0, 100)
+    ax.set_ylim(0, 100)
+    ax.axis("off")
+
+    # 背景渐变
+    ax.add_patch(FancyBboxPatch(
+        (0, 0), 100, 100,
+        boxstyle="round,pad=0", linewidth=0,
+        facecolor="#ECFDF5", zorder=0,
+    ))
+
+    # 顶部条: 翠绿渐变
+    ax.add_patch(FancyBboxPatch(
+        (0, 78), 100, 22,
+        boxstyle="round,pad=0", linewidth=0,
+        facecolor="#10B981", zorder=1,
+    ))
+    ax.text(50, 91, "🌱 洛谷 AI 测评 · 报告锁",
+            ha="center", va="center", fontsize=22, color="white", fontweight="bold", zorder=2)
+    ax.text(50, 83, "每邀请 1 位同学, 解锁 1 档报告内容",
+            ha="center", va="center", fontsize=12, color="#D1FAE5", zorder=2)
+
+    # 学员卡片
+    ax.add_patch(FancyBboxPatch(
+        (8, 64), 84, 11,
+        boxstyle="round,pad=1.5,rounding_size=1.5", linewidth=1.5,
+        edgecolor="#6EE7B7", facecolor="white", zorder=2,
+    ))
+    ax.text(50, 71, f"👤 {student_name}", ha="center", va="center",
+            fontsize=15, color="#064E3B", fontweight="bold", zorder=3)
+    if student_short_id:
+        ax.text(50, 66.5, f"短 ID: {student_short_id}", ha="center", va="center",
+                fontsize=11, color="#6B7280", zorder=3)
+
+    # 大数字: 当前档位
+    _level_label = {0: "0/5 · 未解锁", 1: "1/5 · 雷达", 2: "2/5 · 盲区",
+                    3: "3/5 · 题单", 5: "5/5 · 全部解锁"}[int(unlock_level)]
+    _next_label = {0: "再邀请 1 位同学, 解锁综合能力雷达+性格画像",
+                   1: "再邀请 1 位同学, 解锁知识点盲区+4 棵知识树",
+                   2: "再邀请 1 位同学, 解锁风险诊断+定制题单",
+                   3: "再邀请 2 位同学, 解锁错题清单+AI 讲题",
+                   5: "🎉 报告已全部解锁"}.get(int(unlock_level), "")
+
+    ax.text(50, 55, _level_label, ha="center", va="center",
+            fontsize=28, color="#047857", fontweight="bold", zorder=3)
+
+    # 进度条 (5 档)
+    bar_x0, bar_x1 = 12, 88
+    bar_y = 47
+    bar_w = bar_x1 - bar_x0
+    # 背景
+    ax.add_patch(FancyBboxPatch(
+        (bar_x0, bar_y - 1.5), bar_w, 3,
+        boxstyle="round,pad=0,rounding_size=1.5", linewidth=0,
+        facecolor="#E5E7EB", zorder=2,
+    ))
+    # 填充
+    pct = min(int(invite_count) / 5, 1.0)
+    if pct > 0:
+        ax.add_patch(FancyBboxPatch(
+            (bar_x0, bar_y - 1.5), bar_w * pct, 3,
+            boxstyle="round,pad=0,rounding_size=1.5", linewidth=0,
+            facecolor="#10B981", zorder=3,
+        ))
+    # 5 个档位标记
+    for i in range(1, 6):
+        x = bar_x0 + bar_w * (i / 5)
+        ax.plot([x, x], [bar_y - 2.5, bar_y + 1], color="white", linewidth=1, zorder=4)
+    # 文字标签
+    _labels = ["雷达", "盲区", "题单", "风险", "AI讲题"]
+    for i, lbl in enumerate(_labels, start=1):
+        x = bar_x0 + bar_w * (i / 5)
+        ax.text(x, bar_y - 5, lbl, ha="center", va="top",
+                fontsize=9, color="#374151" if i <= int(unlock_level) else "#9CA3AF", zorder=3)
+
+    # 下一档提示
+    if int(unlock_level) < 5:
+        ax.text(50, 32, _next_label, ha="center", va="center",
+                fontsize=12, color="#047857", zorder=3, wrap=True)
+        ax.text(50, 28, f"当前 {int(invite_count)}/5  ·  进度 {(int(invite_count) * 20)}%",
+                ha="center", va="center", fontsize=11, color="#6B7280", zorder=3)
+    else:
+        ax.text(50, 30, "🎉 报告已全部解锁", ha="center", va="center",
+                fontsize=18, color="#047857", fontweight="bold", zorder=3)
+        ax.text(50, 26, "享受完整报告内容", ha="center", va="center",
+                fontsize=11, color="#6B7280", zorder=3)
+
+    # 分割线
+    ax.plot([15, 85], [20, 20], color="#A7F3D0", linewidth=1, zorder=2)
+
+    # 二维码区
+    qr_size = 16
+    qr_x0 = (100 - qr_size) / 2
+    qr_y0 = 4
+    try:
+        import qrcode  # type: ignore
+        from qrcode.image.pil import PilImage as _QR_FACTORY  # type: ignore
+        from PIL import Image as _PILImage  # type: ignore
+        qr = qrcode.QRCode(
+            version=1, error_correction=qrcode.constants.ERROR_CORRECT_M,
+            box_size=6, border=1,
+        )
+        qr.add_data(invite_url)
+        qr.make(fit=True)
+        qr_img = qr.make_image(fill_color="black", back_color="white", image_factory=_QR_FACTORY)
+        # 转为 numpy / PIL
+        if isinstance(qr_img, _PILImage.Image):
+            qr_pil = qr_img.convert("RGB")
+        else:
+            qr_pil = qr_img.get_image()  # type: ignore
+        # 用 inset 缩放到 W%
+        qr_arr = _PILImage.fromarray if False else None  # noqa
+        from PIL import Image as _PIL
+        qr_pil = qr_pil.resize((int(qr_size * 8), int(qr_size * 8)), _PIL.NEAREST)
+        # 转为 matplotlib 友好的格式
+        import numpy as _np
+        qr_arr = _np.asarray(qr_pil)
+        ax.imshow(qr_arr, extent=(qr_x0, qr_x0 + qr_size, qr_y0, qr_y0 + qr_size),
+                  aspect="equal", zorder=3, cmap="gray")
+    except Exception as _qr_e:
+        app.logger.warning(f"[report_lock_poster] 二维码渲染失败: {_qr_e}")
+        ax.text(50, qr_y0 + qr_size / 2, "[QR 码占位]", ha="center", va="center",
+                fontsize=10, color="#9CA3AF", zorder=3)
+
+    # 网址
+    ax.text(50, 1.5, "扫码或点链接, 通过你的邀请生成报告", ha="center", va="center",
+            fontsize=8, color="#9CA3AF", zorder=3)
+
+    plt.tight_layout(pad=0)
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=100, bbox_inches="tight", pad_inches=0)
+    plt.close(fig)
+    return buf.getvalue()
+
+
+@app.route("/api/report-lock-poster", methods=["GET"])
+def report_lock_poster_png():
+    """v3.12 阶段 4 · 报告锁邀请海报 API
+    Query:
+      task_id  - 必填, 任务的 task_id
+    Returns:
+      PNG (720x1280), 含进度条 / 邀请链接 / 二维码
+    """
+    _task_id = (request.args.get("task_id") or "").strip()
+    if not _task_id:
+        return "task_id 不能为空", 400
+    _t = get_task(_task_id) or {}
+    _invite_count = int(_t.get("invite_count", 0) or 0)
+    _unlock_level = get_unlock_level(_invite_count)
+    # 学员昵称
+    _student_name = "同学"
+    _student_short_id = ""
+    _luogu_uid = str(_t.get("luogu_uid") or "").strip()
+    if _luogu_uid:
+        try:
+            _stu = _admin_students.get_student_by_uid(_luogu_uid) or _admin_students.get_student_by_short_id(_luogu_uid)
+            if _stu:
+                _student_name = str(_stu.get("real_name") or _stu.get("email") or "同学").strip() or "同学"
+                # 隐私: 屏蔽名字中间字符 (例: 张三丰 → 张*丰)
+                if len(_student_name) > 1:
+                    _student_name = _student_name[0] + ("*" * (len(_student_name) - 2) if len(_student_name) > 2 else "") + (_student_name[-1] if len(_student_name) > 1 else "")
+                _student_short_id = str(_stu.get("short_id") or "")
+        except Exception:
+            pass
+    # 邀请链接
+    _public_base = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
+    _base = _public_base or request.host_url.rstrip("/")
+    _invite_url = f"{_base}/upload-source?invite={_luogu_uid or _student_short_id}"
+    if not _luogu_uid and not _student_short_id:
+        # 兜底: 用 task_id
+        _invite_url = f"{_base}/upload-source?invite=task_{_task_id[:8]}"
+    try:
+        png_bytes = _render_report_lock_poster_png(
+            invite_count=_invite_count,
+            unlock_level=_unlock_level,
+            invite_url=_invite_url,
+            student_name=_student_name,
+            student_short_id=_student_short_id,
+        )
+    except Exception as _e:
+        app.logger.exception(f"[report_lock_poster] 渲染失败 task_id={_task_id}: {_e}")
+        return f"海报生成失败: {_e}", 500
+    return Response(png_bytes, mimetype="image/png", headers={
+        "Content-Disposition": f'inline; filename="report-lock-poster-{_task_id[:8]}.png"',
+        "Cache-Control": "public, max-age=60",
     })
 
 

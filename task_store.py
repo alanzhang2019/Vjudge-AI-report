@@ -56,6 +56,10 @@ TASK_COLUMNS: dict[str, str] = {
     "luogu_uid":             "TEXT DEFAULT ''",
     "ps_html":               "TEXT DEFAULT ''",
     "ps_md":                 "TEXT DEFAULT ''",
+    # v3.12 · 报告锁: 邀请追踪 (学生自己拉新用)
+    "invite_count":          "INTEGER DEFAULT 0",  # 该 task 被多少个学员引用生成
+    "invited_by":            "TEXT DEFAULT ''",    # 本 task 是被谁邀请的 (student_short_id)
+    "cooled_until":          "TEXT DEFAULT ''",    # v3.12 · 冷却到期时间 (5人后 +7天, 到期前不再 +1)
 }
 
 
@@ -307,6 +311,19 @@ def init_db():
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_weekly_student ON weekly_reports(student_id, week_start)")
+
+    # v3.12 · 报告锁防作弊表: 同一 IP/设备/UID 在 7 天内不被算作有效邀请
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS invite_blocks (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            inviter_student_id  INTEGER NOT NULL,  -- 谁发的邀请
+            invitee_student_id  INTEGER NOT NULL,  -- 谁接受了邀请
+            block_type  TEXT NOT NULL,  -- 'same_student' / 'same_ip' / 'same_luogu_uid'
+            block_key   TEXT NOT NULL,
+            created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_invite_blocks_inviter ON invite_blocks(inviter_student_id, block_type)")
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS student_goals (
@@ -2162,6 +2179,166 @@ def list_columns() -> list[str]:
     return [row["name"] for row in rows]
 
 
+# ----------------------------------------------------------------------------
+# v3.12 · 报告锁: 邀请计数 + 防作弊 helper
+# ----------------------------------------------------------------------------
+def count_valid_invite(
+    inviter_student_id: int,
+    invitee_student_id: int,
+    invitee_ip: str = "",
+    invitee_luogu_uid: str = "",
+) -> tuple:
+    """v3.12 · 报告锁邀请计数: 验证 + 记录 + +1
+    防作弊: 自己 / 同 IP / 同 luogu_uid 不算
+    Returns: (is_valid: bool, reason: str)
+    """
+    if not inviter_student_id or not invitee_student_id:
+        return False, "missing_student_id"
+    if inviter_student_id == invitee_student_id:
+        return False, "self_invite"
+    conn = _get_conn()
+    try:
+        # 检查 7 天内是否已经因同 IP / 同 luogu_uid 算过
+        cutoff = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+        for btype, bkey in [("same_ip", invitee_ip), ("same_luogu_uid", invitee_luogu_uid)]:
+            if not bkey:
+                continue
+            row = conn.execute("""
+                SELECT id FROM invite_blocks
+                WHERE inviter_student_id = ?
+                  AND block_type = ?
+                  AND block_key = ?
+                  AND created_at >= ?
+                LIMIT 1
+            """, (int(inviter_student_id), btype, bkey, cutoff)).fetchone()
+            if row:
+                return False, f"already_invited_by_{btype}"
+
+        # 记录防作弊 block
+        if invitee_ip:
+            conn.execute("""
+                INSERT INTO invite_blocks (inviter_student_id, invitee_student_id, block_type, block_key)
+                VALUES (?, ?, 'same_ip', ?)
+            """, (int(inviter_student_id), int(invitee_student_id), invitee_ip))
+        if invitee_luogu_uid:
+            conn.execute("""
+                INSERT INTO invite_blocks (inviter_student_id, invitee_student_id, block_type, block_key)
+                VALUES (?, ?, 'same_luogu_uid', ?)
+            """, (int(inviter_student_id), int(invitee_student_id), invitee_luogu_uid))
+        conn.commit()
+        return True, "ok"
+    finally:
+        conn.close()
+
+
+def increment_invite_count(task_id: str) -> int:
+    """v3.12 · 给指定 task 的 invite_count +1, 返回新值
+    用于: 邀请人 A 的最新 task 被 B 引用时, 给 A 的 task +1
+    v3.12 阶段 2 · 5 人后冷却 7 天: 若任务已达 5/5 且 cooled_until 未过期, 不再 +1
+    """
+    conn = _get_conn()
+    try:
+        # 先查当前任务状态 (含 invite_count / cooled_until)
+        row = conn.execute(
+            "SELECT invite_count, cooled_until FROM tasks WHERE task_id = ?",
+            (task_id,),
+        ).fetchone()
+        if not row:
+            return 0
+        cur_count = int(row["invite_count"] or 0)
+        cooled_until = str(row["cooled_until"] or "").strip()
+        # 5 人封顶: 达到 5/5 后, 检查冷却时间
+        if cur_count >= 5:
+            if cooled_until:
+                try:
+                    cool_dt = datetime.strptime(cooled_until, "%Y-%m-%d %H:%M:%S")
+                    if datetime.now() < cool_dt:
+                        # 冷却期未过, 跳过 +1
+                        return cur_count
+                except ValueError:
+                    pass
+            # 冷却期已过 (或没设过) → 继续 +1 (但 display 上 5 仍是档位上限)
+        conn.execute("UPDATE tasks SET invite_count = COALESCE(invite_count, 0) + 1 WHERE task_id = ?", (task_id,))
+        # 达到 5 人时, 设置 cooled_until = now + 7 days
+        if cur_count + 1 == 5:
+            cool_until_str = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+            conn.execute(
+                "UPDATE tasks SET cooled_until = ? WHERE task_id = ?",
+                (cool_until_str, task_id),
+            )
+        conn.commit()
+        row = conn.execute("SELECT invite_count FROM tasks WHERE task_id = ?", (task_id,)).fetchone()
+        return int(row["invite_count"] or 0) if row else 0
+    finally:
+        conn.close()
+
+
+def get_invite_count(task_id: str) -> int:
+    """v3.12 · 查 task 的邀请计数"""
+    conn = _get_conn()
+    try:
+        row = conn.execute("SELECT invite_count FROM tasks WHERE task_id = ?", (task_id,)).fetchone()
+        return int(row["invite_count"] or 0) if row else 0
+    finally:
+        conn.close()
+
+
+def get_unlock_level(invite_count: int) -> int:
+    """v3.12 · 根据邀请数返回解锁档位: 0/1/2/3/5
+    0 → 0, 1 → 1, 2 → 2, 3+ → 3, 5+ → 5
+    """
+    if invite_count >= 5:
+        return 5
+    if invite_count >= 3:
+        return 3
+    return int(invite_count)
+
+
+def is_task_in_cooldown(task_id: str) -> bool:
+    """v3.12 阶段 2 · 检查 task 是否处于冷却期 (5人后 +7天).
+    Returns:
+        bool - True 表示冷却中, 此时邀请人再被引用也不计 +1
+    """
+    if not task_id:
+        return False
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            "SELECT invite_count, cooled_until FROM tasks WHERE task_id = ?",
+            (task_id,),
+        ).fetchone()
+        if not row:
+            return False
+        cur_count = int(row["invite_count"] or 0)
+        cooled_until = str(row["cooled_until"] or "").strip()
+        if cur_count < 5 or not cooled_until:
+            return False
+        try:
+            cool_dt = datetime.strptime(cooled_until, "%Y-%m-%d %H:%M:%S")
+            return datetime.now() < cool_dt
+        except ValueError:
+            return False
+    finally:
+        conn.close()
+
+
+def get_cooled_until(task_id: str) -> str:
+    """v3.12 阶段 2 · 查 task 的冷却到期时间字符串. 空串表示未设冷却."""
+    if not task_id:
+        return ""
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            "SELECT cooled_until FROM tasks WHERE task_id = ?",
+            (task_id,),
+        ).fetchone()
+        if not row:
+            return ""
+        return str(row["cooled_until"] or "").strip()
+    finally:
+        conn.close()
+
+
 def get_latest_done_task_for_uid(luogu_uid: str, since_hours: int = 24, task_type: str = "", task_type_list: list[str] | None = None) -> dict | None:
     """v3.8 · 查最近 N 小时内该 UID 是否已生成过报告（用于每日 1 次限流）
 
@@ -2182,7 +2359,9 @@ def get_latest_done_task_for_uid(luogu_uid: str, since_hours: int = 24, task_typ
 
     判定条件：
       - tasks.luogu_uid = ?
-      - tasks.status IN ('done', 'partial')
+      - tasks.status IN ('done', 'partial', 'running', 'queued')
+        (v3.11.31e · 把 running/queued 也算"已生成过", 防止 14:08 提交 →
+         14:09 重提交时, 前一份还在 running 状态, 旧版只查 done/partial 漏掉)
       - tasks.created_at >= now - N hours
       - 优先返回最近一条
     """
@@ -2198,6 +2377,7 @@ def get_latest_done_task_for_uid(luogu_uid: str, since_hours: int = 24, task_typ
         threshold = (datetime.now() - timedelta(hours=int(since_hours))).strftime("%Y-%m-%d %H:%M:%S")
         # v3.9.64 · 按 task_type 过滤（不同报告类型互不限制）
         # v3.11.27 · 支持 task_type_list (IN 查询, 用于跨入口限流)
+        # v3.11.31e · status 白名单含 running/queued, 防止"已提交但还在生成中"的报告漏判
         _type_filter = ""
         _params: list = [uid, threshold]
         if task_type_list and "task_type" in cols:
@@ -2213,7 +2393,7 @@ def get_latest_done_task_for_uid(luogu_uid: str, since_hours: int = 24, task_typ
             SELECT t.task_id, t.status, t.created_at, t.html, t.student_name
             FROM tasks t
             WHERE t.luogu_uid = ?
-              AND t.status IN ('done', 'partial')
+              AND t.status IN ('done', 'partial', 'running', 'queued')
               AND (t.created_at IS NULL OR t.created_at >= ?)
               {_type_filter}
             ORDER BY t.created_at DESC

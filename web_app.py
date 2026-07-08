@@ -253,7 +253,7 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
 APP_VERSION = "v3.11.25"
-APP_VERSION_BUILD = "20260705_v3p12_report_lock_v13"
+APP_VERSION_BUILD = "20260705_v3p12_report_lock_v14b"
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -7688,6 +7688,55 @@ def status_report_html(task_id: str):
     except Exception as _e:
         app.logger.exception(f"[status_report_html] 读文件失败 task_id={task_id}: {_e}")
         return f"读取失败: {_e}", 500
+
+    # v3.12_report_lock_v14 · 注入 <base href> 让 assets/*.png 相对路径解析正确
+    # 报告原始路径是 /reports/<folder>/report.html, 通过 /status/<tid>/report.html 代理后,
+    # 浏览器会把 src="assets/ability_radar.png" 解析成 /status/<tid>/assets/... 404.
+    # 修法: 在 <head> 顶部插 <base href="/reports/<urlencoded folder>/">
+    try:
+        from urllib.parse import quote as _uquote_v14
+        # html_url 形如 "reports/bc4a4222_未知选手/report_noi_csp.html"
+        # 我们要取 folder 部分 (reports/ 和 /report_xxx.html 之间的)
+        _folder_part_v14 = html_url.rsplit("/", 1)[0]  # "reports/bc4a4222_未知选手"
+        _base_href_v14 = "/" + _uquote_v14(_folder_part_v14, safe="/") + "/"
+        _base_tag_v14 = f'<base href="{_base_href_v14}">'
+        # 插到 <head> 第一个标签之后 (避免影响 title 等)
+        if "<head>" in raw_html:
+            raw_html = raw_html.replace("<head>", "<head>\n" + _base_tag_v14, 1)
+        elif "<head " in raw_html:
+            raw_html = _re_lock.sub(r"(<head[^>]*>)", r"\1\n" + _base_tag_v14, raw_html, count=1, flags=_re_lock.IGNORECASE)
+        app.logger.info(f"[status_report_html v14] injected base href: {_base_href_v14}")
+    except Exception as _e_base:
+        app.logger.warning(f"[status_report_html v14] base href 注入失败: {_e_base}")
+
+    # v3.12_report_lock_v14 · 替换 "报告生成时间: 未知" 为实际时间
+    try:
+        from datetime import datetime as _dt_v14
+        _gen_time_raw = (task.get("created_at") or "").strip()
+        if _gen_time_raw:
+            # 尝试解析多种时间格式
+            for _fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%SZ"):
+                try:
+                    _dt_obj = _dt_v14.strptime(_gen_time_raw[:19], "%Y-%m-%d %H:%M:%S")
+                    _gen_time_label = _dt_obj.strftime("%Y年%m月%d日 %H:%M")
+                    break
+                except ValueError:
+                    continue
+            else:
+                _gen_time_label = _gen_time_raw
+        else:
+            # 用文件 mtime
+            _gen_time_label = _dt_v14.fromtimestamp(file_path.stat().st_mtime).strftime("%Y年%m月%d日 %H:%M")
+        # 替换: 报告生成时间: 未知 / 报告生成时间：未知 (含中英文冒号)
+        raw_html = _re_lock.sub(
+            r"报告生成时间[：:]\s*未知",
+            f"报告生成时间: {_gen_time_label}",
+            raw_html,
+        )
+        app.logger.info(f"[status_report_html v14] gen time label: {_gen_time_label}")
+    except Exception as _e_time:
+        app.logger.warning(f"[status_report_html v14] gen time 替换失败: {_e_time}")
+
     # 2) 计算 lock 状态
     invite_count = int(task.get("invite_count", 0) or 0)
     unlock_level = get_unlock_level(invite_count)

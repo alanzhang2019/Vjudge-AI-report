@@ -253,7 +253,7 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
 APP_VERSION = "v3.11.25"
-APP_VERSION_BUILD = "20260705_v3p12_report_lock_v14b"
+APP_VERSION_BUILD = "20260709_v3p12_report_lock_v16"
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -6128,6 +6128,24 @@ def upload_zip_submit():
     register_active_generation_task(task_id, thread)
     thread.start()
 
+    # v3.12_report_lock_v16 · /upload-zip 也接邀请处理 (旧版只 /upload-source 接, ZIP 入口的邀请全丢)
+    _invite_short_zip = (request.args.get("invite") or request.form.get("invite") or "").strip()
+    _invite_reward_zip = False
+    _invite_reason_zip = ""
+    if _invite_short_zip and _s_id:
+        try:
+            update_task(task_id, invited_by=_invite_short_zip)
+        except Exception as _e:
+            app.logger.warning(f"[v3.12 /upload-zip] set invited_by failed: {_e}")
+        _invitee_ip_zip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+        _invite_reward_zip, _invite_reason_zip, _ = _apply_invite_reward(
+            inviter_short=_invite_short_zip,
+            invitee_student_id=int(_s_id),
+            invitee_luogu_uid=_luogu_uid,
+            invitee_ip=_invitee_ip_zip,
+            source="upload-zip",
+        )
+
     # v3.11.27 · 成功路径返回 JSON 200 + status_url (与 /upload-source 对齐)
     # v3.11.29 · 双返回: fetch 路径 → JSON; 原生表单 → 302 重定向
     _status_url = url_for("status_page", task_id=task_id)
@@ -6137,9 +6155,74 @@ def upload_zip_submit():
             "ok": True,
             "task_id": task_id,
             "status_url": _status_url,
+            "invite_reward": _invite_reward_zip,
+            "invite_reason": _invite_reason_zip,
         }), 200
     from flask import redirect as _redirect
     return _redirect(_status_url, code=302)
+
+
+# v3.12_report_lock_v16 · 报告锁邀请处理公共 helper (3 入口共用: upload-source / upload-zip / generate-form)
+def _apply_invite_reward(
+    inviter_short: str,
+    invitee_student_id: int,
+    invitee_luogu_uid: str = "",
+    invitee_ip: str = "",
+    source: str = "upload-source",
+) -> tuple:
+    """v3.12_report_lock_v16 · 抽公共: 防作弊 + 查 inviter 最新 task + +1
+
+    原 /upload-source 内嵌的 line 6281-6337 逻辑, 抽到此处供 3 个入口共用.
+    旧版只 /upload-source 接, /upload-zip 和 /generate-form 入口的邀请被静默丢失
+    (用户反馈"只涨到 2 就不动了", 因为学员朋友们用的是更便捷的 ZIP 入口).
+
+    Returns:
+        (reward: bool, reason: str, new_count: int)
+    """
+    if not inviter_short or not invitee_student_id:
+        return False, "missing_param", 0
+    try:
+        from task_store import count_valid_invite, get_latest_done_task_for_uid
+        _inviter_student = _admin_students.get_student_by_short_id(inviter_short) or _admin_students.get_student_by_uid(inviter_short)
+        if not _inviter_student or int(_inviter_student.get("id") or 0) == int(invitee_student_id):
+            return False, "inviter_self_or_not_found", 0
+        _inviter_id = int(_inviter_student["id"])
+        is_valid, reason = count_valid_invite(
+            inviter_student_id=_inviter_id,
+            invitee_student_id=int(invitee_student_id),
+            invitee_ip=invitee_ip,
+            invitee_luogu_uid=invitee_luogu_uid,
+        )
+        if not is_valid:
+            app.logger.info(f"[v3.12 {source}] 邀请被防作弊拦截: inviter={inviter_short} -> 原因={reason}")
+            return False, f"blocked:{reason}", 0
+        _inviter_uid_raw = (_inviter_student.get("luogu_uid") or "").strip()
+        _latest_task = None
+        if _inviter_uid_raw:
+            _latest_task = get_latest_done_task_for_uid(
+                _inviter_uid_raw, since_hours=24 * 30,
+                task_type_list=["report_noi_csp", "report_gesp", "report_source_upload", "report_zip_upload"],
+            )
+        if not _latest_task:
+            try:
+                from task_store import get_latest_done_task_for_student_id
+                _latest_task = get_latest_done_task_for_student_id(
+                    _inviter_id, since_hours=24 * 30,
+                    task_type_list=["report_noi_csp", "report_gesp", "report_source_upload", "report_zip_upload"],
+                )
+                if _latest_task:
+                    app.logger.info(f"[v3.12 {source}] 邀请人 luogu_uid 为空, 改走 student_id 兜底 sid={_inviter_id} task={_latest_task['task_id'][:8]}")
+            except Exception as _e2:
+                app.logger.warning(f"[v3.12 {source}] student_id 兜底查 task 失败: {_e2}")
+        if not _latest_task:
+            return False, "inviter_no_recent_report", 0
+        from task_store import increment_invite_count
+        new_count = increment_invite_count(_latest_task["task_id"])
+        app.logger.info(f"[v3.12 {source}] 邀请有效! inviter={inviter_short} task={_latest_task['task_id']} invite_count={new_count}")
+        return True, f"inviter_task={_latest_task['task_id'][:8]}", new_count
+    except Exception as e:
+        app.logger.warning(f"[v3.12 {source}] 邀请处理异常: {e}")
+        return False, f"error:{e}", 0
 
 
 # v3.11.0 · /upload-source 路由 (前端源码粘贴模式)
@@ -7368,7 +7451,7 @@ STATUS_HTML = """
                 // 1) 预加载海报 PNG（matplotlib 现场渲染，可能 5-15s）
                 // v3.9.67 · GESP 报告传 exam_type=gesp, NOI/CSP 报告传 exam_type=noi_csp
                 // v3.11.19 · 用 task_id 新路由 /api/task-poster/<task_id>.png, 服务端反推学员 (老 task luogu_uid 空也能渲染)
-                var _exam_type = ''{{ "gesp" if task_type == "report_gesp" else "noi_csp" }}';
+                var _exam_type = '{{ "gesp" if task_type == "report_gesp" else "noi_csp" }}';
                 var _task_id = '{{ task_id }}';
                 var url = '/api/task-poster/' + encodeURIComponent(_task_id) + '.png?exam_type=' + encodeURIComponent(_exam_type) + '&t=' + Date.now();
                 var pre=new Image();
@@ -11911,6 +11994,26 @@ def generate_form_submit():
         thread = threading.Thread(target=run_generation, args=(task_id, v1_form), daemon=True)
         register_active_generation_task(task_id, thread)
         thread.start()
+
+        # v3.12_report_lock_v16 · /generate-form 也接邀请处理 (旧版只 /upload-source 接)
+        try:
+            _invite_short_gf = (request.args.get("invite") or form.get("invite") or "").strip()
+            if _invite_short_gf and sid:
+                try:
+                    update_task(task_id, invited_by=_invite_short_gf)
+                except Exception:
+                    pass
+                _invitee_ip_gf = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+                _invite_reward_gf, _invite_reason_gf, _ = _apply_invite_reward(
+                    inviter_short=_invite_short_gf,
+                    invitee_student_id=int(sid),
+                    invitee_luogu_uid=luogu_uid,
+                    invitee_ip=_invitee_ip_gf,
+                    source="generate-form",
+                )
+        except Exception as _e_gf:
+            app.logger.warning(f"[v3.12 /generate-form] invite hook 异常: {_e_gf}")
+
         # 跳到 /status/<task_id>，完成后可手动跳到 /me/<uid>
         return redirect(url_for("status_page", task_id=task_id) + f"?luogu_uid={luogu_uid}")
     except Exception as e:

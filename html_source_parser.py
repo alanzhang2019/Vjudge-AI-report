@@ -27,16 +27,41 @@ from typing import Any, Dict, List, Optional, Tuple
 # ---------- 关键正则 (来自 algobeatcontest.github.io/practice) ----------
 
 # 匹配 "passed":[...], "submitted" 的非贪婪抓取
-# 容忍嵌套: 支持 [a, [b, c], d] 这种 1 层嵌套 (洛谷的 practiceData.passed 偶尔会嵌)
-_RE_PASSED = re.compile(
-    r'"passed"\s*:\s*(\[(?:[^\[\]]|\[[^\[\]]*\])*\])',
-    re.S,
-)
-# 匹配 "submitted":[...], 后面跟随 "}" 或 "," (避免吃掉下一个字段)
-_RE_SUBMITTED = re.compile(
-    r'"submitted"\s*:\s*(\[(?:[^\[\]]|\[[^\[\]]*\])*\])\s*[,}]',
-    re.S,
-)
+# v25 · 改用递归函数 _find_balanced_array 而非单层 regex
+# 原 _RE_PASSED 只支持 1 层嵌套, 遇到 [{...}, {...}] (object) 这种带花括号字段就匹配不到
+# 学员 UID 344217 的页面是这种结构, v22 多重转义能识别 passed 文本但拿不到数组
+_RE_PASSED_KEY = re.compile(r'"passed"\s*:\s*\[')  # 只定位 "passed":[ 起点
+_RE_SUBMITTED_KEY = re.compile(r'"submitted"\s*:\s*\[')  # 只定位 "submitted":[ 起点
+
+
+def _find_balanced_array(text: str, start: int) -> int:
+    """从 text[start] (应为 '[') 出发, 找到匹配的 ']' 位置 (含)
+    支持任意层嵌套: [], [[]], [{}, [], "str"]
+    字符串内的 '[' ']' 不计入 (洛谷 passed 数组里的字符串几乎都是单引号包裹的简单字段)
+    """
+    if start >= len(text) or text[start] != '[':
+        return -1
+    depth = 0
+    i = start
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c == '[':
+            depth += 1
+        elif c == ']':
+            depth -= 1
+            if depth == 0:
+                return i  # 闭括号位置
+        elif c == '"':
+            # 跳过一个字符串字面值 (处理转义 \\")
+            i += 1
+            while i < n and text[i] != '"':
+                if text[i] == '\\' and i + 1 < n:
+                    i += 2
+                else:
+                    i += 1
+        i += 1
+    return -1  # 未匹配
 # 提取 uid (优先 __NEXT_DATA__ 里的 "uid":<num>, 备选 URL /user/<num>)
 # v3.11.6 · 粘贴练习页源码通常不含 /user/<uid> 路径 (URL 是 /practice),
 # 只能从 __NEXT_DATA__.props.pageProps.user.uid 里抽。原版只匹配 URL
@@ -117,24 +142,34 @@ def _normalize_html(html: str) -> str:
     return s
 
 def _extract_passed_array(html: str) -> Optional[List[Any]]:
-    # v22 · 提前 normalize
-    m = _RE_PASSED.search(_normalize_html(html))
+    # v25 · 用 _RE_PASSED_KEY 定位 "passed":[ 起点, _find_balanced_array 找闭括号
+    norm = _normalize_html(html)
+    m = _RE_PASSED_KEY.search(norm)
     if not m:
         return None
+    end = _find_balanced_array(norm, m.end() - 1)
+    if end < 0:
+        return None
+    raw = norm[m.end() - 1:end + 1]
     try:
-        arr = _safe_parse_array(m.group(1))
+        arr = _safe_parse_array(raw)
     except ValueError:
         return None
     return arr if isinstance(arr, list) else None
 
 
 def _extract_submitted_array(html: str) -> Optional[List[Any]]:
-    # v22 · 提前 normalize
-    m = _RE_SUBMITTED.search(_normalize_html(html))
+    # v25 · 改用 _RE_SUBMITTED_KEY + _find_balanced_array
+    norm = _normalize_html(html)
+    m = _RE_SUBMITTED_KEY.search(norm)
     if not m:
         return None
+    end = _find_balanced_array(norm, m.end() - 1)
+    if end < 0:
+        return None
+    raw = norm[m.end() - 1:end + 1]
     try:
-        arr = _safe_parse_array(m.group(1))
+        arr = _safe_parse_array(raw)
     except ValueError:
         return None
     return arr if isinstance(arr, list) else None

@@ -12,6 +12,7 @@ from datetime import datetime, date, timedelta, timezone
 # v3.11.0 · 洛谷公开题库本地缓存 (problemset-open)
 # 进程启动时 ensure_ready() 会后台下载 + 构建索引, 提供 title/difficulty/tags 兜底
 import problemset_index
+from elo_ranking import (init_elo_schema, save_elo_snapshot, get_latest_elo_top10, get_snapshot_meta, find_user_report, _parse_elo_html, get_color_hex, get_color_label, get_color_bg_class)
 
 # v3.11.0 · 洛谷个人练习页 HTML 源码解析 (用户 Ctrl+U 复制粘贴, 走 algobeatcontest 同款清洗)
 import html_source_parser
@@ -253,7 +254,7 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
 APP_VERSION = "v3.11.25"
-APP_VERSION_BUILD = "20260709_v3p12_report_lock_v25"  # v25: _RE_PASSED 改 _find_balanced_array 递归匹配任意层嵌套
+APP_VERSION_BUILD = "20260709_v3p13_elo_ranking_v1"  # v3.13: 洛谷 ELO 等级分 Top10 公开排行榜 + admin 粘贴 HTML 抓取
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -1814,6 +1815,9 @@ INDEX_V3100_HTML = """
                 <a href="/me/{{ student_short_id }}" class="text-slate-600 hover:text-indigo-600 font-medium">我的主页</a>
                 <a href="/logout?next=/" class="text-slate-500 hover:text-rose-600">退出</a>
                 {% else %}
+                <a href="/ranking/elo" class="text-slate-600 hover:text-indigo-600 font-medium flex items-center gap-1">
+                    <span class="text-yellow-500">🏆</span> 洛谷等级分榜
+                </a>
                 <a href="/login" class="text-slate-600 hover:text-indigo-600 font-medium">登录</a>
                 <a href="/register" class="btn-primary py-1.5 px-3">注册</a>
                 {% endif %}
@@ -23742,6 +23746,198 @@ try:
     start_vjudge_worker()
 except Exception as _e:
     print(f"[v3.9.74] start_vjudge_worker warning: {_e}")
+
+
+try:
+    init_elo_schema("/app/data/tasks.db")
+    print("[v3.13] ELO schema initialized")
+except Exception as _e:
+    print(f"[v3.13] ELO schema init WARN: {_e}")
+
+
+
+# ============== v3.13 · 洛谷 ELO 等级分排行榜 ==============
+
+ELO_RANKING_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>洛谷 ELO 等级分 Top 10 · 公开 AI 报告</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+body{font-family:"Inter",ui-sans-serif,system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:#F8FAFC;color:#0F172A;}
+.rank-card{transition:all .25s;}
+.rank-card:hover{transform:translateY(-4px);box-shadow:0 12px 30px rgba(99,102,241,.18);}
+.medal-gold{background:linear-gradient(135deg,#FCD34D,#F59E0B);color:white;box-shadow:0 4px 12px rgba(245,158,11,.4);}
+.medal-silver{background:linear-gradient(135deg,#E5E7EB,#9CA3AF);color:white;box-shadow:0 4px 12px rgba(156,163,175,.4);}
+.medal-bronze{background:linear-gradient(135deg,#FDBA74,#C2410C);color:white;box-shadow:0 4px 12px rgba(194,65,12,.4);}
+.rank-num{width:3.5rem;height:3.5rem;display:flex;align-items:center;justify-content:center;border-radius:9999px;font-weight:800;font-size:1.25rem;}
+</style>
+</head>
+<body class="min-h-screen">
+
+<nav class="bg-white border-b border-slate-200 sticky top-0 z-50">
+<div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+<a href="/" class="flex items-center gap-2">
+<div class="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold">信</div>
+<span class="font-bold">信竞 AI 报告</span>
+</a>
+<div class="flex items-center gap-3 text-sm">
+<a href="/" class="text-slate-600 hover:text-indigo-600">← 返回首页</a>
+</div>
+</div>
+</nav>
+
+<div class="max-w-5xl mx-auto px-4 py-8">
+
+<div class="text-center mb-8">
+<h1 class="text-4xl font-extrabold mb-2">
+<span class="bg-gradient-to-r from-yellow-500 via-red-500 to-purple-600 bg-clip-text text-transparent">🏆 洛谷 ELO 等级分 Top 10</span>
+</h1>
+<p class="text-slate-600 text-sm">实时抓取 <a href="https://www.luogu.com.cn/ranking/elo" target="_blank" class="text-indigo-600 hover:underline">luogu.com.cn/ranking/elo</a> · 公开围观 AI 能力报告</p>
+{% if snapshot_at %}
+<p class="text-xs text-slate-400 mt-1">快照时间: {{ snapshot_at }} · 共 {{ users|length }} 人</p>
+{% endif %}
+</div>
+
+{% if not users %}
+<div class="bg-amber-50 border-2 border-amber-200 rounded-xl p-8 text-center">
+<div class="text-5xl mb-3">📋</div>
+<h2 class="text-xl font-bold text-amber-900 mb-2">还没有排行榜数据</h2>
+<p class="text-sm text-amber-800 mb-4">管理员可在 <a href="/admin/elo/upload" class="font-bold underline">/admin/elo/upload</a> 粘贴洛谷 ELO 页面 HTML 源码, 即可抓取 Top 10</p>
+<p class="text-xs text-amber-600">💡 洛谷在服务端被 Cloudflare 拦截 (403), 但 admin 本地浏览器能访问. 复制 HTML 源码粘贴是最稳的方案.</p>
+</div>
+{% else %}
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+{% for u in users %}
+<div class="rank-card card bg-white rounded-2xl p-5 border border-slate-200">
+<div class="flex items-start gap-4">
+<div class="rank-num
+    {% if u.rank == 1 %}medal-gold
+    {% elif u.rank == 2 %}medal-silver
+    {% elif u.rank == 3 %}medal-bronze
+    {% else %}bg-slate-100 text-slate-700
+    {% endif %}">
+{% if u.rank == 1 %}🥇
+{% elif u.rank == 2 %}🥈
+{% elif u.rank == 3 %}🥉
+{% else %}#{{ u.rank }}
+{% endif %}
+</div>
+
+<div class="flex-1 min-w-0">
+<div class="flex items-center gap-2 mb-1 flex-wrap">
+<a href="https://www.luogu.com.cn/user/{{ u.uid }}" target="_blank" class="font-bold text-lg text-slate-900 hover:text-indigo-600 truncate">{{ u.name }}</a>
+<span class="text-xs px-2 py-0.5 rounded-full font-semibold {{ u.color_bg_class }}">{{ u.color_label }}名</span>
+</div>
+<div class="flex items-center gap-3 text-sm text-slate-600 mb-3">
+<span class="font-mono text-xs text-slate-400">UID {{ u.uid }}</span>
+<span class="font-bold text-slate-900 text-lg">{{ u.rating }}</span>
+<span class="text-xs text-slate-400">ELO</span>
+</div>
+
+{% if u.report %}
+<a href="/ranking/elo/report/{{ u.uid }}" target="_blank"
+   class="block w-full text-center bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-400 hover:to-purple-400 text-white font-bold py-2 px-3 rounded-lg text-sm transition-all">
+   🎯 查看 AI 报告
+</a>
+<div class="text-[10px] text-slate-400 mt-1 text-center">
+{{ u.report.solved_count }} 题通过 · 抓取于 {{ u.report.created_at[:10] }}
+</div>
+{% else %}
+<button disabled class="block w-full text-center bg-slate-100 text-slate-400 font-bold py-2 px-3 rounded-lg text-sm cursor-not-allowed">
+   📭 该用户暂未生成报告
+</button>
+{% if u.rank <= 3 %}
+<div class="text-[10px] text-amber-600 mt-1 text-center">
+   ⭐ Top {{ u.rank }} 大神 · <a href="https://www.luogu.com.cn/user/{{ u.uid }}" target="_blank" class="underline">去洛谷围观</a>
+</div>
+{% endif %}
+{% endif %}
+</div>
+</div>
+</div>
+{% endfor %}
+
+</div>
+
+<div class="mt-10 bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-xl p-6">
+<h3 class="text-lg font-bold text-indigo-900 mb-2">📊 关于本榜单</h3>
+<ul class="text-sm text-indigo-800 space-y-1.5">
+<li>· 数据源: 洛谷 ELO 等级分排行榜 (管理员定期粘贴 HTML 同步)</li>
+<li>· 报告复用: 如果 Top 10 用户在本平台生成过报告, 公开围观; 否则只显示基础信息</li>
+<li>· 颜色评级: 灰&lt;1200 · 绿&lt;1400 · 青&lt;1600 · 蓝&lt;1900 · 紫&lt;2100 · 黄&lt;2400 · 橙&lt;2600 · 红&lt;3000 · 传奇≥3000</li>
+<li>· 隐私保护: 仅展示公开 uid 和用户名, 报告内容遵循用户解锁档位</li>
+</ul>
+</div>
+
+{% endif %}
+
+</div>
+</body>
+</html>
+"""
+
+
+@app.route("/ranking/elo")
+def elo_ranking_page():
+    """v3.13 · 公开洛谷 ELO Top 10 排行榜 + AI 报告围观"""
+    try:
+        users = get_latest_elo_top10("/app/data/tasks.db")
+        meta = get_snapshot_meta("/app/data/tasks.db")
+    except Exception as e:
+        app.logger.error(f"[v3.13] elo_ranking_page read db err: {e}")
+        users = []
+        meta = None
+    for u in users:
+        rep = find_user_report("/app/data/tasks.db", u["uid"])
+        u["report"] = rep
+        u["color_label"] = get_color_label(u.get("color", ""))
+        u["color_bg_class"] = get_color_bg_class(u.get("color", ""))
+    return render_template_string(
+        ELO_RANKING_HTML,
+        users=users,
+        snapshot_at=(meta or {}).get("snapshot_at"),
+    )
+
+
+@app.route("/ranking/elo/report/<int:uid>")
+def elo_ranking_report(uid: int):
+    """v3.13 · 公开围观 Top 用户已生成的 AI 报告"""
+    rep = find_user_report("/app/data/tasks.db", uid)
+    if not rep:
+        return redirect(url_for("elo_ranking_page"))
+    return redirect(url_for("status_report_html", task_id=rep["task_id"]))
+
+
+@app.route("/admin/elo/upload", methods=["GET", "POST"])
+def admin_elo_upload():
+    """v3.13 · admin 粘贴洛谷 ELO 页面 HTML → 抓取 Top 10 → 存 DB"""
+    auth_redirect = require_admin_auth()
+    if auth_redirect is not None:
+        return auth_redirect
+
+    if request.method == "GET":
+        return render_template_string(ADMIN_ELO_UPLOAD_HTML, msg=request.args.get("msg"))
+
+    html = (request.form.get("elo_html") or "").strip()
+    if not html or len(html) < 200:
+        return redirect(url_for("admin_elo_upload", msg="❌ HTML 源码太短 (< 200 字符), 请粘贴完整页面"))
+    users = _parse_elo_html(html, top_n=10)
+    if not users:
+        return redirect(url_for("admin_elo_upload", msg="❌ 解析失败: 找不到 #1 排名 + /user/uid 链接, 请确认是 ELO ranking 页源码"))
+    snapshot_at = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    try:
+        save_elo_snapshot("/app/data/tasks.db", users, snapshot_at)
+    except Exception as e:
+        app.logger.error(f"[v3.13] save_elo_snapshot err: {e}")
+        return redirect(url_for("admin_elo_upload", msg=f"❌ DB 写入失败: {e}"))
+    names = "、".join([f"#{u['rank']} {u['name']}({u['rating']})" for u in users])
+    return redirect(url_for("admin_elo_upload", msg=f"✅ 抓取成功! 共 {len(users)} 人: {names}"))
 
 
 if __name__ == "__main__":

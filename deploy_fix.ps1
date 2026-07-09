@@ -21,7 +21,8 @@ $Files = @(
     "syllabus_matcher.py",
     "problemset_index.py",
     "html_source_parser.py",
-    "admin_students.py"
+    "admin_students.py",
+    "elo_ranking.py"
 )
 
 foreach ($f in $Files) {

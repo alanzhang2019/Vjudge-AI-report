@@ -253,7 +253,7 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
 APP_VERSION = "v3.11.25"
-APP_VERSION_BUILD = "20260709_v3p12_report_lock_v17"
+APP_VERSION_BUILD = "20260709_v3p12_report_lock_v23"  # v23: 复制按钮=推荐文案 / 微信改微信/QQ 分享
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -6524,7 +6524,7 @@ UPLOAD_ZIP_HTML = """
                 <!-- 折叠的 LLM 配置 (高级) -->
                 <details class="px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg">
                     <summary class="cursor-pointer font-semibold text-slate-700 text-sm">
-                        ⚙️ LLM 配置 (高级 · 留空走服务端 .env)
+                        ⚙️ LLM 配置 (留空走默认AI)
                     </summary>
                     <div class="mt-3 space-y-2">
                         <input type="text" name="api_key" placeholder="OpenAI 兼容 API Key (sk-...)"
@@ -6533,23 +6533,6 @@ UPLOAD_ZIP_HTML = """
                                class="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400">
                         <input type="text" name="model_name" placeholder="模型 (默认 gpt-4o)"
                                class="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400">
-                    </div>
-                </details>
-
-                <!-- 可选学员信息 (ZIP manifest 自带, 这里是覆盖用) -->
-                <details class="px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg">
-                    <summary class="cursor-pointer font-semibold text-slate-700 text-sm">
-                        👤 覆盖学员信息 (可选 · ZIP 自带 manifest 会兜底)
-                    </summary>
-                    <div class="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2">
-                        <input type="text" name="luogu_uid" placeholder="洛谷 UID"
-                               class="px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400">
-                        <input type="text" name="student_name" placeholder="姓名"
-                               class="px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400">
-                        <input type="text" name="school" placeholder="学校"
-                               class="px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400">
-                        <input type="text" name="grade" placeholder="年级 (如 高一)"
-                               class="px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 md:col-span-3">
                     </div>
                 </details>
 
@@ -6868,7 +6851,7 @@ UPLOAD_SOURCE_HTML = """
                 <!-- 折叠的 LLM 配置 -->
                 <details class="px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg">
                     <summary class="cursor-pointer font-semibold text-slate-700 text-sm">
-                        ⚙️ LLM 配置 (高级 · 留空走服务端 .env)
+                        ⚙️ LLM 配置 (留空走默认AI)
                     </summary>
                     <div class="mt-3 space-y-2">
                         <input type="text" name="api_key" placeholder="OpenAI 兼容 API Key (sk-...)"
@@ -6877,23 +6860,6 @@ UPLOAD_SOURCE_HTML = """
                                class="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400">
                         <input type="text" name="model_name" placeholder="模型 (默认 gpt-4o)"
                                class="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400">
-                    </div>
-                </details>
-
-                <!-- 学员信息 -->
-                <details class="px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg" open>
-                    <summary class="cursor-pointer font-semibold text-slate-700 text-sm">
-                        👤 学员信息 (留空时尝试从源码自动提取)
-                    </summary>
-                    <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
-                        <input type="text" name="luogu_uid" placeholder="洛谷 UID (源码含 /user/123 时可省略)"
-                               class="px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400">
-                        <input type="text" name="student_name" placeholder="姓名 (源码含 title 时可省略)"
-                               class="px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400">
-                        <input type="text" name="school" placeholder="学校 (必填 · 源码不包含)"
-                               class="px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400">
-                        <input type="text" name="grade" placeholder="年级 (如 高一)"
-                               class="px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400">
                     </div>
                 </details>
 
@@ -6961,23 +6927,10 @@ UPLOAD_SOURCE_HTML = """
                     可以用浏览器 <kbd>Ctrl+F</kbd> 搜 "passed" 看是否存在。
                 </div>
             </details>
-            <details>
-                <summary class="cursor-pointer text-slate-600">难度显示成中文了, 是新的吗?</summary>
-                <div class="mt-1 text-slate-500 pl-4">
-                    是的, v3.11.0 起接入了 <a href="https://docs.lgapi.cn/open/judge/" target="_blank" class="underline">洛谷公开题库</a>
-                    缓存, 报告里会自动把数字 0-8 翻译成
-                    「入门 / 普及− / 普及 / 普及+/提高− / 提高 / 提高+/省选− / 省选/NOI− / NOI/NOI+/CTS」,
-                    与洛谷个人主页"难易度统计"完全一致。
-                </div>
-            </details>
         </div>
 
         <div class="text-center text-xs text-slate-400">
             <a href="/" class="hover:underline">← 返回首页</a>
-            ·
-            <a href="/upload-zip" class="hover:underline">走 ZIP 模式</a>
-            ·
-            <a href="/generate-form" class="hover:underline">走标准模式 (cookies)</a>
         </div>
     </div>
 
@@ -7261,16 +7214,25 @@ STATUS_HTML = """
                         <input type="text" id="inviteLinkInput" value="{{ invite_share_url or '' }}" readonly
                                class="flex-1 px-2 py-1.5 text-[11px] font-mono border border-gray-300 rounded bg-gray-50 focus:outline-none focus:border-emerald-500"
                                onclick="this.select()">
-                        <button type="button" onclick="copyInviteLink()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold rounded whitespace-nowrap">
-                            📋 复制
+                        <button type="button" onclick="copyShareText()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold rounded whitespace-nowrap">
+                            📋 复制推荐文案
                         </button>
                     </div>
+                    <details class="mb-2" open>
+                        <summary class="text-[11px] text-emerald-700 font-semibold cursor-pointer hover:underline">✨ 推荐文案（已自动生成, 可点击下方按钮复制）</summary>
+                        <textarea id="inviteShareText" rows="5" readonly
+                                  class="w-full mt-1.5 px-2 py-1.5 text-[11px] border border-gray-300 rounded bg-white focus:outline-none focus:border-emerald-500 resize-none"
+                                  onclick="this.select()">{{ invite_share_text or '' }}</textarea>
+                        <button type="button" onclick="copyShareText()" class="mt-1 w-full px-2 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-[11px] font-bold rounded">
+                            📋 一键复制推荐文案（含链接）
+                        </button>
+                    </details>
                     <div class="grid grid-cols-2 gap-1.5">
                         <button type="button" onclick="showLockPoster()" class="px-2 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-bold rounded">
                             🖼 生成海报
                         </button>
                         <button type="button" onclick="shareToWechat()" class="px-2 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-[11px] font-bold rounded">
-                            💬 微信分享
+                            💬 微信/QQ 分享
                         </button>
                     </div>
                 </div>
@@ -7297,23 +7259,57 @@ STATUS_HTML = """
             </div>
             <script>
             // v3.12 阶段 3 · 报告锁 JS · 复制链接 / 显示海报 / 微信分享
+            // v23 · 主复制按钮 - 复制推荐文案 (含链接), 默认文案为空时拼接默认文案
+            function copyShareText(){
+                var _ta = document.getElementById('inviteShareText');
+                var _link = document.getElementById('inviteLinkInput');
+                if (!_ta) return;
+                var _val = (_ta.value || '').trim();
+                if (!_val) {
+                    // 文案为空, 拼接默认推荐文案
+                    var _url = (_link && _link.value) || '';
+                    _val = '我生成了洛谷 AI 报告, 含能力雷达 + 错题清单 + AI 讲题, 欢迎你也来试试: ' + _url;
+                }
+                // 尝试 Web Share API (mobile)
+                if (navigator.share && /Mobi|Android|iPhone/i.test(navigator.userAgent)) {
+                    navigator.share({ title: '洛谷 AI 报告', text: _val }).then(function(){
+                        // 用户选了分享目标, 不需 alert
+                    }).catch(function(){
+                        // 用户取消或不支持, fallback 到复制
+                        _doCopy(_val, _ta);
+                    });
+                    return;
+                }
+                _doCopy(_val, _ta);
+            }
+            function _doCopy(text, taEl){
+                try {
+                    taEl.focus();
+                    taEl.select();
+                    taEl.setSelectionRange(0, 99999);
+                    var ok = document.execCommand('copy');
+                    if (ok) {
+                        alert('✅ 推荐文案已复制! \\n\\n发到微信/QQ/群里, 粘贴即可发送\\n同学通过链接生成报告, 你就解锁 1 档!');
+                    } else {
+                        alert('复制失败, 请手动选中复制:\\n\\n' + text);
+                    }
+                } catch (e) {
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(text).then(function(){
+                            alert('✅ 推荐文案已复制! \\n\\n发到微信/QQ/群里, 粘贴即可发送');
+                        }).catch(function(){
+                            alert('请手动选中复制:\\n\\n' + text);
+                        });
+                    } else {
+                        alert('请手动选中复制:\\n\\n' + text);
+                    }
+                }
+            }
+            // v23 · 仅复制链接 (老接口, 保留兼容)
             function copyInviteLink(){
                 var _input = document.getElementById('inviteLinkInput');
                 if (!_input) return;
-                var _val = _input.value || '';
-                if (!_val) { alert('邀请链接未生成, 请稍后再试'); return; }
-                try {
-                    _input.select();
-                    _input.setSelectionRange(0, 99999);
-                    var ok = document.execCommand('copy');
-                    if (ok) { alert('✅ 邀请链接已复制!\\n\\n发到家长群/朋友圈, 同学通过链接生成报告, 你就解锁 1 档!'); }
-                    else { alert('复制失败, 请手动复制:\\n' + _val); }
-                } catch (e) {
-                    // 现代浏览器 fallback
-                    if (navigator.clipboard && navigator.clipboard.writeText) {
-                        navigator.clipboard.writeText(_val).then(function(){ alert('✅ 已复制!'); }).catch(function(){ alert('请手动复制:\\n' + _val); });
-                    } else { alert('请手动复制:\\n' + _val); }
-                }
+                copyShareText();
             }
             function showLockPoster(){
                 var m = document.getElementById('lockPosterModal');
@@ -7331,17 +7327,27 @@ STATUS_HTML = """
                 dl.href = url;
             }
             function shareToWechat(){
-                var _input = document.getElementById('inviteLinkInput');
-                var _val = (_input && _input.value) || '';
-                if (!_val) { alert('邀请链接未生成'); return; }
-                // 微信内置浏览器可直接复制 + 提示
-                if (navigator.userAgent.indexOf('MicroMessenger') >= 0) {
-                    copyInviteLink();
-                    alert('💡 微信内长按链接, 可直接发送给朋友或朋友圈');
-                } else {
-                    copyInviteLink();
-                    alert('💡 链接已复制, 打开微信粘贴发送给朋友\\n或生成海报发到家长群 / 朋友圈');
+                // v23 · 微信/QQ 分享: 复制推荐文案 + 提示粘贴
+                var _ta = document.getElementById('inviteShareText');
+                var _link = document.getElementById('inviteLinkInput');
+                var _val = ((_ta && _ta.value) || '').trim();
+                if (!_val) {
+                    var _url = (_link && _link.value) || '';
+                    _val = '我生成了洛谷 AI 报告, 含能力雷达 + 错题清单 + AI 讲题, 欢迎你也来试试: ' + _url;
                 }
+                if (!_val) { alert('邀请链接未生成, 请稍后再试'); return; }
+                var _isWechat = navigator.userAgent.indexOf('MicroMessenger') >= 0;
+                var _isQQ = navigator.userAgent.indexOf('QQ/') >= 0 || navigator.userAgent.indexOf('QQClient') >= 0;
+                var _isMobile = /Mobi|Android|iPhone/i.test(navigator.userAgent);
+                // mobile + 微信/QQ 内: 尝试 Web Share API
+                if (_isMobile && navigator.share) {
+                    navigator.share({ title: '洛谷 AI 报告', text: _val }).catch(function(){
+                        _doCopy(_val, _ta);
+                    });
+                    return;
+                }
+                // 其他场景: 复制 + 提示
+                _doCopy(_val, _ta);
             }
             </script>
             {% endif %}
@@ -7564,6 +7570,58 @@ LIST_REPORTS_HTML = """
 """
 
 
+
+def _build_invite_share_text(
+    task: dict,
+    invite_url: str,
+    invite_count: int = 0,
+    unlock_level: int = 0,
+    student_name: str = "同学",
+) -> str:
+    """v19 · 报告锁邀请推荐文案
+
+    根据邀请人数生成不同口吾:
+      - 0 人: "刚装了个报告, 快试试"
+      - 1–3 人: "已解锁 X 档, 你也来看看"
+      - 4 人: "再邀 1 人解锁 AI 讲题"
+      - 5 人以上: "已全部解锁, 推荐给同学"
+    """
+    if not invite_url:
+        return ""
+    if unlock_level >= 5:
+        subject = (
+            "🎉 我的洛谷 AI 报告已全部解锁，"
+            "能力雷达+错题清单+定制题单+AI讲题全都有！"
+        )
+        cta = "推荐给同学一起体验，越拼越准！"
+    elif unlock_level >= 3:
+        subject = "🔍 刚生成了个人题单，准备报名 CSP！"
+        cta = "你也是个准备 CSP 吗？越拼越准, 赶紧领你的 AI 报告！"
+    elif unlock_level >= 1:
+        subject = (
+            "📊 刚生成了洛谷 AI 学习报告, "
+            "已解锁能力雷达 + 知识点盲区"
+        )
+        cta = "通过我的链接生成你的报告, 我也能多解锁一档, 双赢！"
+    else:
+        subject = (
+            "🚀 刚装了个洛谷 AI 报告, "
+            "含 5 档内容 (能力雷达/错题清单/AI 讲题)"
+        )
+        cta = "越拼越准, 赶紧享受你的 AI 报告！"
+
+    body = (
+        f"{subject}\n\n"
+        f"什么是洛谷 AI 报告？"
+        f"不用 Cookie, 不登帐号, 粘贴练习页源码就能生成你的个人 AI 报告, "
+        f"涵盖能力雷达、知识点盲区、错题清单、定制题单、AI 讲题 5 档。\n\n"
+        f"【{cta}】\n\n"
+        f"👉 点击领取你的 AI 报告: \n{invite_url}\n\n"
+        f"#洛谷 #AI学习报告 #CSP备考 #越拼越准"
+    )
+    return body
+
+
 @app.route("/status/<task_id>")
 def status_page(task_id):
     if not is_generation_task_active(task_id):
@@ -7689,6 +7747,8 @@ def status_page(task_id):
     else:
         _invite_token = ""
 
+    # v19 · 渲染前取 student_name (用于推荐文案)
+    _status_student_name = (str(task.get("student_name") or "")).strip() or "同学"
     # ---- 报告锁: 渲染模板 ----
     return render_template_string(
         STATUS_HTML,
@@ -7727,6 +7787,17 @@ def status_page(task_id):
         invite_count=int(task.get("invite_count", 0) or 0),
         unlock_level=get_unlock_level(int(task.get("invite_count", 0) or 0)),
         invite_share_url=f"https://oi.aijiangti.cn/upload-source?invite={_invite_token}&task={task_id}" if _invite_token else "",
+        # v19 · 推荐文案 (根据邀请进度动态生成, 默认推荐主题)
+        invite_share_text=_build_invite_share_text(
+            task=task,
+            invite_url=(
+                f"https://oi.aijiangti.cn/upload-source?invite={_invite_token}&task={task_id}"
+                if _invite_token else ""
+            ),
+            invite_count=int(task.get("invite_count", 0) or 0),
+            unlock_level=get_unlock_level(int(task.get("invite_count", 0) or 0)),
+            student_name=_status_student_name,
+        ),
     )
 
 

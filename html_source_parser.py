@@ -29,7 +29,7 @@ from typing import Any, Dict, List, Optional, Tuple
 # 匹配 "passed":[...], "submitted" 的非贪婪抓取
 # 容忍嵌套: 支持 [a, [b, c], d] 这种 1 层嵌套 (洛谷的 practiceData.passed 偶尔会嵌)
 _RE_PASSED = re.compile(
-    r'"passed"\s*:\s*(\[(?:[^\[\]]|\[[^\[\]]*\])*\])\s*,\s*"submitted"',
+    r'"passed"\s*:\s*(\[(?:[^\[\]]|\[[^\[\]]*\])*\])',
     re.S,
 )
 # 匹配 "submitted":[...], 后面跟随 "}" 或 "," (避免吃掉下一个字段)
@@ -85,8 +85,40 @@ def _safe_parse_array(raw: str) -> List[Any]:
 
 # ---------- 提取引擎 ----------
 
+
+
+def _normalize_html(html: str) -> str:
+    """v22 · 提取前预处理 (多重 HTML entity + JS escape 反转义)
+
+    洛谷可能出现的转义类型:
+      - &quot; → "
+      - &amp;quot; → &quot; → " (双重转义, 需重复处理)
+      - &#34; → "
+      - \"passed\" → "passed" (JS escape)
+    """
+    s = html
+    # HTML entity 反转义 (重复 3 遍, 支持双重/三重转义)
+    for _ in range(3):
+        prev = s
+        s = (
+            s.replace("&quot;", chr(34))
+             .replace("&#34;", chr(34))
+             .replace("&apos;", chr(39))
+             .replace("&#39;", chr(39))
+             .replace("&lt;", "<")
+             .replace("&gt;", ">")
+             .replace("&nbsp;", " ")
+             .replace("&amp;", "&")
+        )
+        if s == prev:
+            break
+    # JS escape 反转义
+    s = s.replace('\\"', chr(34))
+    return s
+
 def _extract_passed_array(html: str) -> Optional[List[Any]]:
-    m = _RE_PASSED.search(html)
+    # v22 · 提前 normalize
+    m = _RE_PASSED.search(_normalize_html(html))
     if not m:
         return None
     try:
@@ -97,7 +129,8 @@ def _extract_passed_array(html: str) -> Optional[List[Any]]:
 
 
 def _extract_submitted_array(html: str) -> Optional[List[Any]]:
-    m = _RE_SUBMITTED.search(html)
+    # v22 · 提前 normalize
+    m = _RE_SUBMITTED.search(_normalize_html(html))
     if not m:
         return None
     try:
@@ -273,9 +306,38 @@ def parse_html_source(
     # 1) 提取 passed 数组
     passed_raw = _extract_passed_array(html)
     if passed_raw is None:
+        # v22: 诊断更具体 - 检查 normalize 前后 passed 出现位置
+        _hint_parts = []
+        _norm = _normalize_html(html)
+        if "passed" in _norm:
+            _hint_parts.append("页面含 passed 文本, 但数组不是标准 [ ... ] 格式")
+        elif "passed" in html:
+            _ctx_count = html.count("passed")
+            _hint_parts.append(f"页面含 {_ctx_count} 个 passed 文本, 但 normalize 后无 (\u53ef能转义太深)")
+        elif "practiceData" in html:
+            _hint_parts.append("页面含 practiceData 但不是标准结构")
+        elif "submitted" in html:
+            _hint_parts.append("只找到 submitted, 但无 passed")
+        else:
+            _hint_parts.append("页面未包含任何 passed/submitted 数据")
+        _hint_parts.append(
+            "请确认粘贴的是【洛谷个人练习】页 "
+            "(www.luogu.com.cn/user/<UID>/practice) 的完整源码"
+        )
+        # v22: 失败时保存 HTML 到 /tmp 供后续调试
+        try:
+            import os as _os
+            import time as _time
+            _debug_path = f"/tmp/luogu_practice_failed_{int(_time.time())}.html"
+            _os.makedirs("/tmp", exist_ok=True)
+            with open(_debug_path, "w", encoding="utf-8", errors="replace") as _f:
+                _f.write(html[:200 * 1024])
+        except Exception:
+            pass
         raise HtmlSourceParseError(
-            "未找到 \"passed\" 数据, 请确认粘贴的是【洛谷个人练习】页面 "
-            "(https://www.luogu.com.cn/user/<UID>/practice) 的完整源码"
+            "未找到 \"passed\" 数据, "
+            + " | ".join(_hint_parts)
+            + " 如果粘贴有问题, 可换 <a href=\"/upload-zip\">ZIP 模式</a> 兜底"
         )
 
     # 2) 提取 submitted 数组 (可选, 部分旧版页面可能没有)

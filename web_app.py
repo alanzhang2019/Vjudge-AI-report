@@ -12,7 +12,7 @@ from datetime import datetime, date, timedelta, timezone
 # v3.11.0 · 洛谷公开题库本地缓存 (problemset-open)
 # 进程启动时 ensure_ready() 会后台下载 + 构建索引, 提供 title/difficulty/tags 兜底
 import problemset_index
-from elo_ranking import (init_elo_schema, save_elo_snapshot, get_latest_elo_top10, get_snapshot_meta, find_user_report, _parse_elo_html, get_color_hex, get_color_label, get_color_bg_class)
+from elo_ranking import (init_elo_schema, save_elo_snapshot, get_latest_elo_top10, get_snapshot_meta, find_user_report, _parse_elo_html, get_color_hex, get_color_label, get_color_bg_class, save_admin_cookies, get_admin_cookies, delete_admin_cookies, try_fetch_elo_via_api, start_elo_scheduler, get_recent_fetch_log)
 
 # v3.11.0 · 洛谷个人练习页 HTML 源码解析 (用户 Ctrl+U 复制粘贴, 走 algobeatcontest 同款清洗)
 import html_source_parser
@@ -254,7 +254,7 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
 APP_VERSION = "v3.11.25"
-APP_VERSION_BUILD = "20260709_v3p13_elo_ranking_v1"  # v3.13: 洛谷 ELO 等级分 Top10 公开排行榜 + admin 粘贴 HTML 抓取
+APP_VERSION_BUILD = "20260710_v3p13_elo_ranking_v2"  # v3.13b: ELO 全自动抓取 (admin cookies + 后台线程)
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -23806,8 +23806,9 @@ body{font-family:"Inter",ui-sans-serif,system-ui,-apple-system,"PingFang SC","Mi
 <div class="bg-amber-50 border-2 border-amber-200 rounded-xl p-8 text-center">
 <div class="text-5xl mb-3">📋</div>
 <h2 class="text-xl font-bold text-amber-900 mb-2">还没有排行榜数据</h2>
-<p class="text-sm text-amber-800 mb-4">管理员可在 <a href="/admin/elo/upload" class="font-bold underline">/admin/elo/upload</a> 粘贴洛谷 ELO 页面 HTML 源码, 即可抓取 Top 10</p>
-<p class="text-xs text-amber-600">💡 洛谷在服务端被 Cloudflare 拦截 (403), 但 admin 本地浏览器能访问. 复制 HTML 源码粘贴是最稳的方案.</p>
+<p class="text-sm text-amber-800 mb-4">Admin 需在 <a href="/admin/elo/settings" class="font-bold underline">/admin/elo/settings</a> 粘贴自己的洛谷 cookies, 后台线程每 6 小时自动抓取一次 ranking/elo.</p>
+<p class="text-xs text-amber-600 mb-2">💡 洛谷在服务端被 Cloudflare 拦截, 但只要 admin cookies 没失效, 自动化就稳定.</p>
+<p class="text-xs text-amber-600">🛟 兜底: 抓取失败时, admin 还可在 <a href="/admin/elo/upload" class="font-bold underline">/admin/elo/upload</a> 粘贴洛谷 ELO 页面 HTML 源码.</p>
 </div>
 {% else %}
 
@@ -23868,7 +23869,7 @@ body{font-family:"Inter",ui-sans-serif,system-ui,-apple-system,"PingFang SC","Mi
 <div class="mt-10 bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-xl p-6">
 <h3 class="text-lg font-bold text-indigo-900 mb-2">📊 关于本榜单</h3>
 <ul class="text-sm text-indigo-800 space-y-1.5">
-<li>· 数据源: 洛谷 ELO 等级分排行榜 (管理员定期粘贴 HTML 同步)</li>
+<li>· 数据源: 洛谷 ELO 等级分排行榜 (admin 配置 cookies 后, 后台每 6 小时自动抓取)</li>
 <li>· 报告复用: 如果 Top 10 用户在本平台生成过报告, 公开围观; 否则只显示基础信息</li>
 <li>· 颜色评级: 灰&lt;1200 · 绿&lt;1400 · 青&lt;1600 · 蓝&lt;1900 · 紫&lt;2100 · 黄&lt;2400 · 橙&lt;2600 · 红&lt;3000 · 传奇≥3000</li>
 <li>· 隐私保护: 仅展示公开 uid 和用户名, 报告内容遵循用户解锁档位</li>
@@ -23940,6 +23941,211 @@ def admin_elo_upload():
     return redirect(url_for("admin_elo_upload", msg=f"✅ 抓取成功! 共 {len(users)} 人: {names}"))
 
 
+# ============== v3.13b · ELO 排行榜: admin cookies + 全自动抓取 ==============
+
+ADMIN_ELO_SETTINGS_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>ELO 抓取设置 · Admin</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+body{font-family:"Inter",ui-sans-serif,system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:#F8FAFC;color:#0F172A;}
+.card{background:white;border-radius:1rem;box-shadow:0 1px 3px rgba(0,0,0,0.05);}
+.btn-primary{background:linear-gradient(135deg,#6366F1,#8B5CF6);color:white;font-weight:600;padding:0.6rem 1.2rem;border-radius:0.5rem;transition:all .2s;}
+.btn-primary:hover{transform:translateY(-1px);box-shadow:0 8px 20px rgba(99,102,241,0.3);}
+.btn-danger{background:#FEE2E2;color:#B91C1C;font-weight:600;padding:0.4rem 0.8rem;border-radius:0.5rem;}
+.btn-danger:hover{background:#FECACA;}
+.app-label{font-size:0.875rem;font-weight:600;color:#334155;display:block;margin-bottom:0.25rem;}
+.app-input{width:100%;padding:0.5rem 0.75rem;border:1px solid #CBD5E1;border-radius:0.5rem;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:0.875rem;}
+.app-input:focus{outline:none;border-color:#6366F1;box-shadow:0 0 0 3px rgba(99,102,241,0.1);}
+</style>
+</head>
+<body class="min-h-screen p-6">
+<div class="max-w-3xl mx-auto">
+
+<a href="/admin" class="text-sm text-indigo-600 hover:underline mb-4 inline-block">← 返回 Admin 后台</a>
+
+<div class="mb-6">
+<h1 class="text-2xl font-bold text-slate-900 mb-1">⚙️ ELO 排行榜 · 自动抓取设置</h1>
+<p class="text-sm text-slate-500">保存一次你自己的洛谷 cookies, 后台线程每 6 小时自动调 <code class="bg-slate-100 px-1 rounded">ranking/elo</code>, 写入数据库. 不用再粘贴 HTML 源码.</p>
+</div>
+
+{% if msg %}
+<div class="mb-4 p-3 rounded-lg text-sm
+{% if '✅' in msg %}bg-emerald-50 text-emerald-800 border border-emerald-200
+{% elif '❌' in msg %}bg-red-50 text-red-800 border border-red-200
+{% else %}bg-amber-50 text-amber-800 border border-amber-200{% endif %}">
+{{ msg }}
+</div>
+{% endif %}
+
+{% if cookies %}
+<div class="card p-5 mb-4">
+<h2 class="font-bold text-slate-900 mb-2">📌 当前配置</h2>
+<dl class="text-sm space-y-1.5">
+<div class="flex"><dt class="w-32 text-slate-500">__client_id:</dt><dd class="font-mono">{{ cookies.client_id[:12] }}... ({{ cookies.client_id|length }} 字符)</dd></div>
+<div class="flex"><dt class="w-32 text-slate-500">_uid:</dt><dd class="font-mono">{{ cookies.luogu_uid }}</dd></div>
+<div class="flex"><dt class="w-32 text-slate-500">C3VK:</dt><dd class="font-mono">{{ cookies.c3vk[:8] if cookies.c3vk else '(空)' }}...</dd></div>
+<div class="flex"><dt class="w-32 text-slate-500">保存时间:</dt><dd>{{ cookies.saved_at }}</dd></div>
+{% if cookies.last_used_at %}
+<div class="flex"><dt class="w-32 text-slate-500">最近抓取:</dt><dd>{{ cookies.last_used_at }} · <span class="font-bold
+{% if cookies.last_status == 'ok' %}text-emerald-600
+{% else %}text-red-600{% endif %}">{{ cookies.last_status }}</span></dd></div>
+{% if cookies.last_message %}
+<div class="flex"><dt class="w-32 text-slate-500">最近消息:</dt><dd class="text-xs text-slate-600 break-all">{{ cookies.last_message }}</dd></div>
+{% endif %}
+{% endif %}
+</dl>
+<form method="post" action="/admin/elo/settings/delete" class="mt-3"
+      onsubmit="return confirm('确定删除 cookies 配置? 删除后自动抓取停止, 公开页面保留最后一份快照');">
+<button type="submit" class="btn-danger text-sm">🗑️ 删除 cookies</button>
+</form>
+</div>
+{% else %}
+<div class="card p-5 mb-4 border-2 border-amber-300 bg-amber-50">
+<h2 class="font-bold text-amber-900 mb-2">⚠️ 尚未配置 admin cookies</h2>
+<p class="text-sm text-amber-800">公开页面会用之前抓取的快照; 定时抓取已启动, 但没有 cookies 调不通 ranking/elo.</p>
+</div>
+{% endif %}
+
+<div class="card p-5 mb-4">
+<h2 class="font-bold text-slate-900 mb-3">🆕 {{ '更新' if cookies else '保存' }} cookies</h2>
+<form method="post" class="space-y-3">
+<div>
+<label class="app-label">__client_id <span class="text-red-500">*</span></label>
+<input type="text" name="client_id" required class="app-input" placeholder="从浏览器 DevTools 复制的 __client_id cookie 值 (32 字符左右)">
+</div>
+<div>
+<label class="app-label">_uid <span class="text-red-500">*</span></label>
+<input type="text" name="luogu_uid" required class="app-input" placeholder="你的洛谷 UID (纯数字)">
+</div>
+<div>
+<label class="app-label">C3VK <span class="text-slate-400">(可选)</span></label>
+<input type="text" name="c3vk" class="app-input" placeholder="可留空, v3.9.60 后不再需要">
+</div>
+<button type="submit" class="btn-primary">💾 保存 cookies</button>
+</form>
+</div>
+
+<div class="card p-5 mb-4">
+<h2 class="font-bold text-slate-900 mb-3">⚡ 立即手动抓取一次</h2>
+<form method="post" action="/admin/elo/fetch-now" onsubmit="return confirm('立即调用 ranking/elo 抓取, 可能需要 5-15 秒');">
+<button type="submit" class="btn-primary">🚀 立即抓取 ELO 排行榜</button>
+</form>
+<p class="text-xs text-slate-500 mt-2">抓取成功会立刻更新公开页面; 失败会保留旧 snapshot 并写入 fetch log.</p>
+</div>
+
+{% if recent_log %}
+<div class="card p-5">
+<h2 class="font-bold text-slate-900 mb-3">📜 抓取历史 (最近 10 条)</h2>
+<table class="w-full text-sm">
+<thead class="text-left text-xs text-slate-500 border-b">
+<tr><th class="py-2">时间</th><th>来源</th><th>状态</th><th>用户数</th><th>耗时</th><th>消息</th></tr>
+</thead>
+<tbody>
+{% for r in recent_log %}
+<tr class="border-b border-slate-100">
+<td class="py-2 font-mono text-xs">{{ r.fetched_at }}</td>
+<td><span class="px-2 py-0.5 rounded text-xs
+{% if r.source == 'auto' %}bg-indigo-100 text-indigo-700
+{% elif r.source == 'manual_api' %}bg-emerald-100 text-emerald-700
+{% else %}bg-slate-100 text-slate-700{% endif %}">{{ r.source }}</span></td>
+<td>{% if r.ok %}✅{% else %}❌{% endif %}</td>
+<td>{{ r.user_count }}</td>
+<td>{{ r.duration_ms }}ms</td>
+<td class="text-xs text-slate-600 break-all">{{ r.message }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% endif %}
+
+<div class="card p-5 mt-4 bg-slate-50">
+<h3 class="font-bold text-slate-900 mb-2">🔍 如何获取自己的 cookies</h3>
+<ol class="text-sm text-slate-700 space-y-1 list-decimal list-inside">
+<li>用浏览器登录 <a href="https://www.luogu.com.cn" target="_blank" class="text-indigo-600 underline">luogu.com.cn</a></li>
+<li>按 F12 打开 DevTools → Application 标签 → Cookies → 选 <code class="bg-white px-1 rounded">https://www.luogu.com.cn</code></li>
+<li>复制 <code class="bg-white px-1 rounded">__client_id</code> 和 <code class="bg-white px-1 rounded">_uid</code> 两项的值</li>
+<li>粘贴到上面表单 → 保存</li>
+</ol>
+<p class="text-xs text-slate-500 mt-2">💡 跟学员提交报告时用的 __client_id 一样, 只是这次用 admin 自己的.</p>
+</div>
+
+</div>
+</body>
+</html>
+"""
+
+
+@app.route("/admin/elo/settings", methods=["GET", "POST"])
+def admin_elo_settings():
+    """v3.13b · admin 一次性保存 cookies, 后台自动抓取 ELO"""
+    auth_redirect = require_admin_auth()
+    if auth_redirect is not None:
+        return auth_redirect
+
+    msg = request.args.get("msg") or request.form.get("_msg")
+
+    if request.method == "POST":
+        client_id = (request.form.get("client_id") or "").strip()
+        luogu_uid = (request.form.get("luogu_uid") or "").strip()
+        c3vk = (request.form.get("c3vk") or "").strip()
+        if not client_id or not luogu_uid:
+            return redirect(url_for("admin_elo_settings", msg="❌ __client_id 和 _uid 都是必填"))
+        try:
+            result = save_admin_cookies("/app/data/tasks.db", client_id, luogu_uid, c3vk)
+            # 顺便立即跑一次, 让 admin 看到效果
+            fetch_res = try_fetch_elo_via_api("/app/data/tasks.db", source="manual_api")
+            extra = ""
+            if fetch_res.get("ok"):
+                extra = f", 立即抓取成功, 共 {len(fetch_res.get('users', []))} 人"
+            else:
+                extra = f", 但立即抓取失败: {fetch_res.get('message', '未知')}"
+            return redirect(url_for("admin_elo_settings", msg=f"✅ cookies 已保存{extra}"))
+        except Exception as e:
+            app.logger.error(f"[v3.13b] save_admin_cookies err: {e}")
+            return redirect(url_for("admin_elo_settings", msg=f"❌ 保存失败: {e}"))
+
+    cookies = get_admin_cookies("/app/data/tasks.db")
+    recent_log = get_recent_fetch_log("/app/data/tasks.db", limit=10)
+    return render_template_string(
+        ADMIN_ELO_SETTINGS_HTML,
+        msg=msg,
+        cookies=cookies,
+        recent_log=recent_log,
+    )
+
+
+@app.route("/admin/elo/settings/delete", methods=["POST"])
+def admin_elo_settings_delete():
+    auth_redirect = require_admin_auth()
+    if auth_redirect is not None:
+        return auth_redirect
+    try:
+        delete_admin_cookies("/app/data/tasks.db")
+        return redirect(url_for("admin_elo_settings", msg="✅ cookies 已删除, 自动抓取将跳过"))
+    except Exception as e:
+        return redirect(url_for("admin_elo_settings", msg=f"❌ 删除失败: {e}"))
+
+
+@app.route("/admin/elo/fetch-now", methods=["POST"])
+def admin_elo_fetch_now():
+    """v3.13b · admin 手动触发一次 ELO 抓取"""
+    auth_redirect = require_admin_auth()
+    if auth_redirect is not None:
+        return auth_redirect
+    result = try_fetch_elo_via_api("/app/data/tasks.db", source="manual_api")
+    if result.get("ok"):
+        names = "、".join([f"#{u['rank']} {u['name']}({u['rating']})" for u in result.get("users", [])])
+        return redirect(url_for("admin_elo_settings", msg=f"✅ 抓取成功! 共 {len(result.get('users', []))} 人: {names}"))
+    else:
+        return redirect(url_for("admin_elo_settings", msg=f"❌ 抓取失败: {result.get('message', '未知')}"))
+
+
 if __name__ == "__main__":
     # 读取 FLASK_DEBUG 环境变量（与 `flask run` 一致），默认 off
     import os as _os
@@ -23952,5 +24158,14 @@ if __name__ == "__main__":
         app.logger.info("[v3.11.0/problemset] ensure_ready 已调度")
     except Exception as _e:  # noqa: BLE001
         app.logger.warning(f"[v3.11.0/problemset] ensure_ready 失败: {_e}")
+
+    # v3.13b · 启动 ELO 排行榜后台自动抓取线程
+    # 每 6 小时调一次 pyLuogu.get_elo_ranking, 写 DB
+    # 如果 admin 没配置 cookies, 调度器会跳过 (无副作用)
+    try:
+        if start_elo_scheduler():
+            app.logger.info("[v3.13b/elo] auto-fetch scheduler started")
+    except Exception as _e:  # noqa: BLE001
+        app.logger.warning(f"[v3.13b/elo] start_elo_scheduler 失败: {_e}")
 
     app.run(host="0.0.0.0", port=5000, debug=_dbg)

@@ -253,7 +253,7 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
 APP_VERSION = "v3.11.25"
-APP_VERSION_BUILD = "20260709_v3p12_report_lock_v23"  # v23: 复制按钮=推荐文案 / 微信改微信/QQ 分享
+APP_VERSION_BUILD = "20260709_v3p12_report_lock_v24"  # v24: 推荐文案改第一人称+简洁+自带炫耀
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -7578,48 +7578,48 @@ def _build_invite_share_text(
     unlock_level: int = 0,
     student_name: str = "同学",
 ) -> str:
-    """v19 · 报告锁邀请推荐文案
+    """v24 · 报告锁邀请推荐文案 (第一人称 + 简洁 + 自带炫耀)
 
-    根据邀请人数生成不同口吾:
-      - 0 人: "刚装了个报告, 快试试"
-      - 1–3 人: "已解锁 X 档, 你也来看看"
-      - 4 人: "再邀 1 人解锁 AI 讲题"
-      - 5 人以上: "已全部解锁, 推荐给同学"
+    根据解锁档位生成不同口吾:
+      - 0 档: "我刚解锁能力雷达, 真香"
+      - 1 档: "我已解锁能力雷达+盲区"
+      - 3 档: "我已解锁 3 档, 含定制题单"
+      - 5 档: "拼了 5 同学, 我全档解锁"
     """
     if not invite_url:
         return ""
     if unlock_level >= 5:
-        subject = (
-            "🎉 我的洛谷 AI 报告已全部解锁，"
-            "能力雷达+错题清单+定制题单+AI讲题全都有！"
+        # 全部解锁 - 炫耀拉满
+        return (
+            "🎉 拼了 5 个同学，我终于解锁了洛谷 AI 报告全 5 档！\n"
+            "能力雷达 + 错题清单 + 定制题单 + AI 讲题，太爽了！\n"
+            f"你也来拼：{invite_url}\n"
+            "#洛谷 #CSP备考 #越拼越准"
         )
-        cta = "推荐给同学一起体验，越拼越准！"
     elif unlock_level >= 3:
-        subject = "🔍 刚生成了个人题单，准备报名 CSP！"
-        cta = "你也是个准备 CSP 吗？越拼越准, 赶紧领你的 AI 报告！"
+        # 3 档
+        return (
+            f"🔥 我已解锁洛谷 AI 报告 3 档：能力雷达 + 盲区 + 定制题单！\n"
+            f"再邀 {5 - invite_count} 人就解锁 AI 讲题，你也来一起拼：\n"
+            f"{invite_url}\n"
+            "#洛谷 #CSP备考 #越拼越准"
+        )
     elif unlock_level >= 1:
-        subject = (
-            "📊 刚生成了洛谷 AI 学习报告, "
-            "已解锁能力雷达 + 知识点盲区"
+        # 1 档
+        return (
+            f"📈 我已解锁洛谷 AI 报告 {unlock_level} 档：能力雷达 + 知识点盲区看到了！\n"
+            f"再邀 {5 - invite_count} 人解锁全 5 档（错题清单 + AI 讲题）！\n"
+            f"你也来：{invite_url}\n"
+            "#洛谷 #CSP备考 #越拼越准"
         )
-        cta = "通过我的链接生成你的报告, 我也能多解锁一档, 双赢！"
     else:
-        subject = (
-            "🚀 刚装了个洛谷 AI 报告, "
-            "含 5 档内容 (能力雷达/错题清单/AI 讲题)"
+        # 0 档 - 起步炫耀
+        return (
+            "🚀 我刚生成了洛谷 AI 报告，能力雷达 + 错题清单 + AI 讲题，太香了！\n"
+            f"你也来试试，5 个同学一起拼就解锁全 5 档：\n"
+            f"{invite_url}\n"
+            "#洛谷 #CSP备考 #越拼越准"
         )
-        cta = "越拼越准, 赶紧享受你的 AI 报告！"
-
-    body = (
-        f"{subject}\n\n"
-        f"什么是洛谷 AI 报告？"
-        f"不用 Cookie, 不登帐号, 粘贴练习页源码就能生成你的个人 AI 报告, "
-        f"涵盖能力雷达、知识点盲区、错题清单、定制题单、AI 讲题 5 档。\n\n"
-        f"【{cta}】\n\n"
-        f"👉 点击领取你的 AI 报告: \n{invite_url}\n\n"
-        f"#洛谷 #AI学习报告 #CSP备考 #越拼越准"
-    )
-    return body
 
 
 @app.route("/status/<task_id>")

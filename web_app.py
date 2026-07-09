@@ -253,7 +253,7 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
 APP_VERSION = "v3.11.25"
-APP_VERSION_BUILD = "20260709_v3p12_report_lock_v24"  # v24: 推荐文案改第一人称+简洁+自带炫耀
+APP_VERSION_BUILD = "20260709_v3p12_report_lock_v25"  # v25: _RE_PASSED 改 _find_balanced_array 递归匹配任意层嵌套
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)

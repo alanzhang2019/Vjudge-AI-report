@@ -12,7 +12,7 @@ from datetime import datetime, date, timedelta, timezone
 # v3.11.0 · 洛谷公开题库本地缓存 (problemset-open)
 # 进程启动时 ensure_ready() 会后台下载 + 构建索引, 提供 title/difficulty/tags 兜底
 import problemset_index
-from elo_ranking import (init_elo_schema, save_elo_snapshot, get_latest_elo_top10, get_snapshot_meta, find_user_report, _parse_elo_html, get_color_hex, get_color_label, get_color_bg_class, save_admin_cookies, get_admin_cookies, delete_admin_cookies, try_fetch_elo_via_api, start_elo_scheduler, get_recent_fetch_log)
+from elo_ranking import (init_elo_schema, save_elo_snapshot, get_latest_elo_top10, get_snapshot_meta, find_user_report, _parse_elo_html, get_color_hex, get_color_label, get_color_bg_class, save_admin_cookies, get_admin_cookies, delete_admin_cookies, try_fetch_elo_via_api, start_elo_scheduler, get_recent_fetch_log, _rating_to_color)
 
 # v3.11.0 · 洛谷个人练习页 HTML 源码解析 (用户 Ctrl+U 复制粘贴, 走 algobeatcontest 同款清洗)
 import html_source_parser
@@ -254,7 +254,7 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
 APP_VERSION = "v3.11.25"
-APP_VERSION_BUILD = "20260710_v3p13_elo_ranking_v2"  # v3.13b: ELO 全自动抓取 (admin cookies + 后台线程)
+APP_VERSION_BUILD = "20260710_v3p13_elo_ranking_v3"  # v3.13c: 浏览器 bookmarklet 一键同步 ELO (解决 CF 拦截)
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -23869,7 +23869,8 @@ body{font-family:"Inter",ui-sans-serif,system-ui,-apple-system,"PingFang SC","Mi
 <div class="mt-10 bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-xl p-6">
 <h3 class="text-lg font-bold text-indigo-900 mb-2">📊 关于本榜单</h3>
 <ul class="text-sm text-indigo-800 space-y-1.5">
-<li>· 数据源: 洛谷 ELO 等级分排行榜 (admin 配置 cookies 后, 后台每 6 小时自动抓取)</li>
+<li>· 数据源: 洛谷 ELO 等级分排行榜 (admin 配置 cookies 后, 后台每 6 小时自动抓取; 若服务器 IP 被 Cloudflare 拦截, 则保留上次快照)</li>
+<li>· 💡 若排行榜长时间未更新, 说明 admin 抓取失败; 兜底方案: admin 浏览器打开 ranking/elo 页面 → Ctrl+U 复制 HTML → 粘贴到 <a href="/admin/elo/upload" class="underline">/admin/elo/upload</a></li>
 <li>· 报告复用: 如果 Top 10 用户在本平台生成过报告, 公开围观; 否则只显示基础信息</li>
 <li>· 颜色评级: 灰&lt;1200 · 绿&lt;1400 · 青&lt;1600 · 蓝&lt;1900 · 紫&lt;2100 · 黄&lt;2400 · 橙&lt;2600 · 红&lt;3000 · 传奇≥3000</li>
 <li>· 隐私保护: 仅展示公开 uid 和用户名, 报告内容遵循用户解锁档位</li>
@@ -23970,7 +23971,7 @@ body{font-family:"Inter",ui-sans-serif,system-ui,-apple-system,"PingFang SC","Mi
 
 <div class="mb-6">
 <h1 class="text-2xl font-bold text-slate-900 mb-1">⚙️ ELO 排行榜 · 自动抓取设置</h1>
-<p class="text-sm text-slate-500">保存一次你自己的洛谷 cookies, 后台线程每 6 小时自动调 <code class="bg-slate-100 px-1 rounded">ranking/elo</code>, 写入数据库. 不用再粘贴 HTML 源码.</p>
+<p class="text-sm text-slate-500">保存 cookies, 让后台自动抓 ranking/elo; 或用 <b>书签工具</b> 一键从浏览器同步. <span class="text-amber-600 font-bold">若服务器被 Cloudflare 拦截, 只能用书签工具.</span></p>
 </div>
 
 {% if msg %}
@@ -24038,6 +24039,26 @@ body{font-family:"Inter",ui-sans-serif,system-ui,-apple-system,"PingFang SC","Mi
 <p class="text-xs text-slate-500 mt-2">抓取成功会立刻更新公开页面; 失败会保留旧 snapshot 并写入 fetch log.</p>
 </div>
 
+<div class="card p-5 mb-4 border-2 border-indigo-300 bg-gradient-to-br from-indigo-50 to-purple-50">
+<h2 class="font-bold text-slate-900 mb-2">📌 浏览器书签一键同步 <span class="text-xs font-normal text-indigo-600 ml-2">(推荐 · 解决 CF 拦截)</span></h2>
+<p class="text-sm text-slate-700 mb-3">服务端 IP 被 Cloudflare 拦截, 服务器永远连不上 ranking/elo. 唯一能跑通的办法是用 <b>admin 自己的浏览器</b> (admin IP 没被 ban) 抓数据. 一次拖拽, 以后打开洛谷页面点一下书签就同步.</p>
+<ol class="text-sm text-slate-700 space-y-1 list-decimal list-inside mb-4">
+<li>把下面这个按钮 <b>拖到浏览器书签栏</b> (Chrome/Firefox/Edge 都可以):
+<div class="my-2"><a id="elo-bookmarklet" href="#" class="inline-block px-4 py-2 bg-gradient-to-r from-indigo-500 to-purple-500 text-white font-bold rounded-lg shadow-md hover:shadow-lg transition-all cursor-move">🚀 同步 ELO 到 oi.aijiangti.cn</a></div></li>
+<li>浏览器打开 <a href="https://www.luogu.com.cn/ranking/elo?page=1" target="_blank" class="text-indigo-600 underline">洛谷 ELO 排行榜</a> 页面</li>
+<li>点击书签栏的 <b>"🚀 同步 ELO 到 oi.aijiangti.cn"</b> 按钮</li>
+<li>自动跳回 oi 后台, 显示 <code class="bg-white px-1 rounded">✅ 浏览器同步成功, 共 10 人</code></li>
+</ol>
+<div class="bg-white border border-slate-200 rounded-lg p-3 text-xs">
+<p class="font-bold text-slate-700 mb-1">💡 书签栏不显示怎么办?</p>
+<p class="text-slate-600">按 <kbd class="bg-slate-100 px-1 rounded">Ctrl/Cmd+Shift+B</kbd> 显示书签栏; 或者右键上面的按钮 → "收藏链接".</p>
+</div>
+<div class="bg-white border border-slate-200 rounded-lg p-3 text-xs mt-2">
+<p class="font-bold text-slate-700 mb-1">🛟 没用书签? 还有兜底:</p>
+<p class="text-slate-600">在 ranking/elo 页面按 <kbd class="bg-slate-100 px-1 rounded">Ctrl+U</kbd> 复制整页 HTML, 粘贴到 <a href="/admin/elo/upload" class="text-indigo-600 underline">/admin/elo/upload</a> 也能同步.</p>
+</div>
+</div>
+
 {% if recent_log %}
 <div class="card p-5">
 <h2 class="font-bold text-slate-900 mb-3">📜 抓取历史 (最近 10 条)</h2>
@@ -24076,6 +24097,39 @@ body{font-family:"Inter",ui-sans-serif,system-ui,-apple-system,"PingFang SC","Mi
 </div>
 
 </div>
+<script>
+// v3.13b · 设置 bookmarklet 的 href, 让 admin 可以拖到书签栏
+(function(){
+  var bookmarkletCode = [
+    "javascript:void(function(){",
+    "  var users=[];",
+    "  var seen={};",
+    "  document.querySelectorAll('a[href^=\"/user/\"]').forEach(function(a){",
+    "    var m=a.href.match(/\\/user\\/(\\d+)/);",
+    "    if(!m) return;",
+    "    var uid=+m[1];",
+    "    if(seen[uid]) return;",
+    "    seen[uid]=1;",
+    "    var name=(a.textContent||'').trim();",
+    "    var row=a.closest('tr,li,div');",
+    "    var rating=0;",
+    "    if(row){",
+    "      var mt=row.textContent.match(/\\b(\\d{3,4})\\b/g);",
+    "      if(mt)for(var i=0;i<mt.length;i++){var v=+mt[i];if(v>=500&&v<=5000&&v>rating)rating=v;}",
+    "    }",
+    "    users.push({uid:uid,name:name,rating:rating});",
+    "  });",
+    "  if(!users.length){alert('未找到用户链接, 请确认当前是洛谷 ranking/elo 页面');return;}",
+    "  var data=encodeURIComponent(JSON.stringify(users));",
+    "  location.href='https://oi.aijiangti.cn/admin/elo/sync-from-browser?data='+data;",
+    "})();"
+  ].join('\n');
+  var a = document.getElementById('elo-bookmarklet');
+  if (a) {
+    a.href = bookmarkletCode;
+  }
+})();
+</script>
 </body>
 </html>
 """
@@ -24103,6 +24157,8 @@ def admin_elo_settings():
             extra = ""
             if fetch_res.get("ok"):
                 extra = f", 立即抓取成功, 共 {len(fetch_res.get('users', []))} 人"
+            elif fetch_res.get("cf_blocked"):
+                extra = " · ⚠️ 检测到 Cloudflare 拦了服务器 IP, 即使 cookies 有效也连不上. 请用 <a href='/admin/elo/upload' class='underline font-bold'>粘贴 HTML 兑底</a>"
             else:
                 extra = f", 但立即抓取失败: {fetch_res.get('message', '未知')}"
             return redirect(url_for("admin_elo_settings", msg=f"✅ cookies 已保存{extra}"))
@@ -24142,8 +24198,69 @@ def admin_elo_fetch_now():
     if result.get("ok"):
         names = "、".join([f"#{u['rank']} {u['name']}({u['rating']})" for u in result.get("users", [])])
         return redirect(url_for("admin_elo_settings", msg=f"✅ 抓取成功! 共 {len(result.get('users', []))} 人: {names}"))
+    elif result.get("cf_blocked"):
+        # v3.13b · Cloudflare 拦了服务器 IP, 任何 cookies 都没用
+        return redirect(url_for("admin_elo_settings", msg="❌ 服务器 IP 被 Cloudflare 拦截 (403), 任何 cookies 都连不上 ranking/elo. 请用下方 <b>📌 浏览器书签同步</b> 工具 (admin 浏览器不被 ban, 一键同步)"))
     else:
         return redirect(url_for("admin_elo_settings", msg=f"❌ 抓取失败: {result.get('message', '未知')}"))
+
+
+@app.route("/admin/elo/sync-from-browser", methods=["GET"])
+def admin_elo_sync_from_browser():
+    """v3.13b · admin 浏览器 bookmarklet 一键同步 ELO
+
+    流程:
+      1. admin 打开 https://www.luogu.com.cn/ranking/elo?page=1 (admin 浏览器不被 CF ban)
+      2. admin 点击书签栏的 bookmarklet
+      3. bookmarklet 在 luogu 同源抓页面 DOM (a[href^=/user/] 链接 + rating)
+      4. 拼成 JSON, location.href 跳转到本路由带 ?data=...
+      5. 服务端解析, save_elo_snapshot 写 DB, redirect 回 settings 页
+
+    关键: bookmarklet 在 luogu 域名下抓数据, 然后 GET 跳转到 oi 域名 (跨域 GET 没问题)
+    """
+    auth_redirect = require_admin_auth()
+    if auth_redirect is not None:
+        return auth_redirect
+    data_raw = request.args.get("data", "").strip()
+    if not data_raw:
+        return redirect(url_for("admin_elo_settings", msg="❌ 未传 data 参数, 请确认你是在洛谷 ranking/elo 页面点击的书签"))
+    try:
+        import urllib.parse
+        users_raw = json.loads(urllib.parse.unquote(data_raw))
+    except Exception as e:
+        app.logger.error(f"[v3.13b] sync-from-browser parse err: {e}")
+        return redirect(url_for("admin_elo_settings", msg=f"❌ data 解析失败: {e}"))
+    if not isinstance(users_raw, list) or not users_raw:
+        return redirect(url_for("admin_elo_settings", msg="❌ data 格式错误: 应为非空 JSON 数组"))
+    users = []
+    seen_uids = set()
+    for i, u in enumerate(users_raw[:10], start=1):
+        if not isinstance(u, dict):
+            continue
+        uid = int(u.get("uid", 0) or 0)
+        if uid <= 0 or uid in seen_uids:
+            continue
+        seen_uids.add(uid)
+        name = (str(u.get("name") or "?")).strip() or "?"
+        rating = int(u.get("rating", 0) or 0)
+        users.append({
+            "rank": len(users) + 1,
+            "uid": uid,
+            "name": name,
+            "rating": rating,
+            "color": _rating_to_color(rating),
+        })
+    if not users:
+        return redirect(url_for("admin_elo_settings", msg="❌ 没从数据里找到任何有效用户 (uid 必须 > 0)"))
+    snapshot_at = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    try:
+        save_elo_snapshot("/app/data/tasks.db", users, snapshot_at)
+        log_fetch("/app/data/tasks.db", "bookmarklet", True, len(users), 0, f"admin 浏览器同步, 共 {len(users)} 人")
+    except Exception as e:
+        app.logger.error(f"[v3.13b] sync-from-browser save err: {e}")
+        return redirect(url_for("admin_elo_settings", msg=f"❌ DB 写入失败: {e}"))
+    names = "、".join([f"#{u['rank']} {u['name']}({u['rating']})" for u in users])
+    return redirect(url_for("admin_elo_settings", msg=f"✅ 浏览器同步成功! 共 {len(users)} 人: {names}"))
 
 
 if __name__ == "__main__":

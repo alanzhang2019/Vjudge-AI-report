@@ -390,14 +390,20 @@ def _normalize_elo_api_response(api_resp: Any, top_n: int = 10) -> List[Dict[str
 def try_fetch_elo_via_api(db_path: str, source: str = "auto") -> Dict[str, Any]:
     """用 admin cookies 调 pyLuogu.get_elo_ranking, 写 DB
 
-    Returns: {"ok": bool, "users": [...], "message": str, "duration_ms": int}
+    Returns: {
+        "ok": bool,
+        "users": [...],
+        "message": str,
+        "duration_ms": int,
+        "cf_blocked": bool,  # v3.13b · True 表示 Cloudflare 拦了服务器 IP (与 cookies 无关)
+    }
     """
     t0 = time.time()
     cookies_row = get_admin_cookies(db_path)
     if not cookies_row:
         msg = "未配置 admin cookies, 跳过自动抓取"
         log_fetch(db_path, source, False, 0, int((time.time() - t0) * 1000), msg)
-        return {"ok": False, "users": [], "message": msg, "duration_ms": int((time.time() - t0) * 1000)}
+        return {"ok": False, "users": [], "message": msg, "duration_ms": int((time.time() - t0) * 1000), "cf_blocked": False}
 
     # 懒加载 pyLuogu, 避免循环依赖
     try:
@@ -405,7 +411,7 @@ def try_fetch_elo_via_api(db_path: str, source: str = "auto") -> Dict[str, Any]:
     except ImportError as e:
         msg = f"pyLuogu 导入失败: {e}"
         log_fetch(db_path, source, False, 0, int((time.time() - t0) * 1000), msg)
-        return {"ok": False, "users": [], "message": msg, "duration_ms": int((time.time() - t0) * 1000)}
+        return {"ok": False, "users": [], "message": msg, "duration_ms": int((time.time() - t0) * 1000), "cf_blocked": False}
 
     client_id = cookies_row.get("client_id", "")
     luogu_uid = cookies_row.get("luogu_uid", "")
@@ -424,19 +430,26 @@ def try_fetch_elo_via_api(db_path: str, source: str = "auto") -> Dict[str, Any]:
             msg = f"pyLuogu 返回空 users (duration={duration_ms}ms)"
             update_admin_cookies_status(db_path, "fail_empty", msg)
             log_fetch(db_path, source, False, 0, duration_ms, msg)
-            return {"ok": False, "users": [], "message": msg, "duration_ms": duration_ms}
+            return {"ok": False, "users": [], "message": msg, "duration_ms": duration_ms, "cf_blocked": False}
         snapshot_at = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         save_elo_snapshot(db_path, users, snapshot_at)
         msg = f"抓取成功, 共 {len(users)} 人"
         update_admin_cookies_status(db_path, "ok", msg)
         log_fetch(db_path, source, True, len(users), duration_ms, msg)
-        return {"ok": True, "users": users, "message": msg, "duration_ms": duration_ms}
+        return {"ok": True, "users": users, "message": msg, "duration_ms": duration_ms, "cf_blocked": False}
     except Exception as e:
         duration_ms = int((time.time() - t0) * 1000)
         err_short = f"{type(e).__name__}: {str(e)[:200]}"
-        update_admin_cookies_status(db_path, "fail", err_short)
+        # v3.13b · 诊断: pyLuogu 抛 ForbiddenError 时, 真正原因是 Cloudflare 拦了 server IP
+        # 而不是 cookies 失效 (cookies 有效时, Cloudflare 仍然先 ban IP 再 ban cookies)
+        is_cf = "Forbidden" in err_short or "403" in err_short
+        update_admin_cookies_status(
+            db_path,
+            "fail_cf_blocked" if is_cf else "fail",
+            err_short,
+        )
         log_fetch(db_path, source, False, 0, duration_ms, err_short)
-        return {"ok": False, "users": [], "message": err_short, "duration_ms": duration_ms}
+        return {"ok": False, "users": [], "message": err_short, "duration_ms": duration_ms, "cf_blocked": is_cf}
 
 
 # ---------- v3.13b · 后台定时调度器 ----------

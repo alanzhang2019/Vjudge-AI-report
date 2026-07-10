@@ -254,7 +254,7 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
 APP_VERSION = "v3.11.25"
-APP_VERSION_BUILD = "20260710_v3p13_elo_ranking_v3"  # v3.13c: 浏览器 bookmarklet 一键同步 ELO (解决 CF 拦截)
+APP_VERSION_BUILD = "20260710_v3p12_report_lock_v25"  # v3.12_report_lock_v25: SECTION_PATTERNS_V4 关键词改匹配新版 v3.11.25 报告章节
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -7932,15 +7932,26 @@ def status_report_html(task_id: str):
     #    章节定位: 用稳定关键词匹配 <h1/h2/h3>...关键词...</h1/h2/h3> 标签,
     #    不依赖章节号 (避免 LLM 章节号飘移: 有的报告 1~7, 有的 1~10).
     #    req_level: 999 = 永远不锁 (公共章节)
+    # v3.12_report_lock_v25 · 关键修复: 关键词匹配新版 v3.11.25 报告章节
+    # 旧版关键词 ("六维能力雷达表与诊断" / "考纲精准定级" / "风险诊断与训练闭环") 是老版报告的,
+    # 新版 Coach Edition 报告章节已经重写, 关键词完全不存在 → find_section_range 全部 None →
+    # 报告锁完全失效 (学员 invite_count=0 也能看所有内容)
+    # 新版报告实际章节 (h3 为主, h2 是分节):
+    #   5. 核心数据概览与图表化分析  (h1, 公共)
+    #   6-11. 数据校准/难度分布/知识点覆盖/掌握度/知识树 (h2, 公共)
+    #   12. 选手深度能力诊断与训练辅导报告  (h2, 1档: 雷达/性格/行为/难度都在它下面)
+    #   13. 1. 【选手概览与性格画像】 (h3)
+    #   14. 2. 【提交行为深度分析】 (h3)
+    #   15. 3. 【难度分布与水平研判】 (h3)
+    #   16. 7. 【代码质量与工程习惯深度分析】 (h3, 免费)
+    #   17. 7.5 【提交代码考古：思维漏洞与逐版改进】 (h3, 5档 AI讲题)
+    # 锁粒度: 1档锁"选手深度能力诊断"整段 (覆盖 1+2+3 三个 h3 子章节), 5档锁"提交代码考古"
+    # 父 h2 (选手深度能力诊断) 一起锁, 避免 invite=0 时 h2 标题留下但里面 h3 全空
     SECTION_PATTERNS_V4 = [
-        # (关键词, req_level, 锁时是否裁剪)
-        ("核心数据概览", 0, False),          # 永远解锁 (公共概览)
-        ("六维能力雷达表与诊断", 1, True),     # 邀请 1 人解锁
-        ("考纲精准定级", 2, True),
-        ("风险诊断与训练闭环", 3, True),
-        ("代码质量与工程习惯", 999, False),   # 不锁 (免费章节)
-        ("定制训练题单", 3, True),
-        ("未通过题目专属题解", 5, True),     # 邀请 5 人解锁
+        ("核心数据概览", 0, False),                              # 永远解锁 (公共概览)
+        ("选手深度能力诊断与训练辅导报告", 1, True),             # 邀请 1 人解锁 (性格+行为+难度)
+        ("代码质量与工程习惯", 999, False),                      # 不锁 (免费章节, 公共价值)
+        ("提交代码考古", 5, True),                               # 邀请 5 人解锁 (AI 讲题/错题)
     ]
     trimmed_html, locked_keywords = _server_side_trim_report(
         raw_html, SECTION_PATTERNS_V4, unlock_level, invite_url

@@ -254,7 +254,7 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
 APP_VERSION = "v3.11.25"
-APP_VERSION_BUILD = "20260710_v3p12_report_lock_v25"  # v3.12_report_lock_v25: SECTION_PATTERNS_V4 关键词改匹配新版 v3.11.25 报告章节
+APP_VERSION_BUILD = "20260711_v3p12_report_lock_v26"  # v3.12_report_lock_v26: SECTION_PATTERNS_V4 关键词兼容旧+新两版报告章节标题
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -7932,26 +7932,17 @@ def status_report_html(task_id: str):
     #    章节定位: 用稳定关键词匹配 <h1/h2/h3>...关键词...</h1/h2/h3> 标签,
     #    不依赖章节号 (避免 LLM 章节号飘移: 有的报告 1~7, 有的 1~10).
     #    req_level: 999 = 永远不锁 (公共章节)
-    # v3.12_report_lock_v25 · 关键修复: 关键词匹配新版 v3.11.25 报告章节
-    # 旧版关键词 ("六维能力雷达表与诊断" / "考纲精准定级" / "风险诊断与训练闭环") 是老版报告的,
-    # 新版 Coach Edition 报告章节已经重写, 关键词完全不存在 → find_section_range 全部 None →
-    # 报告锁完全失效 (学员 invite_count=0 也能看所有内容)
-    # 新版报告实际章节 (h3 为主, h2 是分节):
-    #   5. 核心数据概览与图表化分析  (h1, 公共)
-    #   6-11. 数据校准/难度分布/知识点覆盖/掌握度/知识树 (h2, 公共)
-    #   12. 选手深度能力诊断与训练辅导报告  (h2, 1档: 雷达/性格/行为/难度都在它下面)
-    #   13. 1. 【选手概览与性格画像】 (h3)
-    #   14. 2. 【提交行为深度分析】 (h3)
-    #   15. 3. 【难度分布与水平研判】 (h3)
-    #   16. 7. 【代码质量与工程习惯深度分析】 (h3, 免费)
-    #   17. 7.5 【提交代码考古：思维漏洞与逐版改进】 (h3, 5档 AI讲题)
-    # 锁粒度: 1档锁"选手深度能力诊断"整段 (覆盖 1+2+3 三个 h3 子章节), 5档锁"提交代码考古"
-    # 父 h2 (选手深度能力诊断) 一起锁, 避免 invite=0 时 h2 标题留下但里面 h3 全空
+    # v3.12_report_lock_v26 · 关键修复 v2: 兼容两版报告章节标题 (v25 只匹配了旧版)
+    # 旧版 (v3.11.25 早期 Coach Edition) 父章节: "选手深度能力诊断与训练辅导报告" (h2)
+    # 新版 (v3.11.25 后期)            父章节: "洛谷深度能力诊断与集训辅导报告" (h1)
+    # 旧版 AI 讲题: "7.5 【提交代码考古: 思维漏洞与逐版改进】" (h3)
+    # 新版 AI 讲题: 无内嵌章节 (AI 讲题走独立按钮 → aijiangti API), 所以 5 档在两版都不锁内嵌内容
+    # 解决: 关键词用 list, 任意一个命中都算匹配 (find_section_range 内部已支持 list)
     SECTION_PATTERNS_V4 = [
-        ("核心数据概览", 0, False),                              # 永远解锁 (公共概览)
-        ("选手深度能力诊断与训练辅导报告", 1, True),             # 邀请 1 人解锁 (性格+行为+难度)
-        ("代码质量与工程习惯", 999, False),                      # 不锁 (免费章节, 公共价值)
-        ("提交代码考古", 5, True),                               # 邀请 5 人解锁 (AI 讲题/错题)
+        (["核心数据概览"], 0, False),                                                  # 永远解锁 (公共概览)
+        (["选手深度能力诊断与训练辅导报告", "洛谷深度能力诊断与集训辅导报告"], 1, True),  # 1 档锁 (旧+新两版父章节, 覆盖下面 1+2+3 子章节)
+        (["代码质量与工程习惯"], 999, False),                                           # 不锁 (免费章节)
+        (["提交代码考古"], 5, True),                                                    # 5 档锁 (旧版 7.5 章节; 新版无此章节, 自动 no-op)
     ]
     trimmed_html, locked_keywords = _server_side_trim_report(
         raw_html, SECTION_PATTERNS_V4, unlock_level, invite_url
@@ -8027,6 +8018,12 @@ def _server_side_trim_report(raw_html, section_patterns, unlock_level, invite_ur
          not in TOC <li> after the h
       4. walk forward from h_close to find next <h[1-3]> (section end)
     Handles <h3><strong>...</strong></h3>, emoji prefixes, TOC <li> skips.
+
+    v3.12_report_lock_v26 · 关键词兼容多版本报告: 旧版 v3.11.25 报告父章节用
+      "选手深度能力诊断与训练辅导报告" (h2), 新版用 "洛谷深度能力诊断与集训辅导报告" (h1)
+      AI讲题章节: 旧版有 "7.5 【提交代码考古】", 新版无 (AI讲题在独立按钮入口)
+    section_patterns 项支持 (kw_list, req, lockable) 形式 — kw_list 是关键词列表,
+      任意一个命中都算匹配这个 section (兼容同一档位在不同版本报告里标题不一样)
     """
     import re as _re_t
     if not raw_html or not section_patterns:
@@ -8035,38 +8032,43 @@ def _server_side_trim_report(raw_html, section_patterns, unlock_level, invite_ur
     H_END_RE = _re_t.compile(r"</h[1-3]>", _re_t.IGNORECASE)
 
     def find_section_range(kw):
-        kw_esc = _re_t.escape(kw)
-        for m in _re_t.finditer(kw_esc, raw_html, _re_t.IGNORECASE):
-            kw_pos = m.start()
-            # 1) 向后逐个 <h> 起点, 取最后一个 = 紧邻 kw 的 h 起点
-            h_match = None
-            h_open_end = 0
-            for tag_m in H_TAG_RE.finditer(raw_html[:kw_pos]):
-                h_match = tag_m
-                h_open_end = tag_m.end()
-            if h_match is None:
-                continue
-            # 2) 验证 kw 确实在该 h 标签内容里 (kw_pos 在 h_close 之前)
-            h_close_match = H_END_RE.search(raw_html, h_open_end)
-            if h_close_match is None:
-                continue
-            h_close_abs = h_close_match.start()
-            if kw_pos >= h_close_abs:
-                # kw 在 h_close 之后, 实际在 <li> 或正文, 跳过
-                continue
-            h_start = h_match.start()
-            # 3) 从 h_close 向后找下一个 <h[1-3]> 起点 (下一章)
-            h_end_match = H_TAG_RE.search(raw_html, h_close_abs)
-            h_end = len(raw_html) if h_end_match is None else h_end_match.start()
-            return (h_start, h_end)
+        """兼容字符串/列表两种关键词形式, 返回 (h_start, h_end, matched_kw)"""
+        kw_list = kw if isinstance(kw, (list, tuple)) else [kw]
+        for kw_one in kw_list:
+            kw_esc = _re_t.escape(kw_one)
+            for m in _re_t.finditer(kw_esc, raw_html, _re_t.IGNORECASE):
+                kw_pos = m.start()
+                # 1) 向后逐个 <h> 起点, 取最后一个 = 紧邻 kw 的 h 起点
+                h_match = None
+                h_open_end = 0
+                for tag_m in H_TAG_RE.finditer(raw_html[:kw_pos]):
+                    h_match = tag_m
+                    h_open_end = tag_m.end()
+                if h_match is None:
+                    continue
+                # 2) 验证 kw 确实在该 h 标签内容里 (kw_pos 在 h_close 之前)
+                h_close_match = H_END_RE.search(raw_html, h_open_end)
+                if h_close_match is None:
+                    continue
+                h_close_abs = h_close_match.start()
+                if kw_pos >= h_close_abs:
+                    # kw 在 h_close 之后, 实际在 <li> 或正文, 跳过
+                    continue
+                h_start = h_match.start()
+                # 3) 从 h_close 向后找下一个 <h[1-3]> 起点 (下一章)
+                h_end_match = H_TAG_RE.search(raw_html, h_close_abs)
+                h_end = len(raw_html) if h_end_match is None else h_end_match.start()
+                return (h_start, h_end, kw_one)
         return None
 
     positions = []
-    for kw, req, lockable in section_patterns:
+    for entry in section_patterns:
+        # v3.12_report_lock_v26 · 解包支持 (kw_or_list, req, lockable) 三元组
+        kw, req, lockable = entry[0], entry[1], entry[2]
         rng = find_section_range(kw)
         if rng is not None:
-            h_start, h_end = rng
-            positions.append({"kw": kw, "req": req, "lockable": lockable, "start": h_start, "end": h_end})
+            h_start, h_end, matched = rng
+            positions.append({"kw": matched, "kw_all": kw if isinstance(kw, (list, tuple)) else [kw], "req": req, "lockable": lockable, "start": h_start, "end": h_end})
     if not positions:
         return raw_html, []
     positions.sort(key=lambda p: p["start"])
